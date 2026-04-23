@@ -1,0 +1,9 @@
+input_csv: /raw/test.csv
+output_root: /out/activations
+text_col: note_text
+num_notes: 3
+max_length: 256
+layer: 4
+tokens_per_shard: 10000
+model_name: gpt2
+run_id: null

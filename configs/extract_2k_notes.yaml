@@ -1,0 +1,9 @@
+input_csv: /raw/test.csv
+output_root: /out/activations
+text_col: note_text
+num_notes: 2000
+max_length: 2048
+layer: 16
+tokens_per_shard: 250000
+model_name: google/gemma-2-2b
+run_id: null
