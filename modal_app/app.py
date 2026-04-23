@@ -21,7 +21,13 @@ image = (
         "safetensors>=0.4",
         "pyyaml>=6.0",
     )
+    # Ship our extraction library AND the modal_app package itself — the
+    # latter is required because modal_app/extract.py imports from
+    # modal_app.app at container-import time. Without this, the container
+    # sees /root/extract.py in isolation and `from modal_app.app import ...`
+    # fails with ModuleNotFoundError.
     .add_local_python_source("mech_interp_research")
+    .add_local_python_source("modal_app")
 )
 
 raw_volume = modal.Volume.from_name("mimic-iv-raw", create_if_missing=False)
