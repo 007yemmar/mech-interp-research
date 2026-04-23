@@ -7,3 +7,4 @@ layer: 4
 tokens_per_shard: 10000
 model_name: gpt2
 run_id: null
+gpu: L4

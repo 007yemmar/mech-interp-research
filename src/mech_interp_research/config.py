@@ -28,6 +28,9 @@ class ExtractionConfig:
     tokens_per_shard: int = 250_000
     model_name: str = "google/gemma-2-2b"
     run_id: str | None = None
+    # Modal GPU tier (ignored for local runs). See modal.com/docs/guide/gpu.
+    # Common values: "T4", "L4", "A10G", "L40S", "A100-40GB", "A100-80GB", "H100".
+    gpu: str = "L4"
 
 
 def load_config(path: str | Path) -> ExtractionConfig:

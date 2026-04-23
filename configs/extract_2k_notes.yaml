@@ -7,3 +7,4 @@ layer: 16
 tokens_per_shard: 250000
 model_name: google/gemma-2-2b
 run_id: null
+gpu: L4

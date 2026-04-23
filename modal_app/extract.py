@@ -15,10 +15,12 @@ from typing import Any
 
 from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 
+DEFAULT_GPU = "L4"
+
 
 @app.function(
     image=image,
-    gpu="A10G",
+    gpu=DEFAULT_GPU,
     timeout=3600,
     volumes={"/raw": raw_volume, "/out": artifacts_volume},
     secrets=[hf_secret],
@@ -40,11 +42,17 @@ def extract_activations(config: dict[str, Any]) -> dict[str, Any]:
 
 @app.local_entrypoint()
 def main(config_file: str) -> None:
-    """CLI stub — load a YAML config and dispatch extract_activations remotely."""
+    """CLI stub — load a YAML config and dispatch extract_activations remotely.
+
+    Honours the `gpu` field in the YAML config (e.g. "L4", "A10G", "A100-80GB").
+    If omitted, falls back to the decorator default (DEFAULT_GPU)."""
     import yaml
 
     with open(config_file, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    summary = extract_activations.remote(config)
+    gpu = config.get("gpu", DEFAULT_GPU)
+    fn = extract_activations.with_options(gpu=gpu)
+    print(f"Dispatching extract_activations on GPU={gpu}")
+    summary = fn.remote(config)
     print(json.dumps(summary, indent=2))
