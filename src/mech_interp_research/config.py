@@ -31,6 +31,10 @@ class ExtractionConfig:
     # Modal GPU tier (ignored for local runs). See modal.com/docs/guide/gpu.
     # Common values: "T4", "L4", "A10G", "L40S", "A100-40GB", "A100-80GB", "H100".
     gpu: str = "L4"
+    # Pre-resolved git SHA (set by the dispatcher on the laptop). Needed because
+    # Modal containers have no git binary; without this, make_run_id falls back
+    # to "nogit" and provenance tracing breaks.
+    git_sha: str | None = None
 
 
 def load_config(path: str | Path) -> ExtractionConfig:
@@ -61,8 +65,13 @@ def _git_sha_short() -> str:
 
 
 def make_run_id(config: ExtractionConfig) -> str:
-    """Build a collision-free run ID: <model>_L<layer>_<N>notes_<sha>_<utc>."""
+    """Build a collision-free run ID: <model>_L<layer>_<N>notes_<sha>_<utc>.
+
+    Prefers `config.git_sha` when set (dispatcher pre-resolved it on the laptop,
+    so runs on Modal containers — where git is unavailable — get a real SHA).
+    Falls back to `_git_sha_short()` otherwise.
+    """
     model_slug = config.model_name.replace("/", "-")
-    sha = _git_sha_short()
+    sha = config.git_sha or _git_sha_short()
     utc = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"{model_slug}_L{config.layer}_{config.num_notes}notes_{sha}_{utc}"

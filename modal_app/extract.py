@@ -55,8 +55,15 @@ def main(config_file: str) -> None:
     """
     import yaml
 
+    from mech_interp_research.config import _git_sha_short
+
     with open(config_file, encoding="utf-8") as f:
         config = yaml.safe_load(f)
+
+    # Resolve git SHA on the laptop — Modal containers have no git binary.
+    # Without this, make_run_id's fallback labels every Modal run as "nogit".
+    if not config.get("git_sha"):
+        config["git_sha"] = _git_sha_short()
 
     cfg_gpu = config.get("gpu", DEFAULT_GPU)
     if cfg_gpu != DEFAULT_GPU:
@@ -64,6 +71,6 @@ def main(config_file: str) -> None:
             f"NOTE: config specifies gpu={cfg_gpu} but this run uses gpu={DEFAULT_GPU}. "
             f"Re-run with MODAL_GPU={cfg_gpu} to switch."
         )
-    print(f"Dispatching extract_activations on GPU={DEFAULT_GPU}")
+    print(f"Dispatching extract_activations on GPU={DEFAULT_GPU} (git_sha={config['git_sha']})")
     summary = extract_activations.remote(config)
     print(json.dumps(summary, indent=2))
