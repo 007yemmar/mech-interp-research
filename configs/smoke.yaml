@@ -1,0 +1,9 @@
+input_csv: ./test.csv
+output_root: .tmp/smoke_outputs/activations
+text_col: note_text
+num_notes: 3
+max_length: 256
+layer: 4
+tokens_per_shard: 10000
+model_name: gpt2
+run_id: null
