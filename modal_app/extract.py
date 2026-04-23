@@ -11,11 +11,16 @@ Config paths inside Modal:
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 
-DEFAULT_GPU = "L4"
+# GPU is resolved at module import time. To change it for a run, set MODAL_GPU
+# in the shell, e.g.:
+#     MODAL_GPU=A10G uv run modal run modal_app/extract.py --config-file=...
+# (Modal 1.4.2 has no per-invocation GPU override API; env-var is the idiom.)
+DEFAULT_GPU = os.environ.get("MODAL_GPU", "L4")
 
 
 @app.function(
@@ -44,15 +49,21 @@ def extract_activations(config: dict[str, Any]) -> dict[str, Any]:
 def main(config_file: str) -> None:
     """CLI stub — load a YAML config and dispatch extract_activations remotely.
 
-    Honours the `gpu` field in the YAML config (e.g. "L4", "A10G", "A100-80GB").
-    If omitted, falls back to the decorator default (DEFAULT_GPU)."""
+    The `gpu` field in YAML is stored in the manifest for provenance but does
+    NOT drive dispatch. Set the MODAL_GPU env var to pick a GPU tier:
+        MODAL_GPU=A10G uv run modal run modal_app/extract.py --config-file=...
+    """
     import yaml
 
     with open(config_file, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    gpu = config.get("gpu", DEFAULT_GPU)
-    fn = extract_activations.with_options(gpu=gpu)
-    print(f"Dispatching extract_activations on GPU={gpu}")
-    summary = fn.remote(config)
+    cfg_gpu = config.get("gpu", DEFAULT_GPU)
+    if cfg_gpu != DEFAULT_GPU:
+        print(
+            f"NOTE: config specifies gpu={cfg_gpu} but this run uses gpu={DEFAULT_GPU}. "
+            f"Re-run with MODAL_GPU={cfg_gpu} to switch."
+        )
+    print(f"Dispatching extract_activations on GPU={DEFAULT_GPU}")
+    summary = extract_activations.remote(config)
     print(json.dumps(summary, indent=2))
