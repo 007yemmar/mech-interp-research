@@ -79,8 +79,7 @@ def run_extraction(config: ExtractionConfig) -> dict[str, Any]:
     df, text_col = load_notes(config.input_csv, config.text_col, config.num_notes)
     tokenizer, model = load_model_and_tokenizer(config.model_name, device)
 
-    # Peek d_model from the config hint if possible, else derive from first note.
-    # We derive from the first activation so this stays model-agnostic.
+    # Derive d_model from the first note so the pipeline stays model-agnostic.
     first_acts, first_meta = extract_one_note(
         text=str(df.iloc[0][text_col]),
         tokenizer=tokenizer,
