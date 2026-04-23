@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Virtual env + tooling
+.venv/
+.python-version-*
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+.ipynb_checkpoints/
+
+# Secrets / local env
+.env
+.env.*
+
+# Data — never commit PHI-adjacent files
+data/
+outputs/
+.tmp/
+*.csv
+*.parquet
+*.pt
+*.safetensors
+*.npy
+
+# Modal local state
+.modal/
+
+# Superpowers workspace (specs, plans) — personal working artifacts
+docs/superpowers/
