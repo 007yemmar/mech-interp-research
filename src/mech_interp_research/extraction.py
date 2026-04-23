@@ -97,35 +97,37 @@ def run_extraction(config: ExtractionConfig) -> dict[str, Any]:
     writer.add_note(
         note_idx=0,
         activations=first_acts,
-        extra_meta=_row_meta(df.iloc[0], df, first_meta),
+        extra_meta=_row_meta(df.iloc[0], df, first_meta, str(df.iloc[0][text_col])),
     )
 
-    # Stream remaining notes.
-    for idx in tqdm(range(1, len(df)), desc="Extracting activations"):
-        row = df.iloc[idx]
-        text = str(row[text_col])
-        acts, acts_meta = extract_one_note(
-            text=text,
-            tokenizer=tokenizer,
-            model=model,
-            device=device,
-            layer=config.layer,
-            max_length=config.max_length,
+    try:
+        # Stream remaining notes. initial=1 so the bar opens at 1/N (note 0 is done).
+        for idx in tqdm(range(1, len(df)), desc="Extracting activations", initial=1, total=len(df)):
+            row = df.iloc[idx]
+            text = str(row[text_col])
+            acts, acts_meta = extract_one_note(
+                text=text,
+                tokenizer=tokenizer,
+                model=model,
+                device=device,
+                layer=config.layer,
+                max_length=config.max_length,
+            )
+            writer.add_note(
+                note_idx=idx,
+                activations=acts,
+                extra_meta=_row_meta(row, df, acts_meta, text),
+            )
+            if len(sample_acts) < 5:
+                sample_acts.append(acts)
+    finally:
+        # Always flush and write manifest/metadata — even on partial runs.
+        manifest = writer.close(
+            extra_manifest={"run_id": run_id, "text_col": text_col, "device": device}
         )
-        writer.add_note(
-            note_idx=idx,
-            activations=acts,
-            extra_meta=_row_meta(row, df, acts_meta),
-        )
-        if len(sample_acts) < 5:
-            sample_acts.append(acts)
 
     checks = run_checks(sample_acts, expected_d_model=d_model)
     elapsed = time.time() - t0
-
-    manifest = writer.close(
-        extra_manifest={"run_id": run_id, "text_col": text_col, "device": device}
-    )
 
     summary = {
         "run_id": run_id,
@@ -140,7 +142,7 @@ def run_extraction(config: ExtractionConfig) -> dict[str, Any]:
     return summary
 
 
-def _row_meta(row: Any, df: Any, acts_meta: dict[str, Any]) -> dict[str, Any]:
+def _row_meta(row: Any, df: Any, acts_meta: dict[str, Any], text: str) -> dict[str, Any]:
     """Build per-note metadata row, tolerating missing ID columns."""
     return {
         "subject_id": int(row["subject_id"]) if "subject_id" in df.columns else None,
@@ -150,4 +152,5 @@ def _row_meta(row: Any, df: Any, acts_meta: dict[str, Any]) -> dict[str, Any]:
             else (int(row["hadm_id"]) if "hadm_id" in df.columns else None)
         ),
         "num_tokens_truncated": acts_meta["num_tokens_truncated"],
+        "text_char_len": len(text),
     }

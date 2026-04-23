@@ -1,0 +1,11 @@
+input_csv: /Users/rishittyagi/Desktop/mimic-iv/pipeline_outputs/step1/train.csv
+output_root: .tmp/sample_10/activations
+text_col: note_text
+num_notes: 10
+max_length: 512
+layer: 16
+tokens_per_shard: 50000
+model_name: google/gemma-2-2b
+run_id: null
+gpu: L4
+git_sha: null

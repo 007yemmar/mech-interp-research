@@ -1,10 +1,11 @@
-input_csv: /raw/sample_50k.csv
+input_csv: /raw/train.csv
 output_root: /out/activations
 text_col: note_text
-num_notes: 2000
-max_length: 2048
+num_notes: 10
+max_length: 512
 layer: 16
-tokens_per_shard: 500000
+tokens_per_shard: 50000
 model_name: google/gemma-2-2b
 run_id: null
-gpu: A10G
+gpu: L4
+git_sha: null

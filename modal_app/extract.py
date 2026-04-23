@@ -26,7 +26,7 @@ DEFAULT_GPU = os.environ.get("MODAL_GPU", "L4")
 @app.function(
     image=image,
     gpu=DEFAULT_GPU,
-    timeout=3600,
+    timeout=21600,
     volumes={"/raw": raw_volume, "/out": artifacts_volume},
     secrets=[hf_secret],
 )
@@ -37,11 +37,11 @@ def extract_activations(config: dict[str, Any]) -> dict[str, Any]:
     from mech_interp_research.extraction import run_extraction
 
     cfg = ExtractionConfig(**config)
-    summary = run_extraction(cfg)
-
-    # Ensure other readers (including `modal volume ls` and future training runs)
-    # see the new files immediately.
-    artifacts_volume.commit()
+    try:
+        summary = run_extraction(cfg)
+    finally:
+        # Commit all written shards/manifests to the volume even on partial runs.
+        artifacts_volume.commit()
     return summary
 
 
