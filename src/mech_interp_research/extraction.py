@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -68,20 +69,55 @@ def run_extraction(config: ExtractionConfig) -> dict[str, Any]:
     - Streams per-note activations into ShardedSafetensorsWriter.
     - Runs sanity checks on the first few note activations kept in RAM.
     - Writes manifest.json and metadata.jsonl to <output_root>/<run_id>/.
+
+    Resume mode: if config.resume_from_run_id is set, reads the existing manifest
+    from that run to find where it stopped, then picks up from that note index.
+    New shards and metadata rows are appended to the existing output directory.
     """
     t0 = time.time()
 
-    run_id = config.run_id or make_run_id(config)
-    output_dir = Path(config.output_root) / run_id
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # --- Resume state -----------------------------------------------------------
+    resume_run_id = config.resume_from_run_id
+    resume_shard_idx = 0
+    resume_total_tokens = 0
+    resume_note_count = 0
+    start_note_idx = 0
+
+    if resume_run_id:
+        resume_dir = Path(config.output_root) / resume_run_id
+        existing_manifest_path = resume_dir / "manifest.json"
+        if not existing_manifest_path.exists():
+            raise FileNotFoundError(
+                f"Cannot resume: manifest not found at {existing_manifest_path}"
+            )
+        with open(existing_manifest_path, encoding="utf-8") as f:
+            existing_manifest = json.load(f)
+        resume_note_count = int(existing_manifest["n_notes"])
+        resume_shard_idx = int(existing_manifest["n_shards"])
+        resume_total_tokens = int(existing_manifest["total_tokens"])
+        start_note_idx = resume_note_count
+        print(
+            f"Resuming run '{resume_run_id}': "
+            f"skipping {resume_note_count} already-processed notes, "
+            f"continuing from shard {resume_shard_idx}."
+        )
+        run_id = resume_run_id
+        output_dir = resume_dir
+    else:
+        run_id = config.run_id or make_run_id(config)
+        output_dir = Path(config.output_root) / run_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+    # ---------------------------------------------------------------------------
 
     device = choose_device()
     df, text_col = load_notes(config.input_csv, config.text_col, config.num_notes)
     tokenizer, model = load_model_and_tokenizer(config.model_name, device)
 
-    # Derive d_model from the first note so the pipeline stays model-agnostic.
+    # Derive d_model from a note we're actually going to process (avoids running
+    # the model on an already-done note just to infer shape).
+    probe_idx = start_note_idx
     first_acts, first_meta = extract_one_note(
-        text=str(df.iloc[0][text_col]),
+        text=str(df.iloc[probe_idx][text_col]),
         tokenizer=tokenizer,
         model=model,
         device=device,
@@ -90,19 +126,30 @@ def run_extraction(config: ExtractionConfig) -> dict[str, Any]:
     )
     d_model = int(first_acts.shape[1])
 
-    writer = ShardedSafetensorsWriter(output_dir, config, d_model=d_model)
+    writer = ShardedSafetensorsWriter(
+        output_dir,
+        config,
+        d_model=d_model,
+        resume_shard_idx=resume_shard_idx,
+        resume_total_tokens=resume_total_tokens,
+        resume_note_count=resume_note_count,
+    )
 
-    # Feed the already-extracted first note to the writer.
+    # Feed the already-extracted probe note to the writer.
     sample_acts: list[torch.Tensor] = [first_acts]
     writer.add_note(
-        note_idx=0,
+        note_idx=probe_idx,
         activations=first_acts,
-        extra_meta=_row_meta(df.iloc[0], df, first_meta, str(df.iloc[0][text_col])),
+        extra_meta=_row_meta(df.iloc[probe_idx], df, first_meta, str(df.iloc[probe_idx][text_col])),
     )
 
     try:
-        # Stream remaining notes. initial=1 so the bar opens at 1/N (note 0 is done).
-        for idx in tqdm(range(1, len(df)), desc="Extracting activations", initial=1, total=len(df)):
+        for idx in tqdm(
+            range(probe_idx + 1, len(df)),
+            desc="Extracting activations",
+            initial=probe_idx + 1 - start_note_idx,
+            total=len(df) - start_note_idx,
+        ):
             row = df.iloc[idx]
             text = str(row[text_col])
             acts, acts_meta = extract_one_note(
