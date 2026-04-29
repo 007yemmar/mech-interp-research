@@ -14,3 +14,11 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=500']
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest tests/ -x -q
+        language: system
+        pass_filenames: false
+        always_run: true
