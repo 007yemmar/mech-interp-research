@@ -16,16 +16,18 @@ activations_dir: /out/activations/google-gemma-2-2b_L16_20000notes_39c5801_20260
 d_in: 2304
 expansion_factor: 8          # d_sae = 18432
 
-# Training
-l1_coeff: 0.008            # conservative starting point; tune via L0
+# Training — mirrors 50k settings; warmup values scaled to ~1100 total steps
+l1_coeff: 10.0
+l1_warmup_steps: 50          # 4% of ~1100 steps; L1 reaches target by step 50
 lr: 0.0002
+adam_beta1: 0.0
 train_batch_size_tokens: 4096
-n_epochs: 3                  # ~9.6M tokens total at 3 passes over ~3.2M
-lr_warmup_steps: 500
+n_epochs: 3
+lr_warmup_steps: 100         # reduced from 500; was 45% of run, now ~9%
 
-# Dead-neuron resampling
+# Dead-neuron resampling — same thresholds as 50k; won't trigger in short run
 resample_steps: 5000
-dead_feature_threshold: 1.0e-8
+dead_feature_threshold: 1.0e-6
 
 # Output
 output_root: /out/saes

@@ -297,7 +297,7 @@ def train(config: SAETrainingConfig) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sae = VanillaSAE(config.d_in, config.d_sae).to(device)
-    optimizer = torch.optim.Adam(sae.parameters(), lr=config.lr, betas=(0.9, 0.999))
+    optimizer = torch.optim.Adam(sae.parameters(), lr=config.lr, betas=(config.adam_beta1, 0.999))
     scheduler = make_warmup_scheduler(optimizer, config.lr_warmup_steps)
 
     buffer = ActivationsBuffer(
@@ -334,8 +334,15 @@ def train(config: SAETrainingConfig) -> dict[str, Any]:
         for batch in buffer:
             batch = batch.to(device, non_blocking=True)  # [batch_size, d_in], float32
 
+            # ---- L1 warmup: ramp from 0 → l1_coeff over l1_warmup_steps ----
+            effective_l1 = (
+                config.l1_coeff * min(1.0, step / config.l1_warmup_steps)
+                if config.l1_warmup_steps > 0
+                else config.l1_coeff
+            )
+
             # ---- Training step (builds computation graph) ----
-            metrics = train_step(sae, optimizer, scheduler, batch, config.l1_coeff)
+            metrics = train_step(sae, optimizer, scheduler, batch, effective_l1)
             step += 1
             steps_since_resample += 1
 
@@ -365,6 +372,7 @@ def train(config: SAETrainingConfig) -> dict[str, Any]:
                         "dead_frac": dead_frac,
                         "explained_variance": ev,
                         "lr": optimizer.param_groups[0]["lr"],
+                        "l1_coeff_effective": effective_l1,
                         "epoch": epoch,
                         "step": step,
                     }
@@ -372,7 +380,8 @@ def train(config: SAETrainingConfig) -> dict[str, Any]:
                         f"step {step:7d} | loss {metrics['loss/total']:.4f} "
                         f"| mse {metrics['loss/mse']:.4f} "
                         f"| l1 {metrics['loss/l1']:.4f} "
-                        f"| L0 {l0:.1f} | dead {dead_frac:.2%} | ev {ev:.3f}"
+                        f"| L0 {l0:.1f} | dead {dead_frac:.2%} | ev {ev:.3f} "
+                        f"| l1c {effective_l1:.4f}"
                     )
                     if config.wandb_project:
                         try:
