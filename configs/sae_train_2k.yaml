@@ -17,7 +17,7 @@ d_in: 2304
 expansion_factor: 8          # d_sae = 18432
 
 # Training — mirrors 50k settings; warmup values scaled to ~1100 total steps
-l1_coeff: 10.0
+l1_coeff: 37.0
 l1_warmup_steps: 50          # 4% of ~1100 steps; L1 reaches target by step 50
 lr: 0.0002
 adam_beta1: 0.0

@@ -76,7 +76,7 @@ def test_full_pipeline_smoke(smoke_run_dir: Path, tmp_path: Path) -> None:
     assert (centered_dir / "manifest.json").exists()
     assert center_summary["mean_norm"] > 1.0, (
         f"Mean norm {center_summary['mean_norm']:.2f} suspiciously small "
-        f"(expected ~{MEAN_OFFSET * (D_MODEL ** 0.5):.1f})"
+        f"(expected ~{MEAN_OFFSET * (D_MODEL**0.5):.1f})"
     )
 
     saved_mean = torch.load(centered_dir / "mean.pt")
