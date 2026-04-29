@@ -35,10 +35,6 @@ class ExtractionConfig:
     # Modal containers have no git binary; without this, make_run_id falls back
     # to "nogit" and provenance tracing breaks.
     git_sha: str | None = None
-    # If set, resume an interrupted run rather than starting fresh.
-    # Must match an existing run_id under output_root; the run picks up from the
-    # last committed note and appends new shards/metadata rows.
-    resume_from_run_id: str | None = None
 
 
 def load_config(path: str | Path) -> ExtractionConfig:
