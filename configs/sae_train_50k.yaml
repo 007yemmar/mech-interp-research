@@ -1,0 +1,42 @@
+# SAE training config — 50k note full run.
+# Purpose: production SAE for MIMIC ICD correlation analysis.
+# Expected training time on A100-40GB: ~4-8 hours (3 epochs over ~100M tokens).
+#
+# Prerequisites:
+#   1. Complete the 2k toy run and confirm L0 is in [20, 80].
+#   2. Copy the calibrated l1_coeff from the 2k run here.
+#   3. Run: modal run modal_app/center.py --run-id <your_50k_extraction_run_id>
+#   4. Fill in activations_dir below.
+#
+# Dispatch command:
+#   MODAL_GPU=A100-40GB modal run modal_app/train_sae.py \
+#     --config-file configs/sae_train_50k.yaml
+
+activations_dir: /out/activations/FILL_IN_50K_RUN_ID_centered
+
+# Architecture
+d_in: 2304
+expansion_factor: 8          # d_sae = 18432
+
+# Training — values intentionally conservative; adjust after 2k calibration
+l1_coeff: 0.008
+lr: 0.0002
+train_batch_size_tokens: 4096
+n_epochs: 3                  # ~300M tokens total at 3 passes over ~100M
+lr_warmup_steps: 2000
+
+# Dead-neuron resampling
+resample_steps: 25000
+dead_feature_threshold: 1.0e-8
+
+# Output
+output_root: /out/saes
+run_id: null                 # auto-generated
+
+# Monitoring
+log_every_n_steps: 100
+save_every_n_steps: 10000
+wandb_project: sae-mimic     # create Modal secret 'wandb-token' first
+wandb_run_name: null
+
+seed: 42

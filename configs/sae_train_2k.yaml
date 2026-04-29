@@ -1,0 +1,40 @@
+# SAE training config — 2k note toy run.
+# Purpose: calibrate l1_coeff and verify pipeline before committing to the 50k run.
+# Expected training time on L4: ~15 min.
+#
+# Before using:
+#   1. Run: modal run modal_app/center.py --run-id <your_2k_extraction_run_id>
+#   2. Fill in activations_dir below with the centered directory path.
+#   3. Verify L0 lands in [20, 80]. If L0 > 100: increase l1_coeff by 2-4x.
+#      If L0 < 10: decrease by 2-4x. Re-run until L0 is in range.
+#
+# DO NOT start the 50k run until L0 is calibrated here.
+
+activations_dir: /out/activations/google-gemma-2-2b_L16_20000notes_39c5801_20260423T172212Z_3shards_centered
+
+# Architecture
+d_in: 2304
+expansion_factor: 8          # d_sae = 18432
+
+# Training
+l1_coeff: 0.008            # conservative starting point; tune via L0
+lr: 0.0002
+train_batch_size_tokens: 4096
+n_epochs: 3                  # ~9.6M tokens total at 3 passes over ~3.2M
+lr_warmup_steps: 500
+
+# Dead-neuron resampling
+resample_steps: 5000
+dead_feature_threshold: 1.0e-8
+
+# Output
+output_root: /out/saes
+run_id: null                 # auto-generated
+
+# Monitoring — set wandb_project to your W&B project name to enable logging
+log_every_n_steps: 100
+save_every_n_steps: 2500
+wandb_project: null
+wandb_run_name: null
+
+seed: 42

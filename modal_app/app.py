@@ -20,6 +20,8 @@ image = (
         "tqdm>=4.66",
         "safetensors>=0.4",
         "pyyaml>=6.0",
+        "sae-lens>=0.3",
+        "wandb>=0.16",
     )
     # Ship our extraction library AND the modal_app package itself — the
     # latter is required because modal_app/extract.py imports from
