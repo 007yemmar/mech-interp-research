@@ -82,6 +82,14 @@ def compute_mean(
     d_model: int = manifest["d_model"]
 
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # If mean.pt already exists (e.g. pass 1 completed but pass 2 or finalize
+    # was interrupted), skip the entire pass 1 computation.
+    mean_path = dest_dir / "mean.pt"
+    if mean_path.exists():
+        print(f"mean.pt found in {dest_dir} — skipping pass 1")
+        return torch.load(mean_path, weights_only=True)
+
     checkpoint_path = dest_dir / _PASS1_CHECKPOINT
 
     start_shard = 0
