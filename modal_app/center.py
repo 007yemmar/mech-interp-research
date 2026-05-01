@@ -104,7 +104,5 @@ def main(run_id: str, output_root: str = "/out/activations") -> None:
         modal run --detach modal_app/center.py --run-id <run_id>
         modal run --detach modal_app/center.py --run-id <run_id> --output-root /out/activations
     """
-    call = center_activations.spawn(run_id, output_root)
-    print("Job spawned — safe to close your terminal.")
-    print(f"Track progress: modal app logs {call.object_id}")
-    print("Or visit: https://modal.com/apps/mech-interp-rmd/main")
+    summary = center_activations.remote(run_id, output_root)
+    print(json.dumps(summary, indent=2))
