@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from safetensors.torch import load_file, save_file
+from safetensors.torch import load_file
 from tqdm import tqdm
 
 _PASS1_CHECKPOINT = "pass1_checkpoint.pt"
@@ -131,15 +131,32 @@ def center_shard(
 ) -> None:
     """Subtract mean from one shard and write fp16 output.
 
-    Idempotent: silently skips if the output shard already exists, so
-    pass-2 fan-out workers can be retried safely.
+    Idempotent: skips if the output shard already exists *and* has the correct
+    file size (guards against silent truncation at 2^31 bytes from save_file's
+    mmap write path). Corrupt/truncated shards are deleted and rewritten.
+
+    Writing uses safetensors.save() → bytes → plain file write to avoid the
+    2^31-byte mmap limit that affects save_file() on some platforms.
     """
+    from safetensors.torch import save as _save_bytes
+
     out_path = dest_dir / f"shard_{shard_idx:04d}.safetensors"
+    src_path = source_dir / f"shard_{shard_idx:04d}.safetensors"
+
     if out_path.exists():
-        return
-    acts = load_file(str(source_dir / f"shard_{shard_idx:04d}.safetensors"))["activations"].float()
+        # Validate size via header to catch 2^31-byte mmap truncation.
+        with open(out_path, "rb") as f:
+            n_hdr = struct.unpack("<Q", f.read(8))[0]
+            hdr = json.loads(f.read(n_hdr))
+            shape = hdr["activations"]["shape"]
+            expected = 8 + n_hdr + shape[0] * shape[1] * 2  # fp16
+        if out_path.stat().st_size >= expected:
+            return  # valid — skip
+        out_path.unlink()  # truncated — delete and rewrite
+
+    acts = load_file(str(src_path))["activations"].float()
     acts -= mean
-    save_file({"activations": acts.half()}, str(out_path))
+    out_path.write_bytes(_save_bytes({"activations": acts.half()}))
 
 
 def _finalize_centered_dir(
