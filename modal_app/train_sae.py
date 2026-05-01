@@ -28,6 +28,8 @@ import json
 import os
 from typing import Any
 
+import modal
+
 from modal_app.app import app, artifacts_volume, image
 
 DEFAULT_GPU = os.environ.get("MODAL_GPU", "L4")
@@ -40,8 +42,7 @@ DEFAULT_GPU = os.environ.get("MODAL_GPU", "L4")
     memory=49152,  # 48 GB RAM for the 1M-token activation buffer (~4.6 GB fp16)
     timeout=86400,  # 24 hours max for the 50k full run
     volumes={"/out": artifacts_volume},
-    # W&B secret is optional. To enable: create 'wandb-token' in Modal and
-    # pass secrets=[..., modal.Secret.from_name("wandb-token")] here.
+    secrets=[modal.Secret.from_name("wandb-token")],
 )
 def train_sae(config: dict[str, Any]) -> dict[str, Any]:
     """Train an SAE on Modal from a serialized SAETrainingConfig dict.
