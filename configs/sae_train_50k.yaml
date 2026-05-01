@@ -12,7 +12,7 @@
 #   MODAL_GPU=A100-40GB modal run modal_app/train_sae.py \
 #     --config-file configs/sae_train_50k.yaml
 
-activations_dir: /out/activations/FILL_IN_50K_RUN_ID_centered
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 
 # Architecture
 d_in: 2304
