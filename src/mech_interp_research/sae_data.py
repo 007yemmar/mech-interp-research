@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import torch
 from safetensors.torch import load_file
@@ -59,6 +60,8 @@ class ActivationsBuffer:
         buffer_size_tokens: int = 1_000_000,
         batch_size: int = 4096,
         seed: int = 42,
+        split: Literal["train", "eval", "all"] = "all",
+        eval_n_shards: int = 0,
     ) -> None:
         self.centered_dir = Path(centered_dir)
         manifest = json.loads((self.centered_dir / "manifest.json").read_text())
@@ -74,6 +77,22 @@ class ActivationsBuffer:
         self.total_tokens: int = manifest["total_tokens"]
         self.buffer_size = buffer_size_tokens
         self.batch_size = batch_size
+        self.split = split
+        self.eval_n_shards = eval_n_shards
+        if split != "all" and not (0 <= eval_n_shards < self.n_shards):
+            raise ValueError(
+                f"eval_n_shards={eval_n_shards} invalid for "
+                f"n_shards={self.n_shards} with split={split}"
+            )
+
+        # Partition shard indices by split (deterministic — index-based).
+        all_indices = list(range(self.n_shards))
+        if split == "train":
+            self._split_indices: list[int] = all_indices[: self.n_shards - eval_n_shards]
+        elif split == "eval":
+            self._split_indices = all_indices[self.n_shards - eval_n_shards :]
+        else:
+            self._split_indices = all_indices
 
         # Persistent RNG: advances each epoch so ordering differs across epochs
         self._rng = torch.Generator()
@@ -82,15 +101,16 @@ class ActivationsBuffer:
         self._shard_queue: list[int] = []  # remaining shard indices for this epoch
         self._buffer: torch.Tensor | None = None  # float16, CPU
         self._buf_pos: int = 0
+        self.skipped_shards: int = 0  # incremented when _load_shard fails (Task 4)
 
         self._init_epoch()
 
     # ---------------------------------------------------------------- epoch control
 
     def _init_epoch(self) -> None:
-        """Shuffle shard order and reset buffer for a fresh epoch."""
-        perm = torch.randperm(self.n_shards, generator=self._rng)
-        self._shard_queue = perm.tolist()
+        """Shuffle within-split shard order and reset buffer for a fresh epoch."""
+        perm = torch.randperm(len(self._split_indices), generator=self._rng)
+        self._shard_queue = [self._split_indices[i] for i in perm.tolist()]
         self._buffer = None
         self._buf_pos = 0
         self._refill()

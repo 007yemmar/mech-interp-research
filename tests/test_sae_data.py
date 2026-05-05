@@ -11,10 +11,12 @@ Key invariants under test:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 import torch
+from safetensors.torch import save_file
 
 from mech_interp_research.sae_data import ActivationsBuffer
 
@@ -29,6 +31,31 @@ BATCH_SIZE = 32
 def collect_epoch(buf: ActivationsBuffer) -> list[torch.Tensor]:
     """Drain one epoch and return all batches as a list."""
     return list(buf)
+
+
+def _make_synthetic_centered_dir(
+    tmp_path: Path, *, n_shards: int, tokens_per_shard: int, d_model: int
+) -> Path:
+    """Create a centered-style activation dir with N shards of synthetic activations."""
+    centered = tmp_path / "centered"
+    centered.mkdir()
+    for i in range(n_shards):
+        torch.manual_seed(i)
+        acts = torch.randn(tokens_per_shard, d_model).half()
+        save_file({"activations": acts}, str(centered / f"shard_{i:04d}.safetensors"))
+    manifest = {
+        "model_name": "test",
+        "layer": 0,
+        "d_model": d_model,
+        "tokens_per_shard": tokens_per_shard,
+        "n_shards": n_shards,
+        "total_tokens": tokens_per_shard * n_shards,
+        "n_notes": n_shards,
+        "run_id": "synthetic",
+        "centered": True,
+    }
+    (centered / "manifest.json").write_text(json.dumps(manifest))
+    return centered
 
 
 # ---------------------------------------------------------------------------
@@ -122,3 +149,51 @@ def test_all_batches_same_size(centered_run_dir: Path) -> None:
     buf = ActivationsBuffer(centered_run_dir, batch_size=BATCH_SIZE)
     for batch in buf:
         assert batch.shape[0] == BATCH_SIZE, f"Incomplete batch of size {batch.shape[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Split parameter tests
+# ---------------------------------------------------------------------------
+
+
+def test_split_train_excludes_eval_shards(tmp_path: Path) -> None:
+    """split='train' must use only the first n_shards - eval_n_shards shards."""
+    centered = _make_synthetic_centered_dir(tmp_path, n_shards=10, tokens_per_shard=64, d_model=8)
+    buf = ActivationsBuffer(
+        centered_dir=centered,
+        buffer_size_tokens=64,
+        batch_size=8,
+        seed=1,
+        split="train",
+        eval_n_shards=3,
+    )
+    total = sum(t.shape[0] for t in buf)
+    assert total == 7 * 64, f"expected 448 train tokens, got {total}"
+
+
+def test_split_eval_returns_only_eval_shards(tmp_path: Path) -> None:
+    centered = _make_synthetic_centered_dir(tmp_path, n_shards=10, tokens_per_shard=64, d_model=8)
+    buf = ActivationsBuffer(
+        centered_dir=centered,
+        buffer_size_tokens=64,
+        batch_size=8,
+        seed=1,
+        split="eval",
+        eval_n_shards=3,
+    )
+    total = sum(t.shape[0] for t in buf)
+    assert total == 3 * 64, f"expected 192 eval tokens, got {total}"
+
+
+def test_split_all_returns_all_shards(tmp_path: Path) -> None:
+    centered = _make_synthetic_centered_dir(tmp_path, n_shards=10, tokens_per_shard=64, d_model=8)
+    buf = ActivationsBuffer(
+        centered_dir=centered,
+        buffer_size_tokens=64,
+        batch_size=8,
+        seed=1,
+        split="all",
+        eval_n_shards=0,
+    )
+    total = sum(t.shape[0] for t in buf)
+    assert total == 10 * 64, f"expected 640 tokens, got {total}"
