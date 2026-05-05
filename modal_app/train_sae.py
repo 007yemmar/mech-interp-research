@@ -15,11 +15,10 @@ Set GPU via MODAL_GPU env var:
     MODAL_GPU=A100-40GB modal run modal_app/train_sae.py --config-file configs/sae_train_50k.yaml
 
 W&B logging:
-    Create a Modal secret named 'wandb-token':
+    Create a Modal secret named 'wandb-token' once:
         modal secret create wandb-token WANDB_API_KEY=<your_key>
     Then set wandb_project in your YAML config.
-    The secret is mounted only when WANDB_SECRET is set to 'wandb-token' in the env
-    (default: no W&B secret, runs without it).
+    The secret is always mounted; runs without W&B logging if wandb_project is null.
 """
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ def train_sae(config: dict[str, Any]) -> dict[str, Any]:
     from mech_interp_research.sae_config import SAETrainingConfig
     from mech_interp_research.sae_train import train
 
-    cfg = SAETrainingConfig(**config)
+    cfg = SAETrainingConfig.from_dict(config)
     print(
         f"Training SAE: d_in={cfg.d_in}, d_sae={cfg.d_sae}, "
         f"l1={cfg.l1_coeff}, epochs={cfg.n_epochs}"
