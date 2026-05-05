@@ -1,42 +1,48 @@
-# SAE training config — 2k note toy run.
-# Purpose: calibrate l1_coeff and verify pipeline before committing to the 50k run.
-# Expected training time on L4: ~15 min.
+# SAE training config — 2k toy run (PIPELINE VALIDATION ONLY).
+# Purpose: validate the full training/eval/checkpoint pipeline before the
+# 50k run. L0 absolute value not gated here (toy is too short to converge).
 #
-# Before using:
-#   1. Run: modal run modal_app/center.py --run-id <your_2k_extraction_run_id>
-#   2. Fill in activations_dir below with the centered directory path.
-#   3. Verify L0 lands in [20, 80]. If L0 > 100: increase l1_coeff by 2-4x.
-#      If L0 < 10: decrease by 2-4x. Re-run until L0 is in range.
-#
-# DO NOT start the 50k run until L0 is calibrated here.
+# Run:
+#   modal run modal_app/train_sae.py --config-file configs/sae_train_2k.yaml
 
 activations_dir: /out/activations/google-gemma-2-2b_L16_20000notes_39c5801_20260423T172212Z_3shards_centered
 
 # Architecture
 d_in: 2304
-expansion_factor: 8          # d_sae = 18432
+expansion_factor: 8
 
-# Training — mirrors 50k settings; warmup values scaled to ~1100 total steps
-l1_coeff: 37.0
-l1_warmup_steps: 50          # 4% of ~1100 steps; L1 reaches target by step 50
+# Training — l1_coeff=10 carried from calibrated 50k runs (wandb 1qj0z5a6)
+l1_coeff: 10
 lr: 0.0002
-adam_beta1: 0.0
 train_batch_size_tokens: 4096
 n_epochs: 3
-lr_warmup_steps: 100         # reduced from 500; was 45% of run, now ~9%
+lr_warmup_steps: 500
+l1_warmup_steps: 500          # linear ramp 0 → 10 over first 500 steps
+
+# Adam — Anthropic best practice
+adam_beta1: 0.0
+adam_beta2: 0.999
 
 # Dead-neuron resampling — same thresholds as 50k; won't trigger in short run
 resample_steps: 5000
 dead_feature_threshold: 1.0e-6
 
+# Eval / early-stop
+eval_n_shards: 1              # toy has 3 shards; reserve last 1 for eval
+eval_every_n_steps: 200
+early_stop_patience: 3
+
+# Resume
+resume_from: null
+
 # Output
 output_root: /out/saes
-run_id: null                 # auto-generated
+run_id: null
 
-# Monitoring — set wandb_project to your W&B project name to enable logging
+# Monitoring
 log_every_n_steps: 100
-save_every_n_steps: 2500
-wandb_project: null
+save_every_n_steps: 500
+wandb_project: sae-mimic-toy
 wandb_run_name: null
 
 seed: 42
