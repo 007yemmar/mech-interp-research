@@ -276,3 +276,57 @@ def test_save_checkpoint_writes_all_four_artifacts(tmp_path):
     assert loaded["step"] == 1234
     assert loaded["best_eval_ev"] == 0.42
     assert loaded["no_improve_count"] == 1
+
+
+def test_load_checkpoint_restores_optimizer_state(tmp_path):
+    """load_checkpoint must restore Adam exp_avg/exp_avg_sq exactly."""
+    import torch
+
+    from mech_interp_research.sae_config import SAETrainingConfig
+    from mech_interp_research.sae_train import (
+        VanillaSAE,
+        load_checkpoint,
+        save_checkpoint,
+    )
+
+    sae1 = VanillaSAE(d_in=16, d_sae=64)
+    opt1 = torch.optim.Adam(sae1.parameters(), lr=1e-4, betas=(0.0, 0.999))
+    # Step a few times to populate optimizer state
+    for _ in range(3):
+        loss = sae1(torch.randn(8, 16))[0].sum()
+        opt1.zero_grad()
+        loss.backward()
+        opt1.step()
+
+    cfg = SAETrainingConfig(activations_dir="/tmp/fake", d_in=16, expansion_factor=4)
+    state = {
+        "step": 3,
+        "epoch": 0,
+        "best_eval_ev": 0.0,
+        "no_improve_count": 0,
+        "steps_since_resample": 3,
+        "activation_counts": [0] * 64,
+    }
+    ckpt_dir = save_checkpoint(
+        sae1,
+        cfg,
+        step=3,
+        output_dir=tmp_path,
+        optimizer=opt1,
+        training_state=state,
+    )
+
+    sae2 = VanillaSAE(d_in=16, d_sae=64)
+    opt2 = torch.optim.Adam(sae2.parameters(), lr=1e-4, betas=(0.0, 0.999))
+    loaded_state = load_checkpoint(sae2, opt2, ckpt_dir)
+
+    assert loaded_state["step"] == 3
+    # Optimizer state preserved: compare exp_avg per param
+    for p1, p2 in zip(sae1.parameters(), sae2.parameters(), strict=True):
+        s1 = opt1.state[p1]
+        s2 = opt2.state[p2]
+        assert torch.allclose(s1["exp_avg"], s2["exp_avg"], atol=1e-7)
+        assert torch.allclose(s1["exp_avg_sq"], s2["exp_avg_sq"], atol=1e-7)
+    # SAE weights preserved
+    for p1, p2 in zip(sae1.parameters(), sae2.parameters(), strict=True):
+        assert torch.allclose(p1.data, p2.data, atol=1e-7)

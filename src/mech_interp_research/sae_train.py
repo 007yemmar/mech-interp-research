@@ -308,6 +308,36 @@ def save_checkpoint(
     return ckpt_dir
 
 
+def load_checkpoint(
+    sae: VanillaSAE,
+    optimizer: torch.optim.Optimizer,
+    ckpt_dir: Path,
+) -> dict[str, Any]:
+    """Restore SAE weights + optimizer state from a checkpoint dir; return training_state.
+
+    Inverse of save_checkpoint(). Expects:
+      ckpt_dir / "sae_weights.safetensors"  (always)
+      ckpt_dir / "optimizer_state.pt"        (required for resume)
+      ckpt_dir / "training_state.json"       (required for resume)
+
+    The SAE and optimizer must already be constructed with matching shapes/lrs
+    before calling — this only loads state into them.
+    """
+    from safetensors.torch import load_file as _load_st
+
+    weights = _load_st(str(ckpt_dir / "sae_weights.safetensors"))
+    sae.W_enc.data.copy_(weights["W_enc"].to(sae.W_enc.dtype))
+    sae.W_dec.data.copy_(weights["W_dec"].to(sae.W_dec.dtype))
+    sae.b_enc.data.copy_(weights["b_enc"].to(sae.b_enc.dtype))
+    sae.b_dec.data.copy_(weights["b_dec"].to(sae.b_dec.dtype))
+
+    opt_state = torch.load(ckpt_dir / "optimizer_state.pt")
+    optimizer.load_state_dict(opt_state)
+
+    training_state: dict[str, Any] = json.loads((ckpt_dir / "training_state.json").read_text())
+    return training_state
+
+
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------
