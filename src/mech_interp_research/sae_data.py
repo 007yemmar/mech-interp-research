@@ -121,10 +121,25 @@ class ActivationsBuffer:
 
     # ---------------------------------------------------------------- buffer internals
 
-    def _load_shard(self, shard_idx: int) -> torch.Tensor:
-        """Load one shard from disk as float16."""
+    def _load_shard(self, shard_idx: int) -> torch.Tensor | None:
+        """Load one shard from disk as float16, or None if the shard is corrupt.
+
+        On failure (file missing, truncated, malformed safetensors), log a
+        warning, increment self.skipped_shards, return None. Caller in _refill
+        treats None as "skip and try next". The 5% rate cap is enforced there.
+        """
+        from safetensors import SafetensorError  # local import: avoid hard dep at module load
+
         path = self.centered_dir / f"shard_{shard_idx:04d}.safetensors"
-        return load_file(str(path))["activations"]  # float16, CPU
+        try:
+            return load_file(str(path))["activations"]
+        except (SafetensorError, OSError, ValueError, KeyError) as e:
+            print(
+                f"WARNING: failed to load {path.name} "
+                f"({type(e).__name__}: {e}); skipping shard {shard_idx}"
+            )
+            self.skipped_shards += 1
+            return None
 
     def _refill(self) -> None:
         """Load shards until buffer reaches buffer_size or shards run out.
@@ -132,7 +147,6 @@ class ActivationsBuffer:
         Any unconsumed rows from the previous buffer are prepended to the new
         data before shuffling, so no activations are dropped mid-epoch.
         """
-        # Carry over unconsumed rows from previous buffer
         parts: list[torch.Tensor] = []
         if self._buffer is not None and self._buf_pos < len(self._buffer):
             parts.append(self._buffer[self._buf_pos :])
@@ -142,8 +156,17 @@ class ActivationsBuffer:
         while loaded < self.buffer_size and self._shard_queue:
             idx = self._shard_queue.pop(0)
             chunk = self._load_shard(idx)
+            if chunk is None:
+                continue
             parts.append(chunk)
             loaded += len(chunk)
+
+        # Refuse to silently train on a corrupt corpus
+        if self.skipped_shards / max(len(self._split_indices), 1) > 0.05:
+            raise RuntimeError(
+                f"Skipped shards exceed 5% of split "
+                f"({self.skipped_shards}/{len(self._split_indices)})."
+            )
 
         if not parts:
             self._buffer = None
@@ -151,7 +174,7 @@ class ActivationsBuffer:
 
         combined = torch.cat(parts, dim=0)  # float16
         perm = torch.randperm(len(combined), generator=self._rng)
-        self._buffer = combined[perm]  # shuffled in-place, float16
+        self._buffer = combined[perm]
         self._buf_pos = 0
 
     # ---------------------------------------------------------------- iteration

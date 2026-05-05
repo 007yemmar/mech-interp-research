@@ -197,3 +197,50 @@ def test_split_all_returns_all_shards(tmp_path: Path) -> None:
     )
     total = sum(t.shape[0] for t in buf)
     assert total == 10 * 64, f"expected 640 tokens, got {total}"
+
+
+# ---------------------------------------------------------------------------
+# Faulty-shard guard tests
+# ---------------------------------------------------------------------------
+
+
+def test_faulty_shard_is_skipped(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    """A corrupt shard should be skipped with a warning, not crash training."""
+    centered = _make_synthetic_centered_dir(tmp_path, n_shards=20, tokens_per_shard=64, d_model=8)
+    # Corrupt shard 5 (1/20 = 5%, at the threshold — single skip should still pass)
+    (centered / "shard_0005.safetensors").write_bytes(b"not a real safetensors file")
+
+    buf = ActivationsBuffer(
+        centered_dir=centered,
+        buffer_size_tokens=64,
+        batch_size=8,
+        seed=1,
+        split="all",
+        eval_n_shards=0,
+    )
+    total = sum(t.shape[0] for t in buf)
+    assert total == 19 * 64
+    assert buf.skipped_shards == 1
+    captured = capsys.readouterr()
+    assert "shard_0005" in captured.out
+
+
+def test_faulty_shard_above_5pct_raises(tmp_path: Path) -> None:
+    """If >5% of shards fail to load, raise rather than silently undertrain."""
+    centered = _make_synthetic_centered_dir(tmp_path, n_shards=10, tokens_per_shard=64, d_model=8)
+    # Corrupt 2/10 = 20% > 5% threshold
+    for i in (1, 2):
+        (centered / f"shard_{i:04d}.safetensors").write_bytes(b"corrupt")
+
+    # The error fires when _refill loads enough shards to cross the 5% rate.
+    # Use a large buffer to force loading all shards in one refill.
+    with pytest.raises(RuntimeError, match="Skipped shards"):
+        buf = ActivationsBuffer(
+            centered_dir=centered,
+            buffer_size_tokens=10 * 64,
+            batch_size=8,
+            seed=1,
+            split="all",
+            eval_n_shards=0,
+        )
+        list(buf)
