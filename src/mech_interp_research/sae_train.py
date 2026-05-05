@@ -246,6 +246,18 @@ def make_warmup_scheduler(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
+def compute_l1_warmup(step: int, l1_coeff: float, l1_warmup_steps: int) -> float:
+    """Linear ramp 0 → l1_coeff over l1_warmup_steps, then constant.
+
+    Per Bricken et al. 2023 / SAELens — gradually applying the L1 penalty
+    reduces dying features in early training. Returns the effective coefficient
+    at the given step.
+    """
+    if l1_warmup_steps <= 0:
+        return l1_coeff
+    return l1_coeff * min(1.0, step / l1_warmup_steps)
+
+
 def save_checkpoint(
     sae: VanillaSAE,
     config: SAETrainingConfig,

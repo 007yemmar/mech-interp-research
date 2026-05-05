@@ -217,3 +217,16 @@ def test_resampled_decoder_rows_are_unit_norm(sae: VanillaSAE, batch: torch.Tens
 
     norms = sae.W_dec.data.norm(dim=1)
     assert torch.allclose(norms, torch.ones_like(norms), atol=1e-5)
+
+
+def test_l1_warmup_ramps_linearly():
+    """compute_l1_warmup is linear 0 → l1_coeff over warmup_steps, then constant."""
+    from mech_interp_research.sae_train import compute_l1_warmup
+
+    assert compute_l1_warmup(step=0, l1_coeff=10.0, l1_warmup_steps=1000) == 0.0
+    assert compute_l1_warmup(step=500, l1_coeff=10.0, l1_warmup_steps=1000) == 5.0
+    assert compute_l1_warmup(step=1000, l1_coeff=10.0, l1_warmup_steps=1000) == 10.0
+    assert compute_l1_warmup(step=5000, l1_coeff=10.0, l1_warmup_steps=1000) == 10.0
+    # warmup_steps = 0 → always full coefficient
+    assert compute_l1_warmup(step=0, l1_coeff=10.0, l1_warmup_steps=0) == 10.0
+    assert compute_l1_warmup(step=999, l1_coeff=10.0, l1_warmup_steps=0) == 10.0
