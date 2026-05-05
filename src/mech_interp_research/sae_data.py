@@ -194,3 +194,80 @@ class ActivationsBuffer:
         batch = self._buffer[self._buf_pos : self._buf_pos + self.batch_size]
         self._buf_pos += self.batch_size
         return batch.float()  # float16 → float32 here, before GPU transfer
+
+
+class EvalAggregator:
+    """Streaming aggregator for eval-pass metrics over an arbitrary number of batches.
+
+    Tracks running sums sufficient to compute MSE, L0, dead-feature fraction, and
+    explained variance without holding all activations in memory. Call .update()
+    once per eval batch and .finalize() once at the end.
+
+    EV is computed against the per-dim variance of x and (x - x_hat) accumulated
+    across the entire eval set (Welford-style would be more numerically robust;
+    we use the population-mean trick: var(x) = E[x^2] - E[x]^2).
+    """
+
+    def __init__(self, d_sae: int) -> None:
+        import torch
+
+        self.d_sae = d_sae
+        self._sum_mse: float = 0.0
+        self._sum_l0: float = 0.0
+        self._sum_x: torch.Tensor | None = None
+        self._sum_x_sq: torch.Tensor | None = None
+        self._sum_res: torch.Tensor | None = None
+        self._sum_res_sq: torch.Tensor | None = None
+        self._activation_counts = torch.zeros(d_sae)
+        self._n_tokens: int = 0
+
+    def update(self, x: torch.Tensor, x_hat: torch.Tensor, z: torch.Tensor) -> None:
+        import torch
+
+        x = x.detach().to(dtype=torch.float64, device="cpu")
+        x_hat = x_hat.detach().to(dtype=torch.float64, device="cpu")
+        z = z.detach().to(dtype=torch.float32, device="cpu")
+        res = x - x_hat
+
+        n = x.shape[0]
+        self._n_tokens += n
+        self._sum_mse += float(res.pow(2).sum().item())
+        self._sum_l0 += float((z > 0).float().sum().item())
+        self._activation_counts += (z > 0).float().sum(dim=0)
+
+        # Per-dim running sums for variance computation
+        if self._sum_x is None:
+            self._sum_x = x.sum(dim=0)
+            self._sum_x_sq = x.pow(2).sum(dim=0)
+            self._sum_res = res.sum(dim=0)
+            self._sum_res_sq = res.pow(2).sum(dim=0)
+        else:
+            self._sum_x += x.sum(dim=0)
+            self._sum_x_sq += x.pow(2).sum(dim=0)
+            self._sum_res += res.sum(dim=0)
+            self._sum_res_sq += res.pow(2).sum(dim=0)
+
+    def finalize(self) -> dict[str, float]:
+        if self._n_tokens == 0:
+            raise RuntimeError("EvalAggregator.finalize() called with no batches.")
+        n = self._n_tokens
+
+        # MSE per token (sum over d_in, mean over tokens), L0 per token
+        eval_mse = self._sum_mse / n
+        eval_l0 = self._sum_l0 / n
+
+        # Per-dim population variance: E[x^2] - E[x]^2
+        mean_x = self._sum_x / n
+        var_x = (self._sum_x_sq / n) - mean_x.pow(2)
+        mean_res = self._sum_res / n
+        var_res = (self._sum_res_sq / n) - mean_res.pow(2)
+
+        eval_ev = float(1.0 - var_res.sum() / (var_x.sum() + 1e-8))
+        eval_dead_frac = float((self._activation_counts == 0).float().mean().item())
+
+        return {
+            "eval/mse": float(eval_mse),
+            "eval/l0": float(eval_l0),
+            "eval/ev": eval_ev,
+            "eval/dead_frac": eval_dead_frac,
+        }

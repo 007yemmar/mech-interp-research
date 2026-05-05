@@ -244,3 +244,36 @@ def test_faulty_shard_above_5pct_raises(tmp_path: Path) -> None:
             eval_n_shards=0,
         )
         list(buf)
+
+
+def test_eval_aggregator_computes_correct_stats():
+    """EvalAggregator running stats match a one-shot torch computation."""
+    import torch
+
+    from mech_interp_research.sae_data import EvalAggregator
+
+    torch.manual_seed(0)
+    n_tokens, d_in, d_sae = 256, 8, 32
+    x = torch.randn(n_tokens, d_in)
+    x_hat = x + 0.1 * torch.randn(n_tokens, d_in)
+    z = (torch.randn(n_tokens, d_sae) - 0.5).clamp(min=0)  # ~half are zero
+
+    # One-shot reference
+    ref_mse = (x - x_hat).pow(2).sum(dim=-1).mean().item()
+    ref_l0 = (z > 0).float().sum(dim=-1).mean().item()
+    ref_dead_frac = ((z > 0).sum(dim=0) == 0).float().mean().item()
+    var_x = x.var(dim=0).sum()
+    var_res = (x - x_hat).var(dim=0).sum()
+    ref_ev = float(1.0 - var_res / (var_x + 1e-8))
+
+    # Streaming via aggregator (split into 4 chunks)
+    agg = EvalAggregator(d_sae=d_sae)
+    for i in range(4):
+        sl = slice(i * 64, (i + 1) * 64)
+        agg.update(x[sl], x_hat[sl], z[sl])
+    out = agg.finalize()
+
+    assert abs(out["eval/mse"] - ref_mse) < 1e-4
+    assert abs(out["eval/l0"] - ref_l0) < 1e-4
+    assert abs(out["eval/dead_frac"] - ref_dead_frac) < 1e-4
+    assert abs(out["eval/ev"] - ref_ev) < 1e-3
