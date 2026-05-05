@@ -338,6 +338,29 @@ def load_checkpoint(
     return training_state
 
 
+def eval_pass(sae: VanillaSAE, eval_buffer, device: str = "cuda") -> dict[str, float]:
+    """Forward-only pass over eval_buffer; return aggregated eval metrics.
+
+    eval_buffer must already be constructed with split='eval'. The buffer is
+    iterated to exhaustion. No gradient, no parameter updates.
+
+    Returns dict with keys eval/mse, eval/l0, eval/ev, eval/dead_frac.
+    """
+    from mech_interp_research.sae_data import EvalAggregator
+
+    agg = EvalAggregator(d_sae=sae.d_sae)
+    sae.eval()
+    try:
+        with torch.no_grad():
+            for batch in eval_buffer:
+                batch = batch.to(device, non_blocking=True)
+                x_hat, z = sae(batch)
+                agg.update(batch, x_hat, z)
+    finally:
+        sae.train()
+    return agg.finalize()
+
+
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------

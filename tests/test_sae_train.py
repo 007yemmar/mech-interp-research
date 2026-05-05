@@ -330,3 +330,57 @@ def test_load_checkpoint_restores_optimizer_state(tmp_path):
     # SAE weights preserved
     for p1, p2 in zip(sae1.parameters(), sae2.parameters(), strict=True):
         assert torch.allclose(p1.data, p2.data, atol=1e-7)
+
+
+def test_eval_pass_returns_finite_metrics_with_correct_shape(tmp_path):
+    """eval_pass returns dict with eval/mse, eval/l0, eval/ev, eval/dead_frac (all finite)."""
+    import json
+
+    import torch
+    from safetensors.torch import save_file as _save_st
+
+    from mech_interp_research.sae_data import ActivationsBuffer
+    from mech_interp_research.sae_train import VanillaSAE, eval_pass
+
+    # Build a tiny synthetic centered dir (3 shards × 64 tokens × d=16)
+    centered = tmp_path / "centered"
+    centered.mkdir()
+    for i in range(3):
+        torch.manual_seed(i)
+        acts = torch.randn(64, 16).half()
+        _save_st({"activations": acts}, str(centered / f"shard_{i:04d}.safetensors"))
+    (centered / "manifest.json").write_text(
+        json.dumps(
+            {
+                "model_name": "t",
+                "layer": 0,
+                "d_model": 16,
+                "tokens_per_shard": 64,
+                "n_shards": 3,
+                "total_tokens": 192,
+                "n_notes": 3,
+                "run_id": "synth",
+                "centered": True,
+            }
+        )
+    )
+
+    sae = VanillaSAE(d_in=16, d_sae=64)
+    eval_buf = ActivationsBuffer(
+        centered_dir=centered,
+        buffer_size_tokens=128,
+        batch_size=32,
+        seed=0,
+        split="all",
+        eval_n_shards=0,
+    )
+    metrics = eval_pass(sae, eval_buf, device="cpu")
+    assert set(metrics.keys()) == {"eval/mse", "eval/l0", "eval/ev", "eval/dead_frac"}
+    for k, v in metrics.items():
+        assert isinstance(v, float)
+        assert v == v, f"{k} is NaN"
+        assert abs(v) < 1e10, f"{k} is non-finite: {v}"
+    # L0 is bounded by d_sae
+    assert 0 <= metrics["eval/l0"] <= 64
+    # dead_frac is in [0, 1]
+    assert 0.0 <= metrics["eval/dead_frac"] <= 1.0
