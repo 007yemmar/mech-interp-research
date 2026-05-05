@@ -367,15 +367,23 @@ def eval_pass(sae: VanillaSAE, eval_buffer, device: str = "cuda") -> dict[str, f
 
 
 def train(config: SAETrainingConfig) -> dict[str, Any]:
-    """Run SAE training end-to-end. Returns a summary dict.
+    """Run SAE training end-to-end with eval-driven stopping.
 
-    - Builds VanillaSAE from config.d_in and config.d_sae.
-    - Reads centered activations from config.activations_dir via ActivationsBuffer.
-    - Runs config.n_epochs passes over the activation corpus.
-    - Resamples dead neurons every config.resample_steps optimizer steps.
-    - Logs to stdout every config.log_every_n_steps steps; optionally to W&B.
-    - Saves checkpoints every config.save_every_n_steps steps + a final checkpoint.
-    - Writes train_summary.json to the output directory.
+    Architecture:
+      - Builds train_buffer (split='train') and eval_buffer (split='eval').
+      - Runs up to config.n_epochs passes over the train split.
+      - Every eval_every_n_steps: runs eval_pass on the eval split, logs
+        eval/{mse,ev,l0,dead_frac}. If eval/ev is the new best → save best/.
+        Otherwise increment no_improve_count; early-stop when count ≥
+        config.early_stop_patience.
+      - Every save_every_n_steps: writes step_NNNNNNNN/ checkpoint with all
+        four artifacts (weights + optimizer + training state + config).
+      - Every resample_steps: dead-neuron resampling (unchanged).
+      - On NaN/Inf batch: skip + bump skipped_batches.
+      - On config.resume_from: load weights, optimizer state, and training
+        state. The outer epoch loop starts at saved_epoch and re-iterates
+        that epoch from scratch (up to one epoch of activation replay; SAE
+        training is robust to repeated tokens).
     """
     torch.manual_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -386,123 +394,242 @@ def train(config: SAETrainingConfig) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sae = VanillaSAE(config.d_in, config.d_sae).to(device)
-    optimizer = torch.optim.Adam(sae.parameters(), lr=config.lr, betas=(config.adam_beta1, 0.999))
+    optimizer = torch.optim.Adam(
+        sae.parameters(),
+        lr=config.lr,
+        betas=(config.adam_beta1, config.adam_beta2),
+    )
     scheduler = make_warmup_scheduler(optimizer, config.lr_warmup_steps)
 
-    buffer = ActivationsBuffer(
+    train_buffer = ActivationsBuffer(
         centered_dir=config.activations_dir,
         buffer_size_tokens=1_000_000,
         batch_size=config.train_batch_size_tokens,
         seed=config.seed,
+        split="train",
+        eval_n_shards=config.eval_n_shards,
     )
+
+    activation_counts = torch.zeros(config.d_sae, device=device)
+    steps_since_resample: int = 0
+    step: int = 0
+    start_epoch: int = 0
+    initial_loss: float | None = None
+    last_loss: float | None = None
+    best_eval_ev: float = float("-inf")
+    no_improve_count: int = 0
+    skipped_batches: int = 0
+
+    if config.resume_from:
+        ts = load_checkpoint(sae, optimizer, Path(config.resume_from))
+        step = int(ts.get("step", 0))
+        start_epoch = int(ts.get("epoch", 0))
+        best_eval_ev = float(ts.get("best_eval_ev", float("-inf")))
+        no_improve_count = int(ts.get("no_improve_count", 0))
+        steps_since_resample = int(ts.get("steps_since_resample", 0))
+        ac = ts.get("activation_counts", [])
+        if ac:
+            activation_counts = torch.tensor(ac, dtype=torch.float32, device=device)
+        print(f"Resumed from {config.resume_from}: step={step}, epoch={start_epoch}")
 
     if config.wandb_project:
         try:
-            import wandb  # optional dependency
+            import wandb
 
             wandb.init(
                 project=config.wandb_project,
                 name=config.wandb_run_name or run_id,
                 config=dataclasses.asdict(config),
+                resume="allow" if config.resume_from else "never",
             )
         except ImportError:
             print("wandb not installed; skipping W&B logging.")
 
-    # Per-feature activation count since last resample. Shape [d_sae].
-    # activation_counts[j] = number of tokens that activated feature j.
-    activation_counts = torch.zeros(config.d_sae, device=device)
-    steps_since_resample: int = 0
-    step: int = 0
-    initial_loss: float | None = None
-    last_loss: float | None = None
+    stopped_reason = "epoch_cap"
 
-    for epoch in range(config.n_epochs):
-        if epoch > 0:
-            buffer.reset_epoch()
+    try:
+        for epoch in range(start_epoch, config.n_epochs):
+            if epoch > start_epoch:
+                train_buffer.reset_epoch()
 
-        for batch in buffer:
-            batch = batch.to(device, non_blocking=True)  # [batch_size, d_in], float32
+            for batch in train_buffer:
+                batch = batch.to(device, non_blocking=True)
 
-            # ---- L1 warmup: ramp from 0 → l1_coeff over l1_warmup_steps ----
-            effective_l1 = (
-                config.l1_coeff * min(1.0, step / config.l1_warmup_steps)
-                if config.l1_warmup_steps > 0
-                else config.l1_coeff
-            )
+                # NaN/Inf batch guard
+                if not torch.isfinite(batch).all():
+                    skipped_batches += 1
+                    print(f"step {step}: NaN/Inf batch detected; skipping")
+                    continue
 
-            # ---- Training step (builds computation graph) ----
-            metrics = train_step(sae, optimizer, scheduler, batch, effective_l1)
-            step += 1
-            steps_since_resample += 1
+                l1_coeff_effective = compute_l1_warmup(
+                    step, config.l1_coeff, config.l1_warmup_steps
+                )
 
-            if initial_loss is None:
-                initial_loss = metrics["loss/total"]
-            last_loss = metrics["loss/total"]
+                metrics = train_step(
+                    sae,
+                    optimizer,
+                    scheduler,
+                    batch,
+                    l1_coeff_effective,
+                )
+                step += 1
+                steps_since_resample += 1
 
-            # ---- Monitoring pass (no gradient, uses updated weights) ----
-            with torch.no_grad():
-                x_hat_mon, z_mon = sae(batch)
-                activation_counts += (z_mon > 0).float().sum(dim=0)
+                if initial_loss is None:
+                    initial_loss = metrics["loss/total"]
+                last_loss = metrics["loss/total"]
 
-                if step % config.log_every_n_steps == 0:
-                    l0 = (z_mon > 0).float().sum(dim=-1).mean().item()
+                with torch.no_grad():
+                    x_hat_mon, z_mon = sae(batch)
+                    activation_counts += (z_mon > 0).float().sum(dim=0)
 
+                    if step % config.log_every_n_steps == 0:
+                        l0 = (z_mon > 0).float().sum(dim=-1).mean().item()
+                        total_tokens_window = steps_since_resample * config.train_batch_size_tokens
+                        act_freq = activation_counts.float() / max(total_tokens_window, 1)
+                        dead_frac = (act_freq < config.dead_feature_threshold).float().mean().item()
+                        var_x = batch.var(dim=0).sum()
+                        var_res = (batch - x_hat_mon).var(dim=0).sum()
+                        ev = float(1.0 - var_res / (var_x + 1e-8))
+
+                        log_data = {
+                            **metrics,
+                            "l0": l0,
+                            "dead_frac": dead_frac,
+                            "explained_variance": ev,
+                            "lr": optimizer.param_groups[0]["lr"],
+                            "epoch": epoch,
+                            "step": step,
+                            "l1_coeff_effective": l1_coeff_effective,
+                        }
+                        print(
+                            f"step {step:7d} | loss {metrics['loss/total']:.4f} "
+                            f"| mse {metrics['loss/mse']:.4f} "
+                            f"| l1 {metrics['loss/l1']:.4f} "
+                            f"| L0 {l0:.1f} | dead {dead_frac:.2%} | ev {ev:.3f}"
+                        )
+                        if config.wandb_project:
+                            try:
+                                import wandb
+
+                                wandb.log(log_data, step=step)
+                            except ImportError:
+                                pass
+
+                if steps_since_resample >= config.resample_steps:
                     total_tokens_window = steps_since_resample * config.train_batch_size_tokens
-                    act_freq = activation_counts.float() / max(total_tokens_window, 1)
-                    dead_frac = (act_freq < config.dead_feature_threshold).float().mean().item()
+                    n_resampled = resample_dead_neurons(
+                        sae,
+                        optimizer,
+                        activation_counts,
+                        total_tokens_window,
+                        config.dead_feature_threshold,
+                        batch,
+                    )
+                    if n_resampled:
+                        pct = n_resampled / config.d_sae
+                        print(f"step {step}: resampled {n_resampled} dead neurons ({pct:.1%})")
+                    activation_counts.zero_()
+                    steps_since_resample = 0
 
-                    var_x = batch.var(dim=0).sum()
-                    var_res = (batch - x_hat_mon).var(dim=0).sum()
-                    ev = float(1.0 - var_res / (var_x + 1e-8))
-
-                    log_data = {
-                        **metrics,
-                        "l0": l0,
-                        "dead_frac": dead_frac,
-                        "explained_variance": ev,
-                        "lr": optimizer.param_groups[0]["lr"],
-                        "l1_coeff_effective": effective_l1,
-                        "epoch": epoch,
+                # Periodic step_NNNNNNNN/ checkpoint
+                if step % config.save_every_n_steps == 0:
+                    training_state = {
                         "step": step,
+                        "epoch": epoch,
+                        "best_eval_ev": best_eval_ev,
+                        "no_improve_count": no_improve_count,
+                        "steps_since_resample": steps_since_resample,
+                        "activation_counts": activation_counts.cpu().int().tolist(),
                     }
+                    save_checkpoint(
+                        sae,
+                        config,
+                        step,
+                        output_dir,
+                        optimizer=optimizer,
+                        training_state=training_state,
+                    )
+
+                # Eval pass + best/early-stop
+                if step % config.eval_every_n_steps == 0:
+                    eval_buffer = ActivationsBuffer(
+                        centered_dir=config.activations_dir,
+                        buffer_size_tokens=1_000_000,
+                        batch_size=config.train_batch_size_tokens,
+                        seed=config.seed + 1,
+                        split="eval",
+                        eval_n_shards=config.eval_n_shards,
+                    )
+                    eval_metrics = eval_pass(sae, eval_buffer, device=device)
                     print(
-                        f"step {step:7d} | loss {metrics['loss/total']:.4f} "
-                        f"| mse {metrics['loss/mse']:.4f} "
-                        f"| l1 {metrics['loss/l1']:.4f} "
-                        f"| L0 {l0:.1f} | dead {dead_frac:.2%} | ev {ev:.3f} "
-                        f"| l1c {effective_l1:.4f}"
+                        f"step {step:7d} | eval/ev {eval_metrics['eval/ev']:.4f} "
+                        f"| eval/mse {eval_metrics['eval/mse']:.4f} "
+                        f"| eval/l0 {eval_metrics['eval/l0']:.1f} "
+                        f"| eval/dead {eval_metrics['eval/dead_frac']:.2%}"
                     )
                     if config.wandb_project:
                         try:
                             import wandb
 
-                            wandb.log(log_data, step=step)
+                            wandb.log(eval_metrics, step=step)
                         except ImportError:
                             pass
 
-            # ---- Dead-neuron resampling ----
-            if steps_since_resample >= config.resample_steps:
-                total_tokens_window = steps_since_resample * config.train_batch_size_tokens
-                n_resampled = resample_dead_neurons(
-                    sae,
-                    optimizer,
-                    activation_counts,
-                    total_tokens_window,
-                    config.dead_feature_threshold,
-                    batch,
-                )
-                if n_resampled:
-                    pct = n_resampled / config.d_sae
-                    print(f"step {step}: resampled {n_resampled} dead neurons ({pct:.1%})")
-                activation_counts.zero_()
-                steps_since_resample = 0
+                    if eval_metrics["eval/ev"] > best_eval_ev:
+                        best_eval_ev = eval_metrics["eval/ev"]
+                        no_improve_count = 0
+                        training_state = {
+                            "step": step,
+                            "epoch": epoch,
+                            "best_eval_ev": best_eval_ev,
+                            "no_improve_count": no_improve_count,
+                            "steps_since_resample": steps_since_resample,
+                            "activation_counts": activation_counts.cpu().int().tolist(),
+                        }
+                        save_checkpoint(
+                            sae,
+                            config,
+                            step,
+                            output_dir,
+                            label="best",
+                            optimizer=optimizer,
+                            training_state=training_state,
+                        )
+                    else:
+                        no_improve_count += 1
+                        if no_improve_count >= config.early_stop_patience:
+                            stopped_reason = "early_stop"
+                            print(
+                                f"step {step}: early-stop after "
+                                f"{no_improve_count} non-improving evals"
+                            )
+                            raise _EarlyStopError()
 
-            # ---- Periodic checkpoint ----
-            if step % config.save_every_n_steps == 0:
-                save_checkpoint(sae, config, step, output_dir)
+    except _EarlyStopError:
+        pass
+    except KeyboardInterrupt:
+        stopped_reason = "keyboard_interrupt"
+        print("KeyboardInterrupt — writing final checkpoint")
 
     # Final checkpoint
-    final_ckpt = save_checkpoint(sae, config, step, output_dir, final=True)
+    final_training_state = {
+        "step": step,
+        "epoch": min(epoch if "epoch" in locals() else start_epoch, config.n_epochs - 1),
+        "best_eval_ev": best_eval_ev,
+        "no_improve_count": no_improve_count,
+        "steps_since_resample": steps_since_resample,
+        "activation_counts": activation_counts.cpu().int().tolist(),
+    }
+    final_ckpt = save_checkpoint(
+        sae,
+        config,
+        step,
+        output_dir,
+        final=True,
+        optimizer=optimizer,
+        training_state=final_training_state,
+    )
 
     if config.wandb_project:
         try:
@@ -520,7 +647,15 @@ def train(config: SAETrainingConfig) -> dict[str, Any]:
         "total_steps": step,
         "initial_loss": initial_loss,
         "final_loss": last_loss,
+        "best_eval_ev": best_eval_ev if best_eval_ev != float("-inf") else None,
+        "stopped_reason": stopped_reason,
+        "total_skipped_batches": skipped_batches,
+        "total_skipped_shards": train_buffer.skipped_shards,
         "elapsed_s": round(elapsed, 2),
     }
     (output_dir / "train_summary.json").write_text(json.dumps(summary, indent=2))
     return summary
+
+
+class _EarlyStopError(Exception):
+    """Internal sentinel to break out of nested epoch/batch loops on early-stop."""
