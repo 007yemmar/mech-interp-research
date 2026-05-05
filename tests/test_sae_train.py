@@ -230,3 +230,49 @@ def test_l1_warmup_ramps_linearly():
     # warmup_steps = 0 → always full coefficient
     assert compute_l1_warmup(step=0, l1_coeff=10.0, l1_warmup_steps=0) == 10.0
     assert compute_l1_warmup(step=999, l1_coeff=10.0, l1_warmup_steps=0) == 10.0
+
+
+def test_save_checkpoint_writes_all_four_artifacts(tmp_path):
+    """save_checkpoint must write weights, optimizer state, training_state.json, config.yaml."""
+    import torch
+
+    from mech_interp_research.sae_config import SAETrainingConfig
+    from mech_interp_research.sae_train import VanillaSAE, save_checkpoint
+
+    sae = VanillaSAE(d_in=16, d_sae=64)
+    optimizer = torch.optim.Adam(sae.parameters(), lr=1e-4, betas=(0.0, 0.999))
+    # Generate some optimizer state (one step)
+    loss = sae(torch.randn(8, 16))[0].sum()
+    loss.backward()
+    optimizer.step()
+
+    config = SAETrainingConfig(activations_dir="/tmp/fake", d_in=16, expansion_factor=4)
+    training_state = {
+        "step": 1234,
+        "epoch": 0,
+        "best_eval_ev": 0.42,
+        "no_improve_count": 1,
+        "steps_since_resample": 200,
+        "activation_counts": [0] * 64,
+    }
+    ckpt_dir = save_checkpoint(
+        sae,
+        config,
+        step=1234,
+        output_dir=tmp_path,
+        optimizer=optimizer,
+        training_state=training_state,
+    )
+
+    assert (ckpt_dir / "sae_weights.safetensors").exists()
+    assert (ckpt_dir / "optimizer_state.pt").exists()
+    assert (ckpt_dir / "training_state.json").exists()
+    assert (ckpt_dir / "sae_config.yaml").exists()
+
+    # Round-trip the training state
+    import json
+
+    loaded = json.loads((ckpt_dir / "training_state.json").read_text())
+    assert loaded["step"] == 1234
+    assert loaded["best_eval_ev"] == 0.42
+    assert loaded["no_improve_count"] == 1

@@ -265,10 +265,27 @@ def save_checkpoint(
     output_dir: Path,
     *,
     final: bool = False,
+    label: str | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
+    training_state: dict[str, Any] | None = None,
 ) -> Path:
-    """Write SAE weights (safetensors) and config (YAML) to a versioned subdirectory."""
-    label = "final" if final else f"step_{step:08d}"
-    ckpt_dir = output_dir / label
+    """Write SAE weights, optimizer state, training-state JSON, and config to a checkpoint dir.
+
+    Directory naming:
+      - label="best"        → output_dir / "best"
+      - label="<custom>"    → output_dir / "<custom>"
+      - final=True          → output_dir / "final"
+      - otherwise           → output_dir / f"step_{step:08d}"
+
+    optimizer and training_state are optional for backward compatibility with the
+    smoke test, but production calls from train() pass both.
+    """
+    if label is not None:
+        ckpt_dir = output_dir / label
+    elif final:
+        ckpt_dir = output_dir / "final"
+    else:
+        ckpt_dir = output_dir / f"step_{step:08d}"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     save_file(
@@ -281,6 +298,13 @@ def save_checkpoint(
         str(ckpt_dir / "sae_weights.safetensors"),
     )
     save_sae_config(config, ckpt_dir / "sae_config.yaml")
+
+    if optimizer is not None:
+        torch.save(optimizer.state_dict(), ckpt_dir / "optimizer_state.pt")
+
+    if training_state is not None:
+        (ckpt_dir / "training_state.json").write_text(json.dumps(training_state, indent=2))
+
     return ckpt_dir
 
 
