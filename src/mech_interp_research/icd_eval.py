@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -346,9 +347,21 @@ def encode_and_pool(
             if not meta_file.exists():
                 continue
             vecs = np.load(vec_file)  # [n_notes, d_sae]
-            all_vectors.extend(list(vecs))
             with open(meta_file) as f:
-                all_meta_rows.extend(json.loads(line) for line in f if line.strip())
+                meta_rows = [json.loads(line) for line in f if line.strip()]
+            # Integrity check — partial writes can leave .npy and .jsonl
+            # with mismatched row counts. Treat as not-done and re-encode.
+            if vecs.shape[0] != len(meta_rows):
+                logger.warning(
+                    f"Checkpoint shard {shard_num}: vectors={vecs.shape[0]} "
+                    f"!= metadata rows={len(meta_rows)}. Discarding partial "
+                    f"checkpoint and re-encoding."
+                )
+                vec_file.unlink()
+                meta_file.unlink()
+                continue
+            all_vectors.extend(list(vecs))
+            all_meta_rows.extend(meta_rows)
             done_shards.add(shard_num)
         if done_shards:
             logger.info(
@@ -418,15 +431,22 @@ def encode_and_pool(
 
         if ckpt_dir is not None:
             ckpt_dir.mkdir(parents=True, exist_ok=True)
-            np.save(ckpt_dir / f"shard_{shard_idx:04d}_vectors.npy", np.stack(shard_vectors))
-            with open(ckpt_dir / f"shard_{shard_idx:04d}_meta.jsonl", "w") as f:
+            # Atomic two-step: write metadata to a temp file, then save the
+            # vectors, then rename metadata into place. The metadata rename
+            # is the commit point — if either preceding write is interrupted,
+            # resume sees no .jsonl and re-encodes the shard.
+            meta_path = ckpt_dir / f"shard_{shard_idx:04d}_meta.jsonl"
+            meta_tmp = meta_path.with_suffix(".jsonl.tmp")
+            with open(meta_tmp, "w") as f:
                 for row in shard_meta:
                     f.write(json.dumps(row) + "\n")
+            np.save(ckpt_dir / f"shard_{shard_idx:04d}_vectors.npy", np.stack(shard_vectors))
+            os.replace(meta_tmp, meta_path)
 
     note_vectors = np.stack(all_vectors, axis=0)  # [num_notes, d_sae]
     note_meta = pd.DataFrame(all_meta_rows).reset_index(drop=True)
 
-    logger.info(f"Encoded {note_vectors.shape[0]} notes → " f"shape {note_vectors.shape}")
+    logger.info(f"Encoded {note_vectors.shape[0]} notes → shape {note_vectors.shape}")
     return note_vectors, note_meta
 
 
@@ -455,6 +475,12 @@ def compute_diagnostic_metrics(
         Dict with keys: n_tokens, mean_l0, explained_variance,
         dead_latent_frac, d_sae, d_model.
     """
+    if sae.W_dec is None:
+        raise ValueError(
+            "compute_diagnostic_metrics requires sae.W_dec for reconstruction. "
+            "Load with from_huggingface() or a checkpoint that includes W_dec."
+        )
+
     if shard_filter is not None:
         metadata = metadata[metadata["shard"].isin(shard_filter)]
 
@@ -596,7 +622,7 @@ def load_and_align_icd_labels(
     prevalences = icd_data.mean(axis=0)
     mask_prev = prevalences >= min_prevalence
     logger.info(
-        f"Prevalence filter (>= {min_prevalence}): " f"{mask_prev.sum()}/{len(icd_cols)} codes pass"
+        f"Prevalence filter (>= {min_prevalence}): {mask_prev.sum()}/{len(icd_cols)} codes pass"
     )
 
     passing_cols = [c for c, m in zip(icd_cols, mask_prev, strict=False) if m]
@@ -615,7 +641,7 @@ def load_and_align_icd_labels(
     icd_matrix = merged[passing_cols].values.astype(np.int8)
     code_names = passing_cols
 
-    logger.info(f"Final ICD matrix: {icd_matrix.shape[0]} notes × " f"{icd_matrix.shape[1]} codes")
+    logger.info(f"Final ICD matrix: {icd_matrix.shape[0]} notes × {icd_matrix.shape[1]} codes")
 
     # Log prevalence summary
     for i, code in enumerate(code_names[:10]):
@@ -732,8 +758,7 @@ def apply_bh_correction(
     n_sig = reject.sum()
     n_tests = m
     logger.info(
-        f"BH correction (q={q}): {n_sig}/{n_tests} tests significant "
-        f"({n_sig / n_tests * 100:.2f}%)"
+        f"BH correction (q={q}): {n_sig}/{n_tests} tests significant ({n_sig / n_tests * 100:.2f}%)"
     )
 
     return reject, p_adjusted
@@ -934,9 +959,35 @@ def save_results(results: GroundingResults, output_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _align_note_vectors_to_matched(
+    note_vectors: np.ndarray,
+    note_meta: pd.DataFrame,
+    matched_meta: pd.DataFrame,
+) -> np.ndarray:
+    """Select rows of note_vectors that correspond to matched_meta, by note_idx.
+
+    note_meta and note_vectors are aligned by row position (encode_and_pool
+    builds them in lockstep). matched_meta is the result of an inner merge
+    whose index has been reset by pandas — its row positions do NOT match
+    note_vectors. We rebuild positions via the note_idx column.
+    """
+    note_meta_idx = note_meta["note_idx"].to_numpy()
+    if len(set(note_meta_idx)) != len(note_meta_idx):
+        raise ValueError("note_meta['note_idx'] contains duplicates; cannot align unambiguously.")
+    pos = {int(nidx): i for i, nidx in enumerate(note_meta_idx)}
+    matched_idx = matched_meta["note_idx"].to_numpy()
+    try:
+        aligned = [pos[int(nidx)] for nidx in matched_idx]
+    except KeyError as exc:
+        raise ValueError(
+            f"matched_meta has note_idx={exc.args[0]} not present in note_meta."
+        ) from None
+    return note_vectors[aligned]
+
+
 def run_icd_eval(
     activations_dir: str | Path,
-    sae_checkpoint: str | Path,
+    sae_checkpoint: str | Path | JumpReLUSAE,
     icd_csv_path: str | Path,
     output_dir: str | Path,
     pooling: PoolingStrategy = "max",
@@ -957,7 +1008,6 @@ def run_icd_eval(
         output_dir/shard_ckpt so resume works automatically on re-run.
     """
     activations_dir = Path(activations_dir)
-    sae_checkpoint = Path(sae_checkpoint)
     icd_csv_path = Path(icd_csv_path)
     output_dir = Path(output_dir)
 
@@ -970,7 +1020,10 @@ def run_icd_eval(
 
     # Step 1: Load SAE
     logger.info("Step 1: Loading SAE...")
-    sae = JumpReLUSAE.from_checkpoint(sae_checkpoint)
+    if isinstance(sae_checkpoint, JumpReLUSAE):
+        sae = sae_checkpoint
+    else:
+        sae = JumpReLUSAE.from_checkpoint(Path(sae_checkpoint))
 
     # Step 2: Load metadata
     logger.info("Step 2: Loading metadata...")
@@ -999,26 +1052,18 @@ def run_icd_eval(
         join_key=join_key,
     )
 
-    # Align note_vectors with matched notes
-    # matched_meta is a subset of note_meta after the inner join
-    # We need the indices into note_vectors that correspond to matched rows
-    matched_indices = matched_meta.index.values
-    if max(matched_indices) >= note_vectors.shape[0]:
-        # The merge reindexed — rebuild alignment via note_idx
-        note_meta_idx = note_meta["note_idx"].values
-        matched_note_idx = matched_meta["note_idx"].values
-        idx_map = {nidx: i for i, nidx in enumerate(note_meta_idx)}
-        aligned_indices = [idx_map[nidx] for nidx in matched_note_idx]
-        X = note_vectors[aligned_indices]
-    else:
-        X = note_vectors[matched_indices]
+    # Align note_vectors with matched notes by note_idx (always — never by
+    # positional index). pandas merge resets the index, so matched_meta's
+    # row positions do not correspond to positions in note_vectors. The
+    # only stable join key is the note_idx column itself.
+    X = _align_note_vectors_to_matched(note_vectors, note_meta, matched_meta)
 
     logger.info(f"Aligned activation matrix: {X.shape}")
 
     # Step 5: Compute correlations
     logger.info("Step 5: Computing point-biserial correlations...")
     r_pb, p_vals = compute_point_biserial_vectorised(X, icd_matrix)
-    logger.info(f"Correlation matrix shape: {r_pb.shape}, " f"max |r| = {np.abs(r_pb).max():.4f}")
+    logger.info(f"Correlation matrix shape: {r_pb.shape}, max |r| = {np.abs(r_pb).max():.4f}")
 
     # Step 6: FDR correction
     logger.info(f"Step 6: BH FDR correction (q={fdr_q})...")

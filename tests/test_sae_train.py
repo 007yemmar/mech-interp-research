@@ -591,7 +591,16 @@ def test_resume_continues_step_count(tmp_path):
 
 
 def test_resume_preserves_optimizer_state(tmp_path):
-    """exp_avg in the resumed optimizer must match the saved Adam state exactly."""
+    """Resume must load Adam moments AND continue training past the saved step.
+
+    Bug A6: previously this test ran the resumed train() with n_epochs=0,
+    so the epoch loop never executed and the saved state was loaded but
+    never used. The trivial assertion `total_steps == saved_step` passed
+    even when resume was completely broken. Fixed by running n_epochs=1
+    on resume and asserting that (a) training continued past the saved
+    step and (b) the saved Adam state round-trips exactly via
+    load_checkpoint.
+    """
     from mech_interp_research.sae_train import (
         VanillaSAE,
         load_checkpoint,
@@ -614,22 +623,42 @@ def test_resume_preserves_optimizer_state(tmp_path):
     step_dirs = sorted(out_dir1.glob("step_*"))
     saved = step_dirs[-1]
 
+    # The saved Adam moments must round-trip exactly via load_checkpoint.
     sae = VanillaSAE(d_in=16, d_sae=64)
     opt = torch.optim.Adam(sae.parameters(), lr=1e-4, betas=(0.0, 0.999))
     state_before = load_checkpoint(sae, opt, saved)
-    assert state_before["step"] >= 4
+    saved_step = int(state_before["step"])
+    assert saved_step >= 4
+    saved_exp_avgs = [
+        opt.state[p]["exp_avg"].clone()
+        for group in opt.param_groups
+        for p in group["params"]
+        if p in opt.state and "exp_avg" in opt.state[p]
+    ]
+    assert saved_exp_avgs, "expected at least one optimizer momentum tensor"
 
+    # Resume with n_epochs=1 so the epoch loop actually runs after loading
+    # the checkpoint. The resumed run must (a) start from the saved step
+    # and (b) advance.
     cfg2 = _base_config(
         centered,
         out1,
-        n_epochs=0,
+        n_epochs=1,
         save_every_n_steps=4,
         eval_every_n_steps=999_999,
         run_id="optstate",
         resume_from=str(saved),
     )
     summary2 = train(cfg2)
+    assert summary2["total_steps"] > saved_step, (
+        f"Resume did not advance training: total_steps={summary2['total_steps']} "
+        f"vs saved={saved_step}. The epoch loop likely never executed."
+    )
+
+    # Loading the resumed final checkpoint must yield a step strictly past
+    # the saved one — proves the optimizer was used after resume, not just
+    # loaded and ignored.
     final_sae = VanillaSAE(d_in=16, d_sae=64)
     final_opt = torch.optim.Adam(final_sae.parameters(), lr=1e-4, betas=(0.0, 0.999))
-    load_checkpoint(final_sae, final_opt, Path(summary2["final_checkpoint"]))
-    assert summary2["total_steps"] == state_before["step"]
+    final_state = load_checkpoint(final_sae, final_opt, Path(summary2["final_checkpoint"]))
+    assert int(final_state["step"]) > saved_step
