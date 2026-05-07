@@ -68,6 +68,7 @@ class JumpReLUSAE:
         # VanillaSAE checkpoints have no threshold (plain ReLU = JumpReLU at 0).
         # Aliases kept for JumpReLU-trained checkpoints.
         "threshold": ["threshold", "log_threshold", "theta"],
+        # Expected shape [d_sae, d_model]. PyTorch nn.Linear stores [d_model, d_sae] — transpose before saving.
         "W_dec": ["W_dec", "decoder.weight", "w_dec"],
     }
 
@@ -231,6 +232,12 @@ class JumpReLUSAE:
         b_dec = _find("b_dec")
         W_dec = _find("W_dec", required=False)
         d_model, d_sae = W_enc.shape
+
+        if W_dec is not None and W_dec.shape != (d_sae, d_model):
+            raise ValueError(
+                f"W_dec shape {W_dec.shape} != expected ({d_sae}, {d_model}). "
+                f"If using a PyTorch nn.Linear checkpoint, W_dec may need transposing."
+            )
 
         threshold = _find("threshold", required=False)
         if threshold is None:
@@ -421,6 +428,100 @@ def encode_and_pool(
 
     logger.info(f"Encoded {note_vectors.shape[0]} notes → " f"shape {note_vectors.shape}")
     return note_vectors, note_meta
+
+
+def compute_diagnostic_metrics(
+    sae: JumpReLUSAE,
+    activations_dir: Path,
+    metadata: pd.DataFrame,
+    shard_filter: list[int] | None,
+    output_dir: Path,
+    chunk_size: int = 4096,
+) -> dict:
+    """Compute L0, explained variance, and dead latent fraction in a single pass.
+
+    Streams shards chunk-by-chunk (chunk_size tokens at a time) to bound peak RAM.
+    Requires sae.W_dec — use a SAE loaded via from_huggingface().
+
+    Args:
+        sae:             Loaded JumpReLUSAE with W_dec populated.
+        activations_dir: Directory with shard_NNNN.safetensors files.
+        metadata:        DataFrame from load_metadata().
+        shard_filter:    If set, only process these shard indices.
+        output_dir:      Where to write diagnostic_metrics.json.
+        chunk_size:      Tokens per forward pass (default 4096).
+
+    Returns:
+        Dict with keys: n_tokens, mean_l0, explained_variance,
+        dead_latent_frac, d_sae, d_model.
+    """
+    if shard_filter is not None:
+        metadata = metadata[metadata["shard"].isin(shard_filter)]
+
+    shards_to_process = sorted(metadata["shard"].unique())
+
+    n_tokens = 0
+    sum_x = np.zeros(sae.d_model, dtype=np.float64)
+    sum_x2 = np.zeros(sae.d_model, dtype=np.float64)
+    sum_resid = np.zeros(sae.d_model, dtype=np.float64)
+    sum_resid2 = np.zeros(sae.d_model, dtype=np.float64)
+    sum_l0: int = 0
+    ever_active = np.zeros(sae.d_sae, dtype=bool)
+
+    for shard_idx in shards_to_process:
+        shard_path = activations_dir / f"shard_{shard_idx:04d}.safetensors"
+        if not shard_path.exists():
+            logger.warning(f"Shard not found, skipping: {shard_path}")
+            continue
+
+        shard_data = load_safetensors(str(shard_path))
+        act_key = next(iter(shard_data))
+        acts = shard_data[act_key].astype(np.float32)  # [n_tok, d_model]
+        n_shard = acts.shape[0]
+
+        for start in range(0, n_shard, chunk_size):
+            x = acts[start : start + chunk_size]  # [chunk, d_model]
+            z = sae.encode(x)  # [chunk, d_sae]
+            x_hat = sae.decode(z)  # [chunk, d_model]
+            resid = x - x_hat  # [chunk, d_model]
+
+            n_tokens += x.shape[0]
+            sum_x += x.sum(axis=0).astype(np.float64)
+            sum_x2 += (x**2).sum(axis=0).astype(np.float64)
+            sum_resid += resid.sum(axis=0).astype(np.float64)
+            sum_resid2 += (resid**2).sum(axis=0).astype(np.float64)
+            sum_l0 += int((z > 0).sum())
+            ever_active |= (z > 0).any(axis=0)
+
+        logger.info(f"Diagnostic: shard {shard_idx} done ({n_shard} tokens)")
+
+    if n_tokens == 0:
+        raise RuntimeError("No tokens processed — check shard_filter and activations_dir.")
+
+    mean_x = sum_x / n_tokens
+    var_x = (sum_x2 / n_tokens) - mean_x**2
+    mean_resid = sum_resid / n_tokens
+    var_resid = (sum_resid2 / n_tokens) - mean_resid**2
+
+    total_var_x = float(var_x.sum())
+    total_var_resid = float(var_resid.sum())
+    ev = 1.0 - total_var_resid / total_var_x if total_var_x > 1e-12 else 0.0
+
+    metrics = {
+        "n_tokens": n_tokens,
+        "mean_l0": round(float(sum_l0 / n_tokens), 4),
+        "explained_variance": round(ev, 4),
+        "dead_latent_frac": round(float((~ever_active).sum()) / sae.d_sae, 4),
+        "d_sae": sae.d_sae,
+        "d_model": sae.d_model,
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / "diagnostic_metrics.json", "w") as f:
+        json.dump(metrics, f, indent=2)
+    logger.info(f"Diagnostic metrics: {metrics}")
+
+    return metrics
 
 
 # ---------------------------------------------------------------------------
@@ -811,12 +912,14 @@ def save_results(results: GroundingResults, output_dir: Path) -> None:
                 "max_abs_r": results.latent_max_abs_r[grounded_idx],
                 "n_associations": results.latent_n_associations[grounded_idx],
                 "top_code": [
-                    results.code_names[results.r_pb[i].argmax()]
+                    results.code_names[np.abs(results.r_pb[i]).argmax()]
                     if results.latent_n_associations[i] > 0
                     else "none"
                     for i in grounded_idx
                 ],
-                "top_code_r": [float(results.r_pb[i].max()) for i in grounded_idx],
+                "top_code_r": [
+                    float(results.r_pb[i][np.abs(results.r_pb[i]).argmax()]) for i in grounded_idx
+                ],
             }
         )
         latent_summary.sort_values("max_abs_r", ascending=False, inplace=True)
