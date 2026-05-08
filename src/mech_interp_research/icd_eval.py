@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -313,6 +314,7 @@ def encode_and_pool(
     topk: int = 10,
     shard_filter: list[int] | None = None,
     checkpoint_dir: str | Path | None = None,
+    on_shard_complete: Callable[[int], None] | None = None,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Encode all eval activations through SAE and pool to note level.
 
@@ -325,6 +327,13 @@ def encode_and_pool(
         shard_filter: If given, only process these shard indices.
         checkpoint_dir: If set, save per-shard results here and skip shards
             whose checkpoint files already exist (enables resume).
+        on_shard_complete: Optional callback invoked with the shard index
+            after a shard's checkpoint files are atomically written to
+            ``checkpoint_dir``. The Modal entrypoints pass
+            ``lambda _: artifacts_volume.commit()`` here so each shard is
+            durably synced to the remote volume before the next starts —
+            otherwise a hard container crash, OOM, or network partition
+            would lose every shard written since the last commit.
 
     Returns:
         note_vectors: [num_notes, d_sae] note-level SAE activations.
@@ -442,6 +451,9 @@ def encode_and_pool(
                     f.write(json.dumps(row) + "\n")
             np.save(ckpt_dir / f"shard_{shard_idx:04d}_vectors.npy", np.stack(shard_vectors))
             os.replace(meta_tmp, meta_path)
+
+            if on_shard_complete is not None:
+                on_shard_complete(int(shard_idx))
 
     note_vectors = np.stack(all_vectors, axis=0)  # [num_notes, d_sae]
     note_meta = pd.DataFrame(all_meta_rows).reset_index(drop=True)
@@ -1000,12 +1012,15 @@ def run_icd_eval(
     join_key: str = "admission_id",
     icd_col_prefix: str = "icd9_",
     checkpoint_dir: str | Path | None = None,
+    on_shard_complete: Callable[[int], None] | None = None,
 ) -> GroundingResults:
     """Run the full ICD-9 clinical grounding evaluation.
 
     This is the main entry point. Call it from a script or notebook.
     checkpoint_dir: directory for per-shard encode checkpoints; defaults to
         output_dir/shard_ckpt so resume works automatically on re-run.
+    on_shard_complete: forwarded to encode_and_pool — see its docstring. The
+        Modal entrypoints pass ``lambda _: artifacts_volume.commit()`` here.
     """
     activations_dir = Path(activations_dir)
     icd_csv_path = Path(icd_csv_path)
@@ -1039,6 +1054,7 @@ def run_icd_eval(
         topk=topk,
         shard_filter=shard_filter,
         checkpoint_dir=checkpoint_dir,
+        on_shard_complete=on_shard_complete,
     )
 
     # Step 4: Align ICD labels

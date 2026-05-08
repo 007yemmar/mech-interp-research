@@ -8,7 +8,7 @@
 # --- GemmaScope HuggingFace coordinates ------------------------------------
 hf_repo_id: google/gemma-scope-2b-pt-res
 # Verify this path against: https://huggingface.co/google/gemma-scope-2b-pt-res/tree/main
-hf_filename: layer_16/width_16k/average_l0_71/params.npz
+hf_filename: layer_16/width_16k/average_l0_42/params.npz
 
 # --- paths -----------------------------------------------------------------
 # Raw (non-centered) activation shards on sae-artifacts volume

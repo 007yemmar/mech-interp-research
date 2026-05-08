@@ -70,8 +70,14 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
 
     # Step 3: Diagnostic metrics on eval shards only.
     # Step 4: Full ICD grounding pipeline over all shards.
-    # Commit in finally so shard checkpoints are saved even on partial failure.
+    # Per-shard commit during ICD encode bounds crash loss to ~1 shard. The
+    # finally-commit is the safety net for the diagnostic phase and the final
+    # grounding artefacts (correlation matrices, summary JSON, CSVs).
     output_dir = Path(config["output_dir"])
+
+    def _commit_shard(shard_idx: int) -> None:
+        artifacts_volume.commit()
+
     try:
         diag = compute_diagnostic_metrics(
             sae=sae,
@@ -81,8 +87,13 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
             output_dir=output_dir,
         )
         print(f"Diagnostic metrics:\n{json.dumps(diag, indent=2)}")
+        artifacts_volume.commit()
 
-        grounding = run_icd_eval(sae_checkpoint=sae, **config)
+        grounding = run_icd_eval(
+            sae_checkpoint=sae,
+            on_shard_complete=_commit_shard,
+            **config,
+        )
     finally:
         artifacts_volume.commit()
 
