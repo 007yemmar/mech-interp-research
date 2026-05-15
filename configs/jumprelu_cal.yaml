@@ -1,0 +1,51 @@
+# JumpReLU SAE calibration run — 3-shard subset (same data as vanilla sae_train_2k.yaml).
+# Purpose: find lambda_l0 that achieves L0 ≈ 35, matching the vanilla SAE target.
+# Expected training time on L4: ~15-20 min.
+#
+# Calibration procedure (watch the "L0" column in the printed log):
+#   Target L0: 25–45 is acceptable; 30–40 is ideal.
+#
+#   After the run ends, check the final printed L0 value:
+#     L0 > 60  → lambda_l0 is too low  — multiply by 2–3x and re-run
+#     L0 40–60 → slightly too low      — multiply by 1.5x and re-run
+#     L0 25–40 → good, proceed to jumprelu_50k.yaml with this lambda_l0
+#     L0 10–25 → slightly too high     — divide by 1.5x and re-run
+#     L0 < 10  → lambda_l0 is too high — divide by 3x and re-run
+#
+#   If L0 never moves from its initial value (~d_sae) after 200+ steps,
+#   the bandwidth is too small and gradients aren't reaching log_threshold.
+#   Try bandwidth: 0.05 (SAELens updated default).
+#
+# Dispatch command:
+#   modal run modal_app/train_jumprelu.py --config-file configs/jumprelu_cal.yaml
+
+activations_dir: /out/activations/google-gemma-2-2b_L16_20000notes_39c5801_20260423T172212Z_3shards_centered
+
+# Architecture — identical to vanilla SAE for a fair comparison
+d_in: 2304
+expansion_factor: 8          # d_sae = 18432
+
+# JumpReLU specific
+log_threshold_init: 2.3    # was -6.9 — starts θ ≈ 10, near target for L0≈35
+bandwidth: 0.5             # was 0.05 — scaled to match pre-activation scale ~3.42
+lambda_l0: 1.5          # restart calibration with bug fix applied
+lambda_l0_warmup_steps: 50   # ramp from 0 → lambda_l0 over first 50 steps (~4% of run)
+
+# Training — mirrors vanilla calibration settings exactly
+lr: 0.0002
+adam_beta1: 0.0
+train_batch_size_tokens: 4096
+n_epochs: 3
+lr_warmup_steps: 100         # short warmup matching vanilla calibration run
+
+# Output
+output_root: /out/saes
+run_id: null                 # auto-generated: jumprelu_d2304_e8_l02e+01_bw1e-03_<timestamp>
+
+# Monitoring
+log_every_n_steps: 100       # print L0, θ_mean, θ_std, ev every 100 steps
+save_every_n_steps: 2500
+wandb_project: null          # set to sae-mimic to log alongside vanilla run
+wandb_run_name: null
+
+seed: 42

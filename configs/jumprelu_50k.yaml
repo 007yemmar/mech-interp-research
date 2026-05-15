@@ -1,0 +1,61 @@
+# JumpReLU SAE training config — 20k note full run.
+# Purpose: production JumpReLU SAE on Gemma-2-2b L16 MIMIC-IV activations,
+#   trained head-to-head against the vanilla ReLU SAE baseline
+#   (configs/sae_train_50k.yaml → /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/).
+# Expected training time on A100-40GB: ~4-8 hours (3 epochs, ~50k steps total —
+#   matches the vanilla full run on the same activation shards).
+#
+# Prerequisites:
+#   1. Calibration run (configs/jumprelu_cal.yaml) complete with stable equilibrium
+#      L0 ≈ 25 at lambda_l0 = 1.5. The calibrated hyperparameters are carried
+#      in below verbatim; L0 is expected to drift modestly upward on the full
+#      dataset as more diverse features become useful.
+#
+# Dispatch command:
+#   MODAL_GPU=A100-40GB modal run modal_app/train_jumprelu.py \
+#     --config-file configs/jumprelu_50k.yaml
+
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+# Architecture — identical to the vanilla SAE for an apples-to-apples comparison
+d_in: 2304
+expansion_factor: 8          # d_sae = 18432
+
+# JumpReLU specific — values copied from jumprelu_cal.yaml after calibration
+# (see jumprelu_cal.yaml header for the L0-vs-lambda_l0 tuning table).
+lambda_l0: 25               # gives equilibrium L0 ≈ 25 on the calibration subset
+bandwidth: 0.5               # rectangular STE kernel half-width, scaled to σ ≈ 3.42
+log_threshold_init: 2.3      # θ₀ = exp(2.3) ≈ 10, near the calibrated equilibrium —
+                             # avoids the cold-start instability of θ₀ ≈ 0.001
+
+# Sparsity warmup — scaled up from the calibration value (50 steps over ~540)
+# to mirror the vanilla l1_warmup_steps: 3000 (~6% of the 50k-step budget).
+# Ramps lambda_l0 from 0 → 1.5 to prevent mass feature death at the start.
+lambda_l0_warmup_steps: 1000
+
+# Training — mirrors configs/sae_train_50k.yaml exactly
+lr: 0.0002
+adam_beta1: 0.0              # Gemma Scope / Anthropic practice: no momentum
+train_batch_size_tokens: 4096
+n_epochs: 3                  # ~50k steps total over the 3-shard 20k-note extraction
+lr_warmup_steps: 2000
+
+# NB: no resample_steps / dead_feature_threshold fields — JumpReLU's per-feature
+# learned thresholds adapt downward for dead features automatically, so explicit
+# dead-neuron resampling is unnecessary (Rajamanoharan et al. 2024, §3.2).
+
+# Output
+output_root: /out/saes
+run_id: null                 # auto-generated: jumprelu_d2304_e8_l0<λ>_bw<ε>_<timestamp>
+
+# Monitoring — cadences match the vanilla 50k run for directly comparable W&B traces
+log_every_n_steps: 100
+# 3000-step cadence (matches the printed log block) caps the worst-case work
+# lost on a mid-run crash to ~3000 steps. Each train_state.pt is ~360 MB
+# (Adam first + second moments at d_sae=18432, fp32), so ~17 checkpoints over
+# the full run fits comfortably on the Modal volume.
+save_every_n_steps: 3000
+wandb_project: sae-mimic     # log alongside the vanilla run for side-by-side curves
+wandb_run_name: null
+
+seed: 42
