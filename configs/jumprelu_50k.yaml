@@ -23,7 +23,7 @@ expansion_factor: 8          # d_sae = 18432
 
 # JumpReLU specific — values copied from jumprelu_cal.yaml after calibration
 # (see jumprelu_cal.yaml header for the L0-vs-lambda_l0 tuning table).
-lambda_l0: 25               # gives equilibrium L0 ≈ 25 on the calibration subset
+lambda_l0: 10               # gives equilibrium L0 ≈ 25 on the calibration subset
 bandwidth: 0.5               # rectangular STE kernel half-width, scaled to σ ≈ 3.42
 log_threshold_init: 2.3      # θ₀ = exp(2.3) ≈ 10, near the calibrated equilibrium —
                              # avoids the cold-start instability of θ₀ ≈ 0.001
