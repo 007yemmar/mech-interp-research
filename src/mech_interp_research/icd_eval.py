@@ -54,12 +54,21 @@ logger = logging.getLogger(__name__)
 class JumpReLUSAE:
     """Minimal JumpReLU SAE encoder (numpy-only, no torch dependency).
 
-    Encoding:
+    Two encoder conventions are supported via ``subtract_b_dec``:
+
+    subtract_b_dec=True  (default — our VanillaSAE / custom JumpReLU checkpoints):
         pre_acts = (x - b_dec) @ W_enc + b_enc
         z = pre_acts * (pre_acts > threshold)
 
-    Adjust weight key names in `from_checkpoint` if your safetensors
-    uses different naming conventions.
+    subtract_b_dec=False (GemmaScope and other externally-trained SAEs):
+        pre_acts = x @ W_enc + b_enc
+        z = pre_acts * (pre_acts > threshold)
+
+    GemmaScope SAEs (Lieberum et al. 2024) were trained without the b_dec
+    subtraction in the encoder.  Loading them with subtract_b_dec=True shifts
+    every pre-activation by −b_dec @ W_enc (mean ≈ −3.2, std ≈ 3.6 for the
+    16k width model), which corrupts feature selection and yields EV ≈ −6.
+    ``from_huggingface`` sets subtract_b_dec=False automatically.
     """
 
     # ClassVar so cls.WEIGHT_KEY_MAP is accessible from the classmethod.
@@ -81,6 +90,9 @@ class JumpReLUSAE:
     d_model: int
     d_sae: int
     W_dec: np.ndarray | None = None  # [d_sae, d_model]; optional — needed for decode()
+    subtract_b_dec: bool = (
+        True  # False for GemmaScope; True for our VanillaSAE/JumpReLU checkpoints
+    )
 
     @classmethod
     def from_checkpoint(cls, checkpoint_dir: str | Path) -> JumpReLUSAE:
@@ -161,11 +173,12 @@ class JumpReLUSAE:
         """Encode activations → SAE latents.
 
         Args:
-            x: [batch, d_model] centered activations (float32).
+            x: [batch, d_model] activations (float32).
         Returns:
             z: [batch, d_sae] sparse latent activations.
         """
-        pre_acts = (x - self.b_dec) @ self.W_enc + self.b_enc  # [batch, d_sae]
+        x_in = (x - self.b_dec) if self.subtract_b_dec else x
+        pre_acts = x_in @ self.W_enc + self.b_enc  # [batch, d_sae]
         z = pre_acts * (pre_acts > self.threshold)  # JumpReLU
         return z
 
@@ -255,6 +268,7 @@ class JumpReLUSAE:
             d_model=d_model,
             d_sae=d_sae,
             W_dec=W_dec,
+            subtract_b_dec=False,  # GemmaScope encoder: x @ W_enc + b_enc (no b_dec subtraction)
         )
 
 
@@ -469,19 +483,27 @@ def compute_diagnostic_metrics(
     shard_filter: list[int] | None,
     output_dir: Path,
     chunk_size: int = 4096,
+    on_shard_complete: Callable[[int], None] | None = None,
 ) -> dict:
     """Compute L0, explained variance, and dead latent fraction in a single pass.
 
     Streams shards chunk-by-chunk (chunk_size tokens at a time) to bound peak RAM.
     Requires sae.W_dec — use a SAE loaded via from_huggingface().
 
+    Checkpoints accumulator state to ``output_dir/diag_ckpt.npz`` after each
+    shard.  On re-run, already-processed shards are skipped automatically.
+    The checkpoint is removed once ``diagnostic_metrics.json`` is written.
+
     Args:
-        sae:             Loaded JumpReLUSAE with W_dec populated.
-        activations_dir: Directory with shard_NNNN.safetensors files.
-        metadata:        DataFrame from load_metadata().
-        shard_filter:    If set, only process these shard indices.
-        output_dir:      Where to write diagnostic_metrics.json.
-        chunk_size:      Tokens per forward pass (default 4096).
+        sae:               Loaded JumpReLUSAE with W_dec populated.
+        activations_dir:   Directory with shard_NNNN.safetensors files.
+        metadata:          DataFrame from load_metadata().
+        shard_filter:      If set, only process these shard indices.
+        output_dir:        Where to write diagnostic_metrics.json.
+        chunk_size:        Tokens per forward pass (default 4096).
+        on_shard_complete: Optional callback after each shard checkpoint is
+            written.  The Modal entrypoint passes
+            ``lambda _: artifacts_volume.commit()`` here.
 
     Returns:
         Dict with keys: n_tokens, mean_l0, explained_variance,
@@ -505,8 +527,31 @@ def compute_diagnostic_metrics(
     sum_resid2 = np.zeros(sae.d_model, dtype=np.float64)
     sum_l0: int = 0
     ever_active = np.zeros(sae.d_sae, dtype=bool)
+    done_shards: set[int] = set()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = output_dir / "diag_ckpt.npz"
+
+    if ckpt_path.exists():
+        ckpt = np.load(ckpt_path, allow_pickle=False)
+        n_tokens = int(ckpt["n_tokens"])
+        sum_x = ckpt["sum_x"]
+        sum_x2 = ckpt["sum_x2"]
+        sum_resid = ckpt["sum_resid"]
+        sum_resid2 = ckpt["sum_resid2"]
+        sum_l0 = int(ckpt["sum_l0"])
+        ever_active = ckpt["ever_active"].astype(bool)
+        done_shards = set(ckpt["done_shards"].tolist())
+        logger.info(
+            f"Diagnostic checkpoint: resumed from {len(done_shards)} shards "
+            f"({n_tokens} tokens already processed)"
+        )
 
     for shard_idx in shards_to_process:
+        if shard_idx in done_shards:
+            logger.info(f"Diagnostic: shard {shard_idx} skipping (checkpoint exists)")
+            continue
+
         shard_path = activations_dir / f"shard_{shard_idx:04d}.safetensors"
         if not shard_path.exists():
             logger.warning(f"Shard not found, skipping: {shard_path}")
@@ -531,6 +576,26 @@ def compute_diagnostic_metrics(
             sum_l0 += int((z > 0).sum())
             ever_active |= (z > 0).any(axis=0)
 
+        done_shards.add(shard_idx)
+
+        ckpt_tmp = ckpt_path.parent / "diag_ckpt_tmp"
+        np.savez(
+            ckpt_tmp,
+            n_tokens=np.array(n_tokens),
+            sum_x=sum_x,
+            sum_x2=sum_x2,
+            sum_resid=sum_resid,
+            sum_resid2=sum_resid2,
+            sum_l0=np.array(sum_l0),
+            ever_active=ever_active,
+            done_shards=np.array(sorted(done_shards)),
+        )
+        # np.savez appends .npz to the path
+        os.replace(str(ckpt_tmp) + ".npz", ckpt_path)
+
+        if on_shard_complete is not None:
+            on_shard_complete(int(shard_idx))
+
         logger.info(f"Diagnostic: shard {shard_idx} done ({n_shard} tokens)")
 
     if n_tokens == 0:
@@ -554,9 +619,10 @@ def compute_diagnostic_metrics(
         "d_model": sae.d_model,
     }
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     with open(output_dir / "diagnostic_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
+    if ckpt_path.exists():
+        ckpt_path.unlink()
     logger.info(f"Diagnostic metrics: {metrics}")
 
     return metrics
@@ -574,6 +640,7 @@ def load_and_align_icd_labels(
     max_codes: int = 50,
     icd_col_prefix: str = "icd9_",
     join_key: str = "admission_id",
+    min_notes: int = 100,
 ) -> tuple[np.ndarray, list[str], pd.DataFrame]:
     """Load ICD binary labels and align with note-level SAE vectors.
 
@@ -584,6 +651,9 @@ def load_and_align_icd_labels(
         max_codes:        Keep at most this many codes (by frequency).
         icd_col_prefix:   Column name prefix for ICD indicator columns.
         join_key:         Column to join metadata with ICD labels.
+        min_notes:        Minimum matched notes required. Raises RuntimeError
+            if the join produces fewer matches (prevents meaningless
+            correlations on tiny samples).
 
     Returns:
         icd_matrix:   [num_matched_notes, num_codes] binary int8 array.
@@ -593,8 +663,12 @@ def load_and_align_icd_labels(
     icd_df = pd.read_csv(icd_csv_path)
     logger.info(f"Loaded ICD labels: {len(icd_df)} rows from {icd_csv_path}")
 
-    # Identify ICD columns
-    icd_cols = [c for c in icd_df.columns if c.startswith(icd_col_prefix)]
+    # Identify ICD binary indicator columns (skip non-numeric like icd9_codes_list)
+    icd_cols = [
+        c
+        for c in icd_df.columns
+        if c.startswith(icd_col_prefix) and pd.api.types.is_numeric_dtype(icd_df[c])
+    ]
     if not icd_cols:
         raise ValueError(
             f"No columns with prefix '{icd_col_prefix}' found in {icd_csv_path}. "
@@ -627,6 +701,15 @@ def load_and_align_icd_labels(
         raise RuntimeError(
             f"Zero notes matched on '{join_key}'. Check that note metadata "
             f"and ICD CSV use the same ID format/type."
+        )
+
+    if n_after < min_notes:
+        raise RuntimeError(
+            f"Only {n_after} notes matched on '{join_key}' (minimum {min_notes}). "
+            f"ICD CSV has {icd_df[join_key].nunique()} unique IDs vs "
+            f"{note_meta[join_key].nunique()} in note metadata. "
+            f"Check that the ICD CSV covers the same population as the "
+            f"extracted activations (e.g. sample_50k.csv, not train.csv)."
         )
 
     # Filter by prevalence
@@ -967,7 +1050,358 @@ def save_results(results: GroundingResults, output_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7.  Orchestrator — full pipeline
+# 7.  Post-hoc analysis helpers
+# ---------------------------------------------------------------------------
+
+
+def reassemble_note_vectors(
+    checkpoint_dir: str | Path,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Reload note-level SAE vectors from per-shard encode checkpoints.
+
+    Loads shard_NNNN_vectors.npy and shard_NNNN_meta.jsonl files written
+    by encode_and_pool, concatenates them in shard order.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    all_vectors: list[np.ndarray] = []
+    all_meta: list[dict] = []
+
+    for vec_file in sorted(checkpoint_dir.glob("shard_*_vectors.npy")):
+        shard_num = int(vec_file.stem.split("_")[1])
+        meta_file = checkpoint_dir / f"shard_{shard_num:04d}_meta.jsonl"
+        if not meta_file.exists():
+            logger.warning(f"Missing metadata for {vec_file.name}, skipping")
+            continue
+
+        vecs = np.load(vec_file)
+        with open(meta_file) as f:
+            meta_rows = [json.loads(line) for line in f if line.strip()]
+
+        if vecs.shape[0] != len(meta_rows):
+            logger.warning(
+                f"Shard {shard_num}: vectors={vecs.shape[0]} != meta={len(meta_rows)}, skipping"
+            )
+            continue
+
+        all_vectors.append(vecs)
+        all_meta.extend(meta_rows)
+
+    if not all_vectors:
+        raise RuntimeError(f"No valid shard checkpoints in {checkpoint_dir}")
+
+    note_vectors = np.concatenate(all_vectors, axis=0)
+    note_meta = pd.DataFrame(all_meta).reset_index(drop=True)
+    logger.info(f"Reassembled {note_vectors.shape[0]} notes from {len(all_vectors)} shards")
+    return note_vectors, note_meta
+
+
+def load_saved_correlations(output_dir: str | Path) -> dict:
+    """Load correlation matrices and code names from a previous eval run."""
+    output_dir = Path(output_dir)
+
+    data = np.load(output_dir / "correlation_matrices.npz")
+    r_pb = data["r_pb"]
+    p_adjusted = data["p_adjusted"]
+    significant = data["significant"].astype(bool)
+
+    with open(output_dir / "code_names.json") as f:
+        code_names = json.load(f)
+
+    with open(output_dir / "grounding_summary.json") as f:
+        summary = json.load(f)
+
+    return {
+        "r_pb": r_pb,
+        "p_adjusted": p_adjusted,
+        "significant": significant,
+        "code_names": code_names,
+        "n_notes": summary["n_notes"],
+    }
+
+
+def compute_partial_point_biserial(
+    X: np.ndarray,
+    Y: np.ndarray,
+    confound: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Point-biserial correlation after residualizing X on confound(s).
+
+    Removes the linear effect of ``confound`` from each column of X via OLS,
+    then computes point-biserial between the residuals and binary Y.  P-values
+    use df = N - 2 - C (C = number of confound columns).
+
+    Args:
+        X: [N, D] continuous matrix (note-level SAE activations).
+        Y: [N, K] binary matrix (ICD indicators).
+        confound: [N] or [N, C] confound variable(s) to partial out.
+
+    Returns:
+        r_partial: [D, K] partial correlation matrix.
+        p_vals:    [D, K] two-tailed p-values.
+    """
+    N = X.shape[0]
+    X64 = X.astype(np.float64)
+    confound = np.asarray(confound, dtype=np.float64)
+    if confound.ndim == 1:
+        confound = confound[:, None]
+    n_confounds = confound.shape[1]
+
+    Z = np.column_stack([np.ones(N), confound])
+    beta, _, _, _ = np.linalg.lstsq(Z, X64, rcond=None)
+    X_resid = X64 - Z @ beta
+
+    r_partial, _ = compute_point_biserial_vectorised(X_resid, Y)
+    r_partial = r_partial.astype(np.float64)
+
+    df = N - 2 - n_confounds
+    if df < 1:
+        raise ValueError(f"Not enough observations: N={N}, confounds={n_confounds}, df={df}")
+    r_sq = np.clip(r_partial**2, 0, 1 - 1e-12)
+    t_stat = r_partial * np.sqrt(df / (1 - r_sq))
+    p_vals = 2 * scipy_stats.t.sf(np.abs(t_stat), df=df)
+    p_vals = np.clip(p_vals, 1e-300, 1.0)
+
+    X_resid_std = X_resid.std(axis=0)
+    zero_mask = X_resid_std < 1e-12
+    r_partial[zero_mask, :] = 0.0
+    p_vals[zero_mask, :] = 1.0
+
+    return r_partial.astype(np.float32), p_vals
+
+
+def compute_monospecificity(
+    r_pb: np.ndarray,
+    significant: np.ndarray,
+    thresholds: list[float],
+) -> list[dict]:
+    """Count per-latent code associations at various |r| thresholds.
+
+    Returns one dict per threshold with grounded/mono/oligo/poly counts
+    and a histogram of associations-per-latent.
+    """
+    abs_r = np.abs(r_pb)
+    d_sae = r_pb.shape[0]
+    results = []
+
+    for thresh in thresholds:
+        mask = significant & (abs_r > thresh)
+        n_assoc = mask.sum(axis=1)  # [d_sae]
+
+        n_grounded = int((n_assoc >= 1).sum())
+        n_mono = int((n_assoc == 1).sum())
+        n_oligo = int(((n_assoc >= 2) & (n_assoc <= 3)).sum())
+        n_poly = int((n_assoc >= 4).sum())
+
+        max_assoc = int(n_assoc.max()) if n_grounded > 0 else 0
+        histogram: dict[str, int] = {}
+        for n in range(max(max_assoc + 1, 1)):
+            count = int((n_assoc == n).sum())
+            if count > 0:
+                histogram[str(n)] = count
+        if max_assoc >= 20:
+            histogram["20+"] = int((n_assoc >= 20).sum())
+
+        results.append(
+            {
+                "threshold": thresh,
+                "n_grounded": n_grounded,
+                "frac_grounded": round(n_grounded / d_sae, 4),
+                "n_monospecific": n_mono,
+                "n_oligospecific": n_oligo,
+                "n_polyspecific": n_poly,
+                "frac_mono_of_grounded": round(n_mono / max(n_grounded, 1), 4),
+                "mean_codes_per_grounded": round(
+                    float(n_assoc[n_assoc > 0].mean()) if n_grounded > 0 else 0.0, 2
+                ),
+                "histogram": histogram,
+            }
+        )
+
+    return results
+
+
+def run_posthoc_analyses(
+    eval_output_dir: str | Path,
+    activations_dir: str | Path,
+    icd_csv_path: str | Path,
+    posthoc_output_dir: str | Path,
+    r_thresholds: list[float] | None = None,
+    checkpoint_dir: str | Path | None = None,
+    fdr_q: float = 0.05,
+    min_prevalence: float = 0.02,
+    max_codes: int = 50,
+    join_key: str = "admission_id",
+    icd_col_prefix: str = "icd9_",
+    min_notes: int = 100,
+) -> dict:
+    """Run post-hoc analyses on existing ICD eval output.
+
+    Three analyses on the saved correlation_matrices.npz:
+      1. Recompute grounding at multiple |r| thresholds
+      2. Partial correlation controlling for note length (n_tokens)
+      3. Monospecificity — code-association histogram at each threshold
+
+    The expensive shard-by-shard encoding is NOT re-run; note vectors are
+    reassembled from the per-shard checkpoints in checkpoint_dir.
+    """
+    if r_thresholds is None:
+        r_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5]
+
+    eval_output_dir = Path(eval_output_dir)
+    activations_dir = Path(activations_dir)
+    icd_csv_path = Path(icd_csv_path)
+    posthoc_output_dir = Path(posthoc_output_dir)
+    posthoc_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if checkpoint_dir is None:
+        checkpoint_dir = eval_output_dir / "shard_ckpt"
+    checkpoint_dir = Path(checkpoint_dir)
+
+    logger.info("=" * 60)
+    logger.info("Post-hoc ICD Grounding Analyses")
+    logger.info("=" * 60)
+
+    # ---- Load existing results ----
+    logger.info("Loading saved correlations...")
+    saved = load_saved_correlations(eval_output_dir)
+    r_pb = saved["r_pb"]
+    p_adjusted = saved["p_adjusted"]
+    significant = saved["significant"]
+    code_names = saved["code_names"]
+    n_notes = saved["n_notes"]
+
+    # ---- Analysis 1: threshold sweep ----
+    logger.info("Analysis 1: grounding at multiple |r| thresholds...")
+    threshold_summaries = []
+    for thresh in r_thresholds:
+        gr = compute_grounding(
+            r_pb=r_pb,
+            p_adjusted=p_adjusted,
+            significant=significant,
+            code_names=code_names,
+            n_notes=n_notes,
+            r_threshold=thresh,
+        )
+        sub = posthoc_output_dir / f"grounding_r{thresh}"
+        save_results(gr, sub)
+        threshold_summaries.append({"threshold": thresh, **gr.summary_dict()})
+        logger.info(
+            f"  r>{thresh}: {gr.grounded_latent_count} grounded " f"({gr.grounded_latent_frac:.1%})"
+        )
+
+    # ---- Analysis 2: monospecificity ----
+    logger.info("Analysis 2: monospecificity at each threshold...")
+    mono = compute_monospecificity(r_pb, significant, r_thresholds)
+    for row in mono:
+        logger.info(
+            f"  r>{row['threshold']}: {row['n_grounded']} grounded — "
+            f"{row['n_monospecific']} mono, {row['n_oligospecific']} oligo, "
+            f"{row['n_polyspecific']} poly"
+        )
+
+    # ---- Analysis 3: partial correlation (control for n_tokens) ----
+    logger.info("Analysis 3: partial correlation controlling for n_tokens...")
+    note_vectors, note_meta = reassemble_note_vectors(checkpoint_dir)
+    logger.info(f"Reassembled note vectors: {note_vectors.shape}")
+
+    icd_matrix, icd_code_names, matched_meta = load_and_align_icd_labels(
+        icd_csv_path=icd_csv_path,
+        note_meta=note_meta,
+        min_prevalence=min_prevalence,
+        max_codes=max_codes,
+        icd_col_prefix=icd_col_prefix,
+        join_key=join_key,
+        min_notes=min_notes,
+    )
+    X = _align_note_vectors_to_matched(note_vectors, note_meta, matched_meta)
+
+    if "n_tokens" in matched_meta.columns:
+        confound = matched_meta["n_tokens"].to_numpy(dtype=np.float64)
+    else:
+        confound = matched_meta["row_end"].to_numpy(dtype=np.float64) - matched_meta[
+            "row_start"
+        ].to_numpy(dtype=np.float64)
+    logger.info(
+        f"Confound n_tokens: mean={confound.mean():.1f}, "
+        f"std={confound.std():.1f}, range=[{confound.min():.0f}, {confound.max():.0f}]"
+    )
+
+    r_partial, p_partial = compute_partial_point_biserial(X, icd_matrix, confound)
+    logger.info(f"Partial correlation: max |r| = {np.abs(r_partial).max():.4f}")
+
+    sig_partial, padj_partial = apply_bh_correction(p_partial, q=fdr_q)
+
+    partial_dir = posthoc_output_dir / "partial"
+    for thresh in r_thresholds:
+        gr_partial = compute_grounding(
+            r_pb=r_partial,
+            p_adjusted=padj_partial,
+            significant=sig_partial,
+            code_names=icd_code_names,
+            n_notes=X.shape[0],
+            r_threshold=thresh,
+        )
+        save_results(gr_partial, partial_dir / f"grounding_r{thresh}")
+
+    gr_partial_default = compute_grounding(
+        r_pb=r_partial,
+        p_adjusted=padj_partial,
+        significant=sig_partial,
+        code_names=icd_code_names,
+        n_notes=X.shape[0],
+        r_threshold=r_thresholds[0],
+    )
+    np.savez_compressed(
+        partial_dir / "correlation_matrices.npz",
+        r_pb=r_partial,
+        p_adjusted=padj_partial,
+        significant=sig_partial.astype(np.uint8),
+    )
+    with open(partial_dir / "code_names.json", "w") as f:
+        json.dump(icd_code_names, f, indent=2)
+
+    mono_partial = compute_monospecificity(r_partial, sig_partial, r_thresholds)
+    logger.info("Partial-correlation monospecificity:")
+    for row in mono_partial:
+        logger.info(
+            f"  r>{row['threshold']}: {row['n_grounded']} grounded — "
+            f"{row['n_monospecific']} mono, {row['n_oligospecific']} oligo, "
+            f"{row['n_polyspecific']} poly"
+        )
+
+    # ---- Save combined summary ----
+    summary = {
+        "threshold_sweep": threshold_summaries,
+        "monospecificity": mono,
+        "partial_correlation_monospecificity": mono_partial,
+        "partial_correlation_summary": gr_partial_default.summary_dict(),
+        "confound": "n_tokens",
+        "r_thresholds": r_thresholds,
+    }
+    with open(posthoc_output_dir / "posthoc_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    logger.info(f"Saved posthoc_summary.json to {posthoc_output_dir}")
+
+    logger.info("=" * 60)
+    logger.info("POST-HOC SUMMARY")
+    logger.info("=" * 60)
+    for ts in threshold_summaries:
+        t = ts["threshold"]
+        m = next(r for r in mono if r["threshold"] == t)
+        mp = next(r for r in mono_partial if r["threshold"] == t)
+        logger.info(
+            f"  |r|>{t}: grounded={ts['grounded_latent_count']} "
+            f"(mono={m['n_monospecific']}) | "
+            f"partial: grounded={mp['n_grounded']} "
+            f"(mono={mp['n_monospecific']})"
+        )
+    logger.info("=" * 60)
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# 8.  Orchestrator — full pipeline
 # ---------------------------------------------------------------------------
 
 
@@ -1011,6 +1445,7 @@ def run_icd_eval(
     shard_filter: list[int] | None = None,
     join_key: str = "admission_id",
     icd_col_prefix: str = "icd9_",
+    min_notes: int = 100,
     checkpoint_dir: str | Path | None = None,
     on_shard_complete: Callable[[int], None] | None = None,
 ) -> GroundingResults:
@@ -1066,6 +1501,7 @@ def run_icd_eval(
         max_codes=max_codes,
         icd_col_prefix=icd_col_prefix,
         join_key=join_key,
+        min_notes=min_notes,
     )
 
     # Align note_vectors with matched notes by note_idx (always — never by

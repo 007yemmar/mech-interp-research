@@ -69,10 +69,7 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     eval_shards = all_shard_indices[-eval_n_shards:] if eval_n_shards > 0 else all_shard_indices
 
     # Step 3: Diagnostic metrics on eval shards only.
-    # Step 4: Full ICD grounding pipeline over all shards.
-    # Per-shard commit during ICD encode bounds crash loss to ~1 shard. The
-    # finally-commit is the safety net for the diagnostic phase and the final
-    # grounding artefacts (correlation matrices, summary JSON, CSVs).
+    # Step 4: ICD grounding pipeline on eval shards only.
     output_dir = Path(config["output_dir"])
 
     def _commit_shard(shard_idx: int) -> None:
@@ -85,10 +82,12 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
             metadata=metadata,
             shard_filter=eval_shards,
             output_dir=output_dir,
+            on_shard_complete=_commit_shard,
         )
         print(f"Diagnostic metrics:\n{json.dumps(diag, indent=2)}")
         artifacts_volume.commit()
 
+        config["shard_filter"] = eval_shards
         grounding = run_icd_eval(
             sae_checkpoint=sae,
             on_shard_complete=_commit_shard,
@@ -103,11 +102,12 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.local_entrypoint()
-def main(config_file: str) -> None:
+def main(config_file: str, detach: bool = False) -> None:
     """Load YAML config and dispatch to Modal.
 
     Usage:
         modal run modal_app/gemma_scope_eval.py --config-file configs/gemma_scope_eval.yaml
+        modal run modal_app/gemma_scope_eval.py --config-file configs/gemma_scope_eval.yaml --detach
     """
     import yaml
 
@@ -115,5 +115,12 @@ def main(config_file: str) -> None:
         config = yaml.safe_load(f)
 
     print(f"Dispatching GemmaScope eval: {config.get('hf_repo_id')}/{config.get('hf_filename')}")
-    result = run_gemma_scope_eval_remote.remote(config)
-    print(json.dumps(result, indent=2))
+
+    if detach:
+        call = run_gemma_scope_eval_remote.spawn(config)
+        print(f"Spawned: {call.object_id}")
+        print("Running in background. Track progress:")
+        print("  modal volume ls sae-artifacts icd_eval/gemma_scope_16k/")
+    else:
+        result = run_gemma_scope_eval_remote.remote(config)
+        print(json.dumps(result, indent=2))

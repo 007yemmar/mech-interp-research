@@ -14,7 +14,7 @@ sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
 
 # ICD binary label CSV on mimic-iv-raw volume.
 # train.csv already has admission_id + icd9_* one-hot columns.
-icd_csv_path: /data/train.csv
+icd_csv_path: /data/sample_50k.csv
 
 # Where to write results (sae-artifacts volume)
 output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
@@ -36,6 +36,10 @@ fdr_q: 0.05                 # Benjamini-Hochberg FDR level
 # Column used to join note metadata with ICD labels
 join_key: admission_id
 icd_col_prefix: "icd9_"
+
+# --- diagnostic settings ---------------------------------------------------
+# Diagnostic metrics use the last N shards (matches SAE training eval set split)
+eval_n_shards: 31
 
 # --- optional ------------------------------------------------------------
 # Restrict to specific shard indices (null = all shards)

@@ -37,6 +37,9 @@ modal run modal_app/icd_eval.py --config-file configs/icd_eval.yaml
 # Modal — GemmaScope SAE baseline eval (uses raw activations, no training needed)
 modal run modal_app/gemma_scope_eval.py --config-file configs/gemma_scope_eval.yaml
 
+# Modal — post-hoc analyses (threshold sweep, partial correlation, monospecificity)
+modal run modal_app/icd_eval_posthoc.py --config-file configs/icd_eval_posthoc.yaml
+
 # Inspect Modal volumes (paths are relative to volume root, no /out/ prefix)
 modal volume ls sae-artifacts activations/
 modal volume ls sae-artifacts saes/
@@ -62,6 +65,7 @@ modal_app/train_sae.py             # VanillaSAE training → checkpoints + train
     ↓
 modal_app/icd_eval.py              # ICD-9 clinical grounding eval → grounding_summary.json + artefacts
 modal_app/gemma_scope_eval.py      # GemmaScope baseline: L0/EV/dead-frac + ICD grounding on raw activations
+modal_app/icd_eval_posthoc.py     # Post-hoc: threshold sweep, partial-r (n_tokens confound), monospecificity
 ```
 
 All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sae-artifacts` holds every downstream artifact (activations, centered activations, SAE checkpoints).
@@ -80,7 +84,7 @@ All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sa
 | `sae_config.py` | `SAETrainingConfig` dataclass; `d_sae` is always `d_in × expansion_factor` (never set separately) |
 | `sae_data.py` | `ActivationsBuffer` — loads shards in shuffled order into a 1M-token RAM window, drains in `batch_size` chunks |
 | `sae_train.py` | `VanillaSAE` + `train_step` + `resample_dead_neurons` + `train` loop |
-| `icd_eval.py` | ICD-9 grounding pipeline: `JumpReLUSAE` (numpy-only encoder), `encode_and_pool`, vectorised point-biserial correlation, BH FDR correction, `run_icd_eval` orchestrator |
+| `icd_eval.py` | ICD-9 grounding pipeline: `JumpReLUSAE` (numpy-only encoder), `encode_and_pool`, vectorised point-biserial correlation, BH FDR correction, `run_icd_eval` orchestrator; post-hoc helpers: `reassemble_note_vectors`, `compute_partial_point_biserial`, `compute_monospecificity`, `run_posthoc_analyses` |
 
 ### `modal_app/` — Modal entrypoints
 
@@ -123,6 +127,13 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
     shard_ckpt/                           # per-shard encode checkpoints (resume support)
         shard_NNNN_vectors.npy            # [n_notes, d_sae] pooled vectors
         shard_NNNN_meta.jsonl
+    posthoc/                              # post-hoc analyses (icd_eval_posthoc.py)
+        posthoc_summary.json              # combined threshold sweep + monospecificity + partial-r
+        grounding_r0.1/ ... grounding_r0.5/  # full grounding artefacts at each threshold
+        partial/                          # partial correlation (controlling for n_tokens)
+            correlation_matrices.npz      # partial r_pb, p_adjusted, significant
+            grounding_r0.1/ ... grounding_r0.5/
+            code_names.json
 ```
 
 ### Data handling rules (MIMIC-IV / PHI)
@@ -153,3 +164,22 @@ Key operational notes:
 2. Target: L0 in **[20, 80]**. If L0 > 100: multiply `l1_coeff` by 2–4×. If L0 < 10: divide by 2–4×.
 3. Do not start the 50k run until L0 is in range on the 2k run.
 4. 50k full run requires `MODAL_GPU=A100-40GB` and W&B secret `wandb-token` (set `wandb_project: sae-mimic` in config).
+
+### ICD eval pitfalls
+
+- **ICD CSV must match the extraction population.** `icd_csv_path` must point at the same CSV the activations were extracted from (e.g. `sample_50k.csv`), not a different split. A wrong file silently produces a near-empty join. The `min_notes` guard (default 100) in `load_and_align_icd_labels` catches this.
+- **`icd9_codes_list` column**: the CSVs contain a semicolon-delimited string column alongside the binary indicators. `load_and_align_icd_labels` filters to numeric columns only — do not remove this filter.
+- **Polyspecificity from max-pooling**: with `pooling: max`, longer/sicker notes produce globally higher activation values, so latents tend to correlate with many codes simultaneously (acuity confound). Diagnostic levers: raise `r_threshold` (0.3–0.5), partial-correlate out `n_tokens`, or re-run with `pooling: mean`. Higher-threshold and partial-correlation analyses can be done cheaply on the existing `correlation_matrices.npz` without re-encoding shards.
+- **GemmaScope baseline must use the same pooling strategy** as the custom SAE eval for a fair comparison. Only change pooling if you re-run both.
+
+### Post-hoc analyses (icd_eval_posthoc)
+
+`run_posthoc_analyses` runs three cheap analyses on existing eval output (seconds, not hours):
+
+1. **Threshold sweep** — recomputes `compute_grounding` at each `r_threshold` in the list (default 0.1–0.5). Shows how grounded-latent counts drop as the bar rises.
+2. **Monospecificity** — at each threshold, counts how many grounded latents associate with exactly 1 code (monospecific), 2–3 codes (oligospecific), or 4+ (polyspecific). Key question: at `|r| > 0.5`, do surviving latents become monospecific?
+3. **Partial correlation** — residualizes note-level SAE activations on `n_tokens` (OLS) before computing point-biserial, removing the max-pooling length confound. Runs BH FDR correction and grounding at every threshold. Reassembles `note_vectors` from `shard_ckpt/` — no shard re-encoding.
+
+```bash
+modal run modal_app/icd_eval_posthoc.py --config-file configs/icd_eval_posthoc.yaml
+```

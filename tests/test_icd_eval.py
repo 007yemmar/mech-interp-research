@@ -70,6 +70,59 @@ def test_jumprelu_decode_correctness() -> None:
     np.testing.assert_allclose(x_hat, expected, rtol=1e-5)
 
 
+def test_subtract_b_dec_false_uses_gemma_scope_formula() -> None:
+    """subtract_b_dec=False must use x @ W_enc + b_enc (GemmaScope convention).
+
+    GemmaScope SAEs were trained without b_dec subtraction in the encoder.
+    Applying the default subtract_b_dec=True shifts every pre-activation by
+    -b_dec @ W_enc, corrupting feature selection (L0 3-4x too high) and
+    producing negative EV (~-6). This test ensures the two conventions are
+    distinct when b_dec is non-zero.
+    """
+    d_model, d_sae = 8, 16
+    rng = np.random.default_rng(99)
+    W_enc = rng.standard_normal((d_model, d_sae)).astype(np.float32)
+    b_enc = rng.standard_normal(d_sae).astype(np.float32)
+    b_dec = rng.standard_normal(d_model).astype(np.float32) * 5.0  # large non-zero b_dec
+    threshold = np.zeros(d_sae, dtype=np.float32)
+
+    sae_vanilla = JumpReLUSAE(
+        W_enc=W_enc,
+        b_enc=b_enc,
+        b_dec=b_dec,
+        threshold=threshold,
+        d_model=d_model,
+        d_sae=d_sae,
+        subtract_b_dec=True,
+    )
+    sae_gemma = JumpReLUSAE(
+        W_enc=W_enc,
+        b_enc=b_enc,
+        b_dec=b_dec,
+        threshold=threshold,
+        d_model=d_model,
+        d_sae=d_sae,
+        subtract_b_dec=False,
+    )
+
+    x = rng.standard_normal((20, d_model)).astype(np.float32)
+
+    z_vanilla = sae_vanilla.encode(x)
+    z_gemma = sae_gemma.encode(x)
+
+    # With non-zero b_dec the two formulas must differ.
+    assert not np.allclose(z_vanilla, z_gemma), "Formulas should differ when b_dec != 0"
+
+    # GemmaScope formula must exactly match x @ W_enc + b_enc.
+    expected = np.maximum(x @ W_enc + b_enc, 0)
+    np.testing.assert_allclose(
+        z_gemma,
+        expected,
+        rtol=1e-5,
+        err_msg="subtract_b_dec=False should compute x @ W_enc + b_enc",
+    )
+
+
 def test_compute_diagnostic_metrics_zero_sae(synthetic_run_dir: Path, tmp_path: Path) -> None:
     """Zero-weight SAE: L0=0, all features dead, EV=0."""
     from mech_interp_research.icd_eval import compute_diagnostic_metrics, load_metadata
@@ -99,6 +152,104 @@ def test_compute_diagnostic_metrics_zero_sae(synthetic_run_dir: Path, tmp_path: 
     assert result["dead_latent_frac"] == 1.0
     assert abs(result["explained_variance"]) < 1e-4
     assert (out_dir / "diagnostic_metrics.json").exists()
+
+
+def test_compute_diagnostic_metrics_resumes_from_checkpoint(
+    synthetic_run_dir: Path, tmp_path: Path
+) -> None:
+    """Diagnostic metrics resume correctly from a partial checkpoint."""
+    from mech_interp_research.icd_eval import compute_diagnostic_metrics, load_metadata
+
+    d_model, d_sae = 64, 32
+    rng = np.random.default_rng(5)
+    sae = JumpReLUSAE(
+        W_enc=rng.standard_normal((d_model, d_sae)).astype(np.float32),
+        b_enc=np.zeros(d_sae, dtype=np.float32),
+        b_dec=np.zeros(d_model, dtype=np.float32),
+        threshold=np.zeros(d_sae, dtype=np.float32),
+        d_model=d_model,
+        d_sae=d_sae,
+        W_dec=rng.standard_normal((d_sae, d_model)).astype(np.float32),
+    )
+    metadata = load_metadata(synthetic_run_dir)
+    out_dir = tmp_path / "diag_out"
+
+    completed_shards: list[int] = []
+    result_full = compute_diagnostic_metrics(
+        sae=sae,
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        shard_filter=None,
+        output_dir=out_dir,
+        on_shard_complete=lambda idx: completed_shards.append(idx),
+    )
+    assert len(completed_shards) == 2
+    assert not (out_dir / "diag_ckpt.npz").exists()
+
+    # Simulate a crash after shard 0 by manually building a checkpoint.
+    # We run shard 0 alone, then intercept the checkpoint before cleanup.
+    ckpt_resume = tmp_path / "diag_resume"
+    ckpt_resume.mkdir()
+
+    # Run only shard 0 — capture the checkpoint before it's cleaned up
+    # by injecting a callback that copies it.
+    import shutil
+
+    captured = {}
+
+    def capture_ckpt(shard_idx: int) -> None:
+        ckpt_src = tmp_path / "diag_partial" / "diag_ckpt.npz"
+        if ckpt_src.exists():
+            shutil.copy2(ckpt_src, ckpt_resume / "diag_ckpt.npz")
+            captured["done"] = True
+
+    partial_dir = tmp_path / "diag_partial"
+    compute_diagnostic_metrics(
+        sae=sae,
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        shard_filter=[0],
+        output_dir=partial_dir,
+        on_shard_complete=capture_ckpt,
+    )
+    assert captured.get("done"), "Callback should have captured the checkpoint"
+
+    # Now resume from the captured shard-0 checkpoint, processing all shards.
+    result_resumed = compute_diagnostic_metrics(
+        sae=sae,
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        shard_filter=None,
+        output_dir=ckpt_resume,
+    )
+
+    assert result_resumed["n_tokens"] == result_full["n_tokens"]
+    assert abs(result_resumed["mean_l0"] - result_full["mean_l0"]) < 1e-6
+    assert abs(result_resumed["explained_variance"] - result_full["explained_variance"]) < 1e-6
+    assert result_resumed["dead_latent_frac"] == result_full["dead_latent_frac"]
+    assert not (ckpt_resume / "diag_ckpt.npz").exists()
+
+
+def test_load_and_align_icd_labels_min_notes_guard(synthetic_run_dir: Path, tmp_path: Path) -> None:
+    """load_and_align_icd_labels raises when too few notes match."""
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_and_align_icd_labels, load_metadata
+
+    metadata = load_metadata(synthetic_run_dir)
+    # ICD CSV with only 2 matching note_idx values
+    icd_df = pd.DataFrame({"note_idx": [0, 1], "icd9_001": [1, 0]})
+    icd_csv = tmp_path / "labels.csv"
+    icd_df.to_csv(icd_csv, index=False)
+
+    with pytest.raises(RuntimeError, match="Only 2 notes matched"):
+        load_and_align_icd_labels(
+            icd_csv_path=icd_csv,
+            note_meta=metadata,
+            join_key="note_idx",
+            min_prevalence=0.0,
+            min_notes=100,
+        )
 
 
 def test_run_icd_eval_accepts_presupplied_sae(synthetic_run_dir: Path, tmp_path: Path) -> None:
@@ -137,6 +288,7 @@ def test_run_icd_eval_accepts_presupplied_sae(synthetic_run_dir: Path, tmp_path:
         output_dir=tmp_path / "icd_out",
         join_key="note_idx",
         min_prevalence=0.0,
+        min_notes=0,
     )
     assert results.n_notes == 5
     assert results.n_latents == d_sae
@@ -206,6 +358,7 @@ def test_run_icd_eval_aligns_correctly_when_notes_drop_at_merge(
         output_dir=tmp_path / "icd_out",
         join_key="note_idx",
         min_prevalence=0.0,
+        min_notes=0,
         fdr_q=1.0,  # keep all correlations regardless of significance
     )
     # n_notes is the post-merge count (4 of the 5 encoded matched).

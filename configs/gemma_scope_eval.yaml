@@ -15,7 +15,7 @@ hf_filename: layer_16/width_16k/average_l0_42/params.npz
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z
 
 # ICD binary label CSV on mimic-iv-raw volume
-icd_csv_path: /data/train.csv
+icd_csv_path: /data/sample_50k.csv
 
 # Output dir on sae-artifacts volume
 output_dir: /out/icd_eval/gemma_scope_16k
