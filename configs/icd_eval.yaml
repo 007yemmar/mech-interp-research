@@ -1,0 +1,48 @@
+# ICD-9 clinical grounding evaluation config.
+#
+# Run:
+#   modal run modal_app/icd_eval.py --config-file configs/icd_eval.yaml
+#
+# Fill in the three paths below before running.
+
+# --- paths ---------------------------------------------------------------
+# Centered activation shards to evaluate (sae-artifacts volume)
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+# Trained SAE checkpoint dir — best/ = best eval-EV checkpoint (EV=0.889)
+sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+
+# ICD binary label CSV on mimic-iv-raw volume.
+# train.csv already has admission_id + icd9_* one-hot columns.
+icd_csv_path: /data/sample_50k.csv
+
+# Where to write results (sae-artifacts volume)
+output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
+
+# --- eval settings -------------------------------------------------------
+# Token pooling strategy per note: max | mean | topk_mean
+pooling: max
+topk: 10                    # only used when pooling=topk_mean
+
+# ICD label filtering
+min_prevalence: 0.02        # drop codes appearing in < 2% of notes
+max_codes: 50               # cap at top-N codes by frequency
+
+# Grounding thresholds
+r_threshold: 0.1            # |r_pb| > this required to call a latent "grounded"
+fdr_q: 0.05                 # Benjamini-Hochberg FDR level
+
+# --- join key -----------------------------------------------------------
+# Column used to join note metadata with ICD labels
+join_key: admission_id
+icd_col_prefix: "icd9_"
+
+# --- diagnostic settings ---------------------------------------------------
+# Diagnostic metrics use the last N shards (matches SAE training eval set split)
+eval_n_shards: 31
+
+# --- optional ------------------------------------------------------------
+# Restrict to specific shard indices (null = all shards)
+shard_filter: null
+
+logging_level: INFO

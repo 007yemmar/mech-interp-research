@@ -1,0 +1,32 @@
+# Post-hoc ICD grounding analyses — JumpReLU SAE.
+#
+# Run after icd_eval_jumprelu_allshards.yaml completes (needs correlation_matrices.npz + shard_ckpt/).
+#
+# Run:
+#   modal run modal_app/icd_eval_posthoc.py --config-file configs/icd_eval_posthoc_jumprelu.yaml
+
+# --- paths ---------------------------------------------------------------
+eval_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+posthoc_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/posthoc
+
+# Per-shard encode checkpoints from the original run (auto-detected if null)
+checkpoint_dir: null
+
+# --- analysis settings (identical to vanilla posthoc) --------------------
+r_thresholds:
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  - 0.5
+
+fdr_q: 0.05
+min_prevalence: 0.02
+max_codes: 50
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+
+logging_level: INFO

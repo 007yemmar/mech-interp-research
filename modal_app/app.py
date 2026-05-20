@@ -20,6 +20,7 @@ image = (
         "tqdm>=4.66",
         "safetensors>=0.4",
         "pyyaml>=6.0",
+        "scikit-learn>=1.4",
         "sae-lens>=0.3",
         "wandb>=0.16",
     )
@@ -30,6 +31,7 @@ image = (
     # fails with ModuleNotFoundError.
     .add_local_python_source("mech_interp_research")
     .add_local_python_source("modal_app")
+    .add_local_file("configs/lexical_keywords.yaml", "/root/configs/lexical_keywords.yaml")
 )
 
 raw_volume = modal.Volume.from_name("mimic-iv-raw", create_if_missing=False)

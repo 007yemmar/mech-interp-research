@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import torch
 from safetensors.torch import load_file
@@ -59,6 +60,8 @@ class ActivationsBuffer:
         buffer_size_tokens: int = 1_000_000,
         batch_size: int = 4096,
         seed: int = 42,
+        split: Literal["train", "eval", "all"] = "all",
+        eval_n_shards: int = 0,
     ) -> None:
         self.centered_dir = Path(centered_dir)
         manifest = json.loads((self.centered_dir / "manifest.json").read_text())
@@ -74,6 +77,22 @@ class ActivationsBuffer:
         self.total_tokens: int = manifest["total_tokens"]
         self.buffer_size = buffer_size_tokens
         self.batch_size = batch_size
+        self.split = split
+        self.eval_n_shards = eval_n_shards
+        if split != "all" and not (0 <= eval_n_shards < self.n_shards):
+            raise ValueError(
+                f"eval_n_shards={eval_n_shards} invalid for "
+                f"n_shards={self.n_shards} with split={split}"
+            )
+
+        # Partition shard indices by split (deterministic — index-based).
+        all_indices = list(range(self.n_shards))
+        if split == "train":
+            self._split_indices: list[int] = all_indices[: self.n_shards - eval_n_shards]
+        elif split == "eval":
+            self._split_indices = all_indices[self.n_shards - eval_n_shards :]
+        else:
+            self._split_indices = all_indices
 
         # Persistent RNG: advances each epoch so ordering differs across epochs
         self._rng = torch.Generator()
@@ -82,15 +101,16 @@ class ActivationsBuffer:
         self._shard_queue: list[int] = []  # remaining shard indices for this epoch
         self._buffer: torch.Tensor | None = None  # float16, CPU
         self._buf_pos: int = 0
+        self.skipped_shards: int = 0  # incremented when _load_shard fails (Task 4)
 
         self._init_epoch()
 
     # ---------------------------------------------------------------- epoch control
 
     def _init_epoch(self) -> None:
-        """Shuffle shard order and reset buffer for a fresh epoch."""
-        perm = torch.randperm(self.n_shards, generator=self._rng)
-        self._shard_queue = perm.tolist()
+        """Shuffle within-split shard order and reset buffer for a fresh epoch."""
+        perm = torch.randperm(len(self._split_indices), generator=self._rng)
+        self._shard_queue = [self._split_indices[i] for i in perm.tolist()]
         self._buffer = None
         self._buf_pos = 0
         self._refill()
@@ -101,10 +121,25 @@ class ActivationsBuffer:
 
     # ---------------------------------------------------------------- buffer internals
 
-    def _load_shard(self, shard_idx: int) -> torch.Tensor:
-        """Load one shard from disk as float16."""
+    def _load_shard(self, shard_idx: int) -> torch.Tensor | None:
+        """Load one shard from disk as float16, or None if the shard is corrupt.
+
+        On failure (file missing, truncated, malformed safetensors), log a
+        warning, increment self.skipped_shards, return None. Caller in _refill
+        treats None as "skip and try next". The 5% rate cap is enforced there.
+        """
+        from safetensors import SafetensorError  # local import: avoid hard dep at module load
+
         path = self.centered_dir / f"shard_{shard_idx:04d}.safetensors"
-        return load_file(str(path))["activations"]  # float16, CPU
+        try:
+            return load_file(str(path))["activations"]
+        except (SafetensorError, OSError, ValueError, KeyError) as e:
+            print(
+                f"WARNING: failed to load {path.name} "
+                f"({type(e).__name__}: {e}); skipping shard {shard_idx}"
+            )
+            self.skipped_shards += 1
+            return None
 
     def _refill(self) -> None:
         """Load shards until buffer reaches buffer_size or shards run out.
@@ -112,7 +147,6 @@ class ActivationsBuffer:
         Any unconsumed rows from the previous buffer are prepended to the new
         data before shuffling, so no activations are dropped mid-epoch.
         """
-        # Carry over unconsumed rows from previous buffer
         parts: list[torch.Tensor] = []
         if self._buffer is not None and self._buf_pos < len(self._buffer):
             parts.append(self._buffer[self._buf_pos :])
@@ -122,8 +156,17 @@ class ActivationsBuffer:
         while loaded < self.buffer_size and self._shard_queue:
             idx = self._shard_queue.pop(0)
             chunk = self._load_shard(idx)
+            if chunk is None:
+                continue
             parts.append(chunk)
             loaded += len(chunk)
+
+        # Refuse to silently train on a corrupt corpus
+        if self.skipped_shards / max(len(self._split_indices), 1) > 0.05:
+            raise RuntimeError(
+                f"Skipped shards exceed 5% of split "
+                f"({self.skipped_shards}/{len(self._split_indices)})."
+            )
 
         if not parts:
             self._buffer = None
@@ -131,7 +174,7 @@ class ActivationsBuffer:
 
         combined = torch.cat(parts, dim=0)  # float16
         perm = torch.randperm(len(combined), generator=self._rng)
-        self._buffer = combined[perm]  # shuffled in-place, float16
+        self._buffer = combined[perm]
         self._buf_pos = 0
 
     # ---------------------------------------------------------------- iteration
@@ -151,3 +194,80 @@ class ActivationsBuffer:
         batch = self._buffer[self._buf_pos : self._buf_pos + self.batch_size]
         self._buf_pos += self.batch_size
         return batch.float()  # float16 → float32 here, before GPU transfer
+
+
+class EvalAggregator:
+    """Streaming aggregator for eval-pass metrics over an arbitrary number of batches.
+
+    Tracks running sums sufficient to compute MSE, L0, dead-feature fraction, and
+    explained variance without holding all activations in memory. Call .update()
+    once per eval batch and .finalize() once at the end.
+
+    EV is computed against the per-dim variance of x and (x - x_hat) accumulated
+    across the entire eval set (Welford-style would be more numerically robust;
+    we use the population-mean trick: var(x) = E[x^2] - E[x]^2).
+    """
+
+    def __init__(self, d_sae: int) -> None:
+        import torch
+
+        self.d_sae = d_sae
+        self._sum_mse: float = 0.0
+        self._sum_l0: float = 0.0
+        self._sum_x: torch.Tensor | None = None
+        self._sum_x_sq: torch.Tensor | None = None
+        self._sum_res: torch.Tensor | None = None
+        self._sum_res_sq: torch.Tensor | None = None
+        self._activation_counts = torch.zeros(d_sae)
+        self._n_tokens: int = 0
+
+    def update(self, x: torch.Tensor, x_hat: torch.Tensor, z: torch.Tensor) -> None:
+        import torch
+
+        x = x.detach().to(dtype=torch.float64, device="cpu")
+        x_hat = x_hat.detach().to(dtype=torch.float64, device="cpu")
+        z = z.detach().to(dtype=torch.float32, device="cpu")
+        res = x - x_hat
+
+        n = x.shape[0]
+        self._n_tokens += n
+        self._sum_mse += float(res.pow(2).sum().item())
+        self._sum_l0 += float((z > 0).float().sum().item())
+        self._activation_counts += (z > 0).float().sum(dim=0)
+
+        # Per-dim running sums for variance computation
+        if self._sum_x is None:
+            self._sum_x = x.sum(dim=0)
+            self._sum_x_sq = x.pow(2).sum(dim=0)
+            self._sum_res = res.sum(dim=0)
+            self._sum_res_sq = res.pow(2).sum(dim=0)
+        else:
+            self._sum_x += x.sum(dim=0)
+            self._sum_x_sq += x.pow(2).sum(dim=0)
+            self._sum_res += res.sum(dim=0)
+            self._sum_res_sq += res.pow(2).sum(dim=0)
+
+    def finalize(self) -> dict[str, float]:
+        if self._n_tokens == 0:
+            raise RuntimeError("EvalAggregator.finalize() called with no batches.")
+        n = self._n_tokens
+
+        # MSE per token (sum over d_in, mean over tokens), L0 per token
+        eval_mse = self._sum_mse / n
+        eval_l0 = self._sum_l0 / n
+
+        # Per-dim population variance: E[x^2] - E[x]^2
+        mean_x = self._sum_x / n
+        var_x = (self._sum_x_sq / n) - mean_x.pow(2)
+        mean_res = self._sum_res / n
+        var_res = (self._sum_res_sq / n) - mean_res.pow(2)
+
+        eval_ev = float(1.0 - var_res.sum() / (var_x.sum() + 1e-8))
+        eval_dead_frac = float((self._activation_counts == 0).float().mean().item())
+
+        return {
+            "eval/mse": float(eval_mse),
+            "eval/l0": float(eval_l0),
+            "eval/ev": eval_ev,
+            "eval/dead_frac": eval_dead_frac,
+        }

@@ -1,0 +1,42 @@
+# ICD-9 clinical grounding evaluation — JumpReLU SAE (bw=1.0 run).
+#
+# Head-to-head comparison with the vanilla ReLU SAE eval (configs/icd_eval.yaml).
+# All eval settings (pooling, thresholds, FDR) are kept identical for a fair comparison.
+#
+# Run:
+#   modal run modal_app/icd_eval.py --config-file configs/icd_eval_jumprelu.yaml
+
+# --- paths ---------------------------------------------------------------
+# Same centered activation shards as the vanilla eval
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+# JumpReLU SAE checkpoint — best EV from eval scan (EV=0.899, L0=43.5, dead=3.2%)
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+
+# ICD binary label CSV on mimic-iv-raw volume (same as vanilla eval)
+icd_csv_path: /data/sample_50k.csv
+
+# Separate output dir to avoid overwriting vanilla eval results
+output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+
+# --- eval settings (identical to vanilla for fair comparison) ------------
+pooling: max
+topk: 10
+
+min_prevalence: 0.02
+max_codes: 50
+
+r_threshold: 0.1
+fdr_q: 0.05
+
+# --- join key -----------------------------------------------------------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+
+# --- diagnostic settings ---------------------------------------------------
+eval_n_shards: 31
+
+# --- optional ------------------------------------------------------------
+shard_filter: null
+
+logging_level: INFO

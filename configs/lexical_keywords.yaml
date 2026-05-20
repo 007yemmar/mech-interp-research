@@ -1,0 +1,475 @@
+# Lexical keyword dictionary for ICD-9 clinical grounding baseline.
+#
+# Sources: ICD-9-CM descriptions, clinical abbreviations, common medications,
+# distinctive lab values / procedures. No UMLS dependency.
+#
+# Matching rules (implemented in lexical_baseline.py):
+#   - Default: case-insensitive substring match
+#   - Keywords ≤3 characters: word-boundary regex (\bKEYWORD\b) to avoid
+#     false positives in longer strings
+#
+# One entry per icd9_* column name from the eval. Codes not listed here are
+# skipped in the baseline comparison (reported as "no keywords").
+
+icd9_4019:
+  description: "Unspecified essential hypertension"
+  keywords:
+    - hypertension
+    - hypertensive
+    - HTN
+    - lisinopril
+    - amlodipine
+    - metoprolol
+    - losartan
+    - antihypertensive
+
+icd9_41401:
+  description: "Coronary atherosclerosis of native coronary artery"
+  keywords:
+    - coronary
+    - atherosclerosis
+    - CAD
+    - angina
+    - stent
+    - atorvastatin
+    - clopidogrel
+    - cardiac catheterization
+    - CABG
+
+icd9_42731:
+  description: "Atrial fibrillation"
+  keywords:
+    - atrial fibrillation
+    - afib
+    - a-fib
+    - warfarin
+    - coumadin
+    - anticoagulation
+    - cardioversion
+    - amiodarone
+    - INR
+
+icd9_4280:
+  description: "Congestive heart failure, unspecified"
+  keywords:
+    - heart failure
+    - CHF
+    - congestive
+    - cardiomyopathy
+    - ejection fraction
+    - furosemide
+    - lasix
+    - diuretic
+    - BNP
+
+icd9_25000:
+  description: "Diabetes mellitus type II without complications"
+  keywords:
+    - diabetes
+    - diabetic
+    - DM2
+    - metformin
+    - insulin
+    - glucose
+    - A1c
+    - hemoglobin a1c
+    - hyperglycemia
+
+icd9_2724:
+  description: "Other and unspecified hyperlipidemia"
+  keywords:
+    - hyperlipidemia
+    - cholesterol
+    - lipid
+    - statin
+    - atorvastatin
+    - simvastatin
+    - LDL
+    - triglyceride
+
+icd9_2449:
+  description: "Unspecified hypothyroidism"
+  keywords:
+    - hypothyroidism
+    - hypothyroid
+    - levothyroxine
+    - synthroid
+    - TSH
+    - thyroid
+    - myxedema
+
+icd9_5849:
+  description: "Acute kidney failure, unspecified"
+  keywords:
+    - acute kidney
+    - AKI
+    - acute renal failure
+    - creatinine
+    - oliguria
+    - renal replacement
+    - dialysis
+
+icd9_5856:
+  description: "End stage renal disease"
+  keywords:
+    - end stage renal
+    - ESRD
+    - dialysis
+    - hemodialysis
+    - creatinine
+    - fistula
+    - nephrology
+    - renal replacement
+    - peritoneal dialysis
+
+icd9_5990:
+  description: "Urinary tract infection, site not specified"
+  keywords:
+    - urinary tract infection
+    - UTI
+    - dysuria
+    - pyuria
+    - urine culture
+    - bacteriuria
+    - ciprofloxacin
+    - nitrofurantoin
+
+icd9_486:
+  description: "Pneumonia, organism unspecified"
+  keywords:
+    - pneumonia
+    - consolidation
+    - infiltrate
+    - sputum
+    - ceftriaxone
+    - azithromycin
+    - levofloxacin
+    - respiratory infection
+
+icd9_51881:
+  description: "Acute respiratory failure"
+  keywords:
+    - respiratory failure
+    - intubation
+    - ventilator
+    - mechanical ventilation
+    - hypoxia
+    - hypoxemic
+    - hypercapnic
+    - extubation
+
+icd9_5070:
+  description: "Pneumonitis due to food/vomitus (aspiration)"
+  keywords:
+    - aspiration
+    - aspiration pneumonia
+    - pneumonitis
+    - aspiration pneumonitis
+
+icd9_2762:
+  description: "Acidosis"
+  keywords:
+    - acidosis
+    - metabolic acidosis
+    - lactic acidosis
+    - lactate
+    - bicarbonate
+    - pH
+
+icd9_2761:
+  description: "Hyposmolality / hyponatremia"
+  keywords:
+    - hyponatremia
+    - sodium
+    - hyposmolality
+    - SIADH
+
+icd9_2800:
+  description: "Iron deficiency anemia"
+  keywords:
+    - iron deficiency
+    - anemia
+    - ferritin
+    - iron
+    - hemoglobin
+    - transfusion
+
+icd9_2851:
+  description: "Acute posthemorrhagic anemia"
+  keywords:
+    - hemorrhage
+    - bleeding
+    - blood loss
+    - transfusion
+    - hemoglobin
+    - anemia
+    - posthemorrhagic
+
+icd9_2859:
+  description: "Anemia, unspecified"
+  keywords:
+    - anemia
+    - hemoglobin
+    - hematocrit
+    - transfusion
+    - iron
+    - erythropoietin
+
+icd9_2875:
+  description: "Thrombocytopenia, unspecified"
+  keywords:
+    - thrombocytopenia
+    - platelet
+    - platelets
+    - PLT
+
+icd9_2930:
+  description: "Delirium due to conditions classified elsewhere"
+  keywords:
+    - delirium
+    - confusion
+    - agitation
+    - disoriented
+    - altered mental status
+    - CAM
+    - encephalopathy
+
+icd9_30000:
+  description: "Anxiety state, unspecified"
+  keywords:
+    - anxiety
+    - anxious
+    - lorazepam
+    - benzodiazepine
+    - ativan
+
+icd9_3051:
+  description: "Tobacco use disorder"
+  keywords:
+    - tobacco
+    - smoking
+    - smoker
+    - nicotine
+    - cigarette
+    - pack-year
+
+icd9_311:
+  description: "Depressive disorder, not elsewhere classified"
+  keywords:
+    - depression
+    - depressive
+    - depressed
+    - SSRI
+    - sertraline
+    - antidepressant
+
+icd9_32723:
+  description: "Obstructive sleep apnea"
+  keywords:
+    - sleep apnea
+    - OSA
+    - CPAP
+    - apnea-hypopnea
+    - obstructive sleep
+
+icd9_34830:
+  description: "Encephalopathy, unspecified"
+  keywords:
+    - encephalopathy
+    - altered mental status
+    - AMS
+    - metabolic encephalopathy
+    - confusion
+
+icd9_40390:
+  description: "Hypertensive chronic kidney disease, stage I-IV"
+  keywords:
+    - hypertensive kidney
+    - hypertensive renal
+    - CKD
+    - chronic kidney
+    - creatinine
+    - GFR
+
+icd9_40391:
+  description: "Hypertensive chronic kidney disease, stage V / ESRD"
+  keywords:
+    - hypertensive kidney
+    - ESRD
+    - CKD stage 5
+    - dialysis
+    - end stage renal
+
+icd9_412:
+  description: "Old myocardial infarction"
+  keywords:
+    - myocardial infarction
+    - MI
+    - heart attack
+    - troponin
+    - STEMI
+    - NSTEMI
+
+icd9_4148:
+  description: "Other forms of chronic ischemic heart disease"
+  keywords:
+    - ischemic heart
+    - ischemia
+    - coronary
+    - angina
+    - cardiac
+
+icd9_4168:
+  description: "Other chronic pulmonary heart diseases"
+  keywords:
+    - pulmonary hypertension
+    - cor pulmonale
+    - right heart failure
+    - pulmonary heart
+
+icd9_4241:
+  description: "Aortic valve disorders"
+  keywords:
+    - aortic valve
+    - aortic stenosis
+    - aortic regurgitation
+    - aortic insufficiency
+
+icd9_4439:
+  description: "Peripheral vascular disease, unspecified"
+  keywords:
+    - peripheral vascular
+    - PVD
+    - PAD
+    - claudication
+    - peripheral arterial
+
+icd9_496:
+  description: "Chronic airway obstruction, NEC"
+  keywords:
+    - COPD
+    - chronic obstructive
+    - emphysema
+    - bronchitis
+    - inhaler
+    - albuterol
+
+icd9_5119:
+  description: "Unspecified pleural effusion"
+  keywords:
+    - pleural effusion
+    - effusion
+    - thoracentesis
+    - pleural fluid
+    - pleurisy
+
+icd9_53081:
+  description: "Esophageal reflux"
+  keywords:
+    - reflux
+    - GERD
+    - esophageal reflux
+    - omeprazole
+    - pantoprazole
+    - proton pump
+
+icd9_5715:
+  description: "Cirrhosis of liver without alcohol"
+  keywords:
+    - cirrhosis
+    - hepatic
+    - liver disease
+    - portal hypertension
+    - ascites
+    - varices
+    - MELD
+
+icd9_5723:
+  description: "Portal hypertension"
+  keywords:
+    - portal hypertension
+    - varices
+    - ascites
+    - TIPS
+
+icd9_5781:
+  description: "Blood in stool / melena"
+  keywords:
+    - melena
+    - hematochezia
+    - GI bleed
+    - gastrointestinal bleed
+    - blood in stool
+    - hematemesis
+
+icd9_5845:
+  description: "Acute kidney failure with tubular necrosis"
+  keywords:
+    - acute tubular necrosis
+    - ATN
+    - acute kidney
+    - creatinine
+    - renal failure
+
+icd9_5859:
+  description: "Chronic kidney disease, unspecified"
+  keywords:
+    - chronic kidney
+    - CKD
+    - chronic renal
+    - creatinine
+    - GFR
+    - nephropathy
+
+icd9_E8788:
+  description: "Other specified surgical operations as cause of abnormal reaction"
+  keywords:
+    - surgical complication
+    - postoperative
+    - post-surgical
+    - post-op
+
+icd9_E8798:
+  description: "Other specified procedures as cause of abnormal reaction"
+  keywords:
+    - procedural complication
+    - post-procedure
+    - complication of
+
+icd9_99592:
+  description: "Severe sepsis"
+  keywords:
+    - sepsis
+    - septic
+    - septicemia
+    - severe sepsis
+    - bacteremia
+    - vasopressor
+    - norepinephrine
+
+icd9_99811:
+  description: "Hemorrhage complicating a procedure"
+  keywords:
+    - hemorrhage
+    - bleeding
+    - surgical bleeding
+    - postoperative hemorrhage
+    - blood loss
+
+icd9_V1582:
+  description: "Personal history of tobacco use"
+  keywords:
+    - tobacco
+    - smoking history
+    - former smoker
+    - ex-smoker
+    - nicotine
+    - pack-year
+
+icd9_V4581:
+  description: "Aortocoronary bypass status"
+  keywords:
+    - CABG
+    - bypass graft
+    - coronary bypass
+    - aortocoronary

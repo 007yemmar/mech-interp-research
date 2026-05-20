@@ -1,0 +1,35 @@
+# ICD-9 grounding evaluation — JumpReLU SAE, ALL shards.
+#
+# Continues the JumpReLU ICD eval on all 312 shards (matching vanilla eval)
+# with diagnostics skipped (already computed on eval shards).
+# Resumes from existing shard_ckpt (88/312 done).
+#
+# Run:
+#   modal run modal_app/icd_eval.py --config-file configs/icd_eval_jumprelu_allshards.yaml
+
+# --- paths ---------------------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+
+# --- shard selection -----------------------------------------------------
+# Diagnostics already done on eval shards — skip to avoid overwriting.
+skip_diagnostics: true
+eval_n_shards: 31
+
+# Use all shards for ICD grounding (0 = all). Matches vanilla eval (50k notes).
+grounding_n_shards: 0
+
+# --- eval settings (identical to vanilla for fair comparison) ------------
+pooling: max
+topk: 10
+min_prevalence: 0.02
+max_codes: 50
+r_threshold: 0.1
+fdr_q: 0.05
+join_key: admission_id
+icd_col_prefix: "icd9_"
+shard_filter: null
+
+logging_level: INFO

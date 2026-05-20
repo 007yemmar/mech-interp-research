@@ -1,47 +1,56 @@
-# SAE training config — 50k note full run.
-# Purpose: production SAE for MIMIC ICD correlation analysis.
-# Expected training time on A100-40GB: ~4-8 hours (3 epochs over ~100M tokens).
+# SAE training config — 50k note final run.
+# Purpose: production layer-16 Gemma-2-2B SAE for downstream MIMIC ICD work.
+# Expected wall on A100-40GB: 4–6 hr (~75k–113k steps depending on early-stop).
 #
-# Prerequisites:
-#   1. Complete the 2k toy run and confirm L0 is in [20, 80].
-#   2. Copy the calibrated l1_coeff from the 2k run here.
-#   3. Run: modal run modal_app/center.py --run-id <your_50k_extraction_run_id>
-#   4. Fill in activations_dir below.
+# Pre-flight (must pass):
+#   uv run pytest tests/
+#   modal run modal_app/train_sae.py --config-file configs/sae_train_2k.yaml   # toy
 #
-# Dispatch command:
-#   MODAL_GPU=A100-40GB modal run modal_app/train_sae.py \
+# First-time-only setup:
+#   modal secret create wandb-token WANDB_API_KEY=$WANDB_API_KEY
+#
+# Fire (detached so laptop can disconnect):
+#   MODAL_GPU=A100-40GB modal run --detach modal_app/train_sae.py \
 #     --config-file configs/sae_train_50k.yaml
 
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 
 # Architecture
 d_in: 2304
-expansion_factor: 8          # d_sae = 18432
+expansion_factor: 8           # d_sae = 18432
 
-# Training
-# l1_coeff derived from σ measurement: E(||x||)/sqrt(d_model) = 164.07/48 = 3.42
-# Formula: l1_coeff = l1_ref × σ × (L0_ref / L0_target) = 2 × 3.42 × (53/35) = 10.3
-# If 2k calibration shows L0 outside [30,40]: scale proportionally (e.g. L0=50 → 14, L0=25 → 7.5)
-l1_coeff: 10.0
-l1_warmup_steps: 3000        # ramp l1 0→10.0 over first 3k steps (~4% of run)
+# Training — l1_coeff=10 calibrated from wandb run 1qj0z5a6 (L0=46, EV=0.896)
+l1_coeff: 10
 lr: 0.0002
-adam_beta1: 0.0              # Gemma Scope / Anthropic practice: no momentum
 train_batch_size_tokens: 4096
-n_epochs: 3                  # ~300M tokens total at 3 passes over ~100M
+n_epochs: 3                   # hard cap; early-stop expected to trigger first
 lr_warmup_steps: 2000
+l1_warmup_steps: 3000         # linear ramp 0 → 10 over first 3000 steps
+
+# Adam — Anthropic best practice (β1=0 reduces dying features)
+adam_beta1: 0.0
+adam_beta2: 0.999
 
 # Dead-neuron resampling
-resample_steps: 5000         # 20M token window; revive dead features promptly
-dead_feature_threshold: 1.0e-6  # fired < once/million tokens → marginal, resample
+resample_steps: 5000
+dead_feature_threshold: 1.0e-6
+
+# Eval / early-stop (held out: last 31 of 312 shards = 9.94%, ~15.5M tokens)
+eval_n_shards: 31
+eval_every_n_steps: 2500
+early_stop_patience: 3        # 3 consecutive non-improving evals → stop
+
+# Resume (set to a step_NNNNNNNN/ path if recovering an interrupted run)
+resume_from: null
 
 # Output
 output_root: /out/saes
-run_id: null                 # auto-generated
+run_id: null                  # auto-generated
 
 # Monitoring
 log_every_n_steps: 100
-save_every_n_steps: 10000
-wandb_project: sae-mimic     # create Modal secret 'wandb-token' first
+save_every_n_steps: 1000      # 4M tokens between checkpoints (worst-case loss)
+wandb_project: sae-mimic
 wandb_run_name: null
 
 seed: 42

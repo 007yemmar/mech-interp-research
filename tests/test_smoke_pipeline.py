@@ -35,28 +35,29 @@ MEAN_OFFSET = 3.0  # ensures centering is non-trivial
 
 @pytest.fixture()
 def smoke_run_dir(tmp_path: Path) -> Path:
-    """Single-shard synthetic extraction run with a known non-zero mean."""
+    """Two-shard synthetic extraction run."""
     torch.manual_seed(99)
     run_dir = tmp_path / "smoke_extraction"
     run_dir.mkdir()
 
     true_mean = torch.full((D_MODEL,), MEAN_OFFSET)
-    acts = (torch.randn(N_TOKENS, D_MODEL) + true_mean).half()
-    save_file({"activations": acts}, str(run_dir / "shard_0000.safetensors"))
+    for i in range(2):
+        acts = (torch.randn(N_TOKENS // 2, D_MODEL) + true_mean).half()
+        save_file({"activations": acts}, str(run_dir / f"shard_{i:04d}.safetensors"))
 
     manifest = {
         "model_name": "test-gpt2",
         "layer": 4,
         "d_model": D_MODEL,
-        "tokens_per_shard": N_TOKENS,
-        "n_shards": 1,
+        "tokens_per_shard": N_TOKENS // 2,
+        "n_shards": 2,
         "total_tokens": N_TOKENS,
         "n_notes": 8,
         "run_id": "smoke_extraction",
         "centered": False,
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest))
-    (run_dir / "metadata.jsonl").write_text("")  # empty but file must exist
+    (run_dir / "metadata.jsonl").write_text("")
     return run_dir
 
 
@@ -87,15 +88,21 @@ def test_full_pipeline_smoke(smoke_run_dir: Path, tmp_path: Path) -> None:
     config = SAETrainingConfig(
         activations_dir=str(centered_dir),
         d_in=D_MODEL,
-        expansion_factor=4,  # 256 features
+        expansion_factor=4,
         l1_coeff=1e-3,
         lr=2e-4,
         train_batch_size_tokens=BATCH_SIZE,
-        n_epochs=2,  # two passes to ensure reset_epoch() path is exercised
+        n_epochs=2,
         lr_warmup_steps=5,
-        resample_steps=500,  # won't trigger in a small smoke run, but code path exists
+        l1_warmup_steps=5,
+        adam_beta1=0.0,
+        adam_beta2=0.999,
+        resample_steps=500,
         log_every_n_steps=20,
-        save_every_n_steps=10_000,  # won't trigger; we rely on final checkpoint
+        save_every_n_steps=10_000,
+        eval_n_shards=1,
+        eval_every_n_steps=4,
+        early_stop_patience=99,
         wandb_project=None,
         output_root=str(tmp_path / "saes"),
         seed=42,
@@ -162,3 +169,17 @@ def test_full_pipeline_smoke(smoke_run_dir: Path, tmp_path: Path) -> None:
     assert x_hat.shape == (16, D_MODEL)
     assert (z >= 0).all()  # ReLU output
     assert torch.isfinite(x_hat).all()
+
+    # ---- Step 6: verify eval-driven outputs ----
+    assert (output_dir / "best").exists()
+    assert (output_dir / "best" / "sae_weights.safetensors").exists()
+    assert (output_dir / "best" / "optimizer_state.pt").exists()
+    assert (output_dir / "best" / "training_state.json").exists()
+
+    js = json.loads((output_dir / "train_summary.json").read_text())
+    assert "best_eval_ev" in js
+    assert "stopped_reason" in js
+    assert "total_skipped_batches" in js
+    assert "total_skipped_shards" in js
+    assert js["total_skipped_batches"] == 0
+    assert js["total_skipped_shards"] == 0

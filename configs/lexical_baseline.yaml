@@ -1,0 +1,32 @@
+# Lexical control baseline config — VanillaSAE eval.
+#
+# Run:
+#   modal run modal_app/lexical_baseline.py --config-file configs/lexical_baseline.yaml
+#
+# Requires a completed icd_eval run (correlation_matrices.npz + shard_ckpt/).
+
+# --- paths ---------------------------------------------------------------
+eval_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
+
+icd_csv_path: /data/sample_50k.csv
+
+# Keyword dictionary (shipped into container image via app.py)
+keyword_dict_path: /root/configs/lexical_keywords.yaml
+
+# Output directory
+output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/lexical_baseline
+
+# Per-shard encode checkpoints (auto-detected if null)
+checkpoint_dir: null
+
+# --- settings ------------------------------------------------------------
+text_col: note_text
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+delta_r_threshold: 0.05
+fdr_q: 0.05
+
+logging_level: INFO

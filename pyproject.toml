@@ -12,6 +12,8 @@ dependencies = [
     "pyyaml>=6.0",
     "modal>=0.64",
     "sae-lens>=0.3",
+    "scikit-learn>=1.4",
+    "scipy>=1.13",
     "wandb>=0.16",
 ]
 
@@ -38,4 +40,8 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N"]
-ignore = ["E501"]  # line length handled by formatter
+ignore = [
+    "E501",   # line length handled by formatter
+    "N803",   # uppercase argument names (X, Y are standard math/ML notation)
+    "N806",   # uppercase variable names (W_enc, W_dec, X, Y, M1, M0, N are standard)
+]

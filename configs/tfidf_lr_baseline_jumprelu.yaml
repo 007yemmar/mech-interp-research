@@ -1,0 +1,41 @@
+# TF-IDF + Logistic Regression baseline — JumpReLU SAE eval.
+#
+# Run:
+#   modal run modal_app/tfidf_lr_baseline.py --config-file configs/tfidf_lr_baseline_jumprelu.yaml
+#
+# Requires a completed icd_eval run (correlation_matrices.npz + shard_ckpt/).
+
+# --- paths ---------------------------------------------------------------
+eval_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+
+icd_csv_path: /data/sample_50k.csv
+
+output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/posthoc/tfidf_lr_baseline
+
+# Per-shard encode checkpoints (auto-detected if null)
+checkpoint_dir: null
+
+# --- TF-IDF settings -----------------------------------------------------
+tfidf_max_features: 10000
+tfidf_ngram_range: [1, 2]
+tfidf_sublinear_tf: true
+
+# --- classification settings ----------------------------------------------
+cv_n_splits: 5
+lr_max_iter: 5000
+random_state: 42
+
+# --- comparison thresholds ------------------------------------------------
+delta_auc_threshold: 0.02
+delta_r_threshold: 0.05
+
+# --- settings (identical to other baselines for fair comparison) ----------
+text_col: note_text
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+fdr_q: 0.05
+
+logging_level: INFO

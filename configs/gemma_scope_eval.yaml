@@ -1,0 +1,38 @@
+# GemmaScope SAE baseline evaluation.
+#
+# Run:
+#   modal run modal_app/gemma_scope_eval.py --config-file configs/gemma_scope_eval.yaml
+#
+# Uses raw (non-centered) activations — GemmaScope was trained on raw residual stream.
+
+# --- GemmaScope HuggingFace coordinates ------------------------------------
+hf_repo_id: google/gemma-scope-2b-pt-res
+# Verify this path against: https://huggingface.co/google/gemma-scope-2b-pt-res/tree/main
+hf_filename: layer_16/width_16k/average_l0_42/params.npz
+
+# --- paths -----------------------------------------------------------------
+# Raw (non-centered) activation shards on sae-artifacts volume
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z
+
+# ICD binary label CSV on mimic-iv-raw volume
+icd_csv_path: /data/sample_50k.csv
+
+# Output dir on sae-artifacts volume
+output_dir: /out/icd_eval/gemma_scope_16k
+
+# --- diagnostic settings ---------------------------------------------------
+# Diagnostic metrics use the last N shards (matches SAE training eval set split)
+eval_n_shards: 31
+
+# --- ICD eval settings (identical to icd_eval.yaml) -----------------------
+pooling: max
+topk: 10
+min_prevalence: 0.02
+max_codes: 50
+r_threshold: 0.1
+fdr_q: 0.05
+join_key: admission_id
+icd_col_prefix: "icd9_"
+shard_filter: null
+
+logging_level: INFO
