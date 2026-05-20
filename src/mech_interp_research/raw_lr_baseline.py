@@ -10,11 +10,18 @@ the other baselines use, then compares head-to-head against a frozen
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
+from safetensors.numpy import load_file as load_safetensors
+
+from mech_interp_research.icd_eval import PoolingStrategy, _pool_note
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +143,146 @@ def _rename_compare_keys(comparison: list[dict]) -> list[dict]:
     return out
 
 
-def pool_raw_activations(*args: Any, **kwargs: Any) -> Any:
-    raise NotImplementedError
+def pool_raw_activations(
+    activations_dir: Path,
+    metadata: pd.DataFrame,
+    pooling: PoolingStrategy = "max",
+    topk: int = 10,
+    shard_filter: list[int] | None = None,
+    checkpoint_dir: str | Path | None = None,
+    on_shard_complete: Callable[[int], None] | None = None,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Pool raw centered token activations to note level.
+
+    Direct counterpart to ``icd_eval.encode_and_pool`` minus the SAE
+    forward pass: load each shard's float16 activations, cast to
+    float32, slice per note via ``row_start``/``row_end``, and apply
+    ``_pool_note(strategy=pooling)``. Per-shard checkpoints are written
+    in the same format ``encode_and_pool`` uses so
+    ``reassemble_note_vectors`` works unchanged.
+
+    Output dtype: float32. Resumable via ``checkpoint_dir``.
+    """
+    activations_dir = Path(activations_dir)
+    if shard_filter is not None:
+        metadata = metadata[metadata["shard"].isin(shard_filter)].copy()
+
+    ckpt_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
+
+    all_vectors: list[np.ndarray] = []
+    all_meta_rows: list[dict] = []
+    done_shards: set[int] = set()
+
+    if ckpt_dir is not None and ckpt_dir.exists():
+        for vec_file in sorted(ckpt_dir.glob("shard_*_vectors.npy")):
+            shard_num = int(vec_file.stem.split("_")[1])
+            meta_file = ckpt_dir / f"shard_{shard_num:04d}_meta.jsonl"
+            if not meta_file.exists():
+                continue
+            vecs = np.load(vec_file)
+            with open(meta_file) as f:
+                meta_rows = [json.loads(line) for line in f if line.strip()]
+            # Partial-write invariant: if vector and meta row counts
+            # disagree the checkpoint is half-written. Discard and
+            # re-encode the shard.
+            if vecs.shape[0] != len(meta_rows):
+                logger.warning(
+                    f"Checkpoint shard {shard_num}: vectors={vecs.shape[0]} "
+                    f"!= metadata rows={len(meta_rows)}. Discarding partial "
+                    f"checkpoint and re-encoding."
+                )
+                vec_file.unlink()
+                meta_file.unlink()
+                continue
+            all_vectors.extend(list(vecs))
+            all_meta_rows.extend(meta_rows)
+            done_shards.add(shard_num)
+        if done_shards:
+            logger.info(
+                f"Checkpoint: resumed from {len(done_shards)} shards "
+                f"({len(all_vectors)} notes already pooled)"
+            )
+
+    grouped = metadata.groupby("shard")
+
+    for shard_idx, shard_notes in grouped:
+        if shard_idx in done_shards:
+            logger.info(f"Shard {shard_idx}: skipping (checkpoint exists)")
+            continue
+
+        shard_path = activations_dir / f"shard_{shard_idx:04d}.safetensors"
+        if not shard_path.exists():
+            logger.warning(f"Shard file not found, skipping: {shard_path}")
+            continue
+
+        logger.info(f"Processing shard {shard_idx}: {len(shard_notes)} notes")
+        shard_data = load_safetensors(str(shard_path))
+        act_key = next(iter(shard_data))
+        shard_activations = shard_data[act_key].astype(np.float32)
+
+        shard_vectors: list[np.ndarray] = []
+        shard_meta: list[dict] = []
+
+        for _, note_row in shard_notes.iterrows():
+            row_start = int(note_row["row_start"])
+            row_end = int(note_row["row_end"])
+
+            note_acts = shard_activations[row_start:row_end]
+            if note_acts.shape[0] == 0:
+                logger.warning(
+                    f"Empty activation slice for note_idx={note_row['note_idx']}, "
+                    f"shard={shard_idx}, rows=[{row_start}:{row_end})"
+                )
+                continue
+
+            # Baseline 3: pool the raw centered activations directly.
+            # No SAE encode step (this is the only structural difference
+            # versus encode_and_pool).
+            note_vec = _pool_note(note_acts, strategy=pooling, topk=topk)
+            shard_vectors.append(note_vec.astype(np.float32))
+            shard_meta.append(
+                {
+                    k: (
+                        int(v)
+                        if isinstance(v, np.integer)
+                        else float(v)
+                        if isinstance(v, np.floating)
+                        else v
+                    )
+                    for k, v in note_row.items()
+                }
+            )
+
+        if not shard_vectors:
+            continue
+
+        all_vectors.extend(shard_vectors)
+        all_meta_rows.extend(shard_meta)
+
+        if ckpt_dir is not None:
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            # Atomic two-step write: meta written to .tmp first, vectors
+            # written next, meta renamed last. If interrupted, no
+            # .jsonl exists at the final path and resume re-encodes.
+            meta_path = ckpt_dir / f"shard_{shard_idx:04d}_meta.jsonl"
+            meta_tmp = meta_path.with_suffix(".jsonl.tmp")
+            with open(meta_tmp, "w") as f:
+                for row in shard_meta:
+                    f.write(json.dumps(row) + "\n")
+            np.save(
+                ckpt_dir / f"shard_{shard_idx:04d}_vectors.npy",
+                np.stack(shard_vectors),
+            )
+            os.replace(meta_tmp, meta_path)
+
+            if on_shard_complete is not None:
+                on_shard_complete(int(shard_idx))
+
+    note_vectors = np.stack(all_vectors, axis=0).astype(np.float32)
+    note_meta = pd.DataFrame(all_meta_rows).reset_index(drop=True)
+
+    logger.info(f"Pooled {note_vectors.shape[0]} notes → shape {note_vectors.shape}")
+    return note_vectors, note_meta
 
 
 def run_raw_lr_baseline(*args: Any, **kwargs: Any) -> Any:

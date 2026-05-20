@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 
@@ -211,3 +212,120 @@ def test_rename_compare_keys():
     # delta_auc_roc / code / None pass through
     assert out[0]["delta_auc_roc"] == 0.03
     assert out[1]["auc_pr_sae"] is None
+
+
+# ---------------------------------------------------------------------------
+# pool_raw_activations
+# ---------------------------------------------------------------------------
+
+
+def test_pool_raw_activations_shape_and_dtype(synthetic_run_dir, tmp_path):
+    """Pooled output has shape (n_notes, d_model) and is float32."""
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+    ckpt = tmp_path / "raw_shard_ckpt"
+
+    vecs, meta = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="max",
+        checkpoint_dir=ckpt,
+    )
+    assert vecs.shape == (5, 64)  # 5 notes, d_model=64 (per conftest)
+    assert vecs.dtype == np.float32
+    assert len(meta) == 5
+    assert "note_idx" in meta.columns
+
+
+def test_pool_raw_activations_pooling_strategies(synthetic_run_dir, tmp_path):
+    """max >= topk_mean >= mean elementwise (when all token-axis values are real-valued)."""
+    import numpy as np
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+
+    vecs_max, _ = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="max",
+        checkpoint_dir=tmp_path / "ck_max",
+    )
+    vecs_mean, _ = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="mean",
+        checkpoint_dir=tmp_path / "ck_mean",
+    )
+    vecs_topk, _ = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="topk_mean",
+        topk=5,
+        checkpoint_dir=tmp_path / "ck_topk",
+    )
+
+    assert vecs_max.shape == vecs_mean.shape == vecs_topk.shape
+    assert np.all(vecs_max >= vecs_topk - 1e-5)
+    assert np.all(vecs_topk >= vecs_mean - 1e-5)
+
+
+def test_pool_raw_activations_resume(synthetic_run_dir, tmp_path, caplog):
+    """Pre-existing checkpoint for one shard is reused; second shard re-runs."""
+    import logging
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+    ckpt = tmp_path / "raw_shard_ckpt"
+
+    # First pass: complete run.
+    pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        checkpoint_dir=ckpt,
+    )
+    # Delete shard 1's checkpoint, keep shard 0's.
+    (ckpt / "shard_0001_vectors.npy").unlink()
+    (ckpt / "shard_0001_meta.jsonl").unlink()
+
+    # Second pass: shard 0 must be skipped, shard 1 re-run.
+    with caplog.at_level(logging.INFO, logger="mech_interp_research.raw_lr_baseline"):
+        vecs, meta = pool_raw_activations(
+            activations_dir=synthetic_run_dir,
+            metadata=metadata,
+            checkpoint_dir=ckpt,
+        )
+    assert vecs.shape == (5, 64)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "skipping" in msgs.lower() or "resumed" in msgs.lower()
+
+
+def test_pool_raw_activations_partial_checkpoint(synthetic_run_dir, tmp_path):
+    """Mismatched .npy and .jsonl row counts -> checkpoint discarded + re-encode."""
+    import json
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+    ckpt = tmp_path / "raw_shard_ckpt"
+    ckpt.mkdir()
+
+    # Plant a corrupt checkpoint for shard 0: 1 vector row, 2 meta rows.
+    np.save(ckpt / "shard_0000_vectors.npy", np.zeros((1, 64), dtype=np.float32))
+    with open(ckpt / "shard_0000_meta.jsonl", "w") as f:
+        for i in range(2):
+            f.write(json.dumps({"note_idx": i, "shard": 0}) + "\n")
+
+    vecs, meta = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        checkpoint_dir=ckpt,
+    )
+    # Full re-encode of shard 0 produced 3 notes; shard 1 produced 2.
+    assert vecs.shape == (5, 64)
