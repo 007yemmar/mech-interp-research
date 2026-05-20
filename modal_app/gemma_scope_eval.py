@@ -42,9 +42,12 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     import logging
     from pathlib import Path
 
+    import numpy as np
+
     from mech_interp_research.icd_eval import (
         JumpReLUSAE,
         compute_diagnostic_metrics,
+        compute_domain_shift_analysis,
         load_metadata,
         run_icd_eval,
     )
@@ -57,6 +60,10 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     hf_repo_id = config.pop("hf_repo_id")
     hf_filename = config.pop("hf_filename")
     eval_n_shards = config.pop("eval_n_shards", 31)
+    skip_diagnostics = config.pop("skip_diagnostics", False)
+    grounding_n_shards = config.pop("grounding_n_shards", None)
+    clinical_mean_path = config.pop("clinical_mean_path", None)
+    domain_shift_n_shards = config.pop("domain_shift_n_shards", 5)
 
     # Step 1: Download GemmaScope weights from HuggingFace.
     # hf_hub_download reads HF_TOKEN from env automatically via Modal secret.
@@ -68,26 +75,63 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     all_shard_indices = sorted(metadata["shard"].unique())
     eval_shards = all_shard_indices[-eval_n_shards:] if eval_n_shards > 0 else all_shard_indices
 
-    # Step 3: Diagnostic metrics on eval shards only.
-    # Step 4: ICD grounding pipeline on eval shards only.
+    if grounding_n_shards is not None:
+        grounding_shards = (
+            all_shard_indices[-grounding_n_shards:] if grounding_n_shards > 0 else all_shard_indices
+        )
+    else:
+        grounding_shards = eval_shards
+
     output_dir = Path(config["output_dir"])
 
     def _commit_shard(shard_idx: int) -> None:
         artifacts_volume.commit()
 
+    diag: dict | None = None
     try:
-        diag = compute_diagnostic_metrics(
-            sae=sae,
-            activations_dir=activations_dir,
-            metadata=metadata,
-            shard_filter=eval_shards,
-            output_dir=output_dir,
-            on_shard_complete=_commit_shard,
-        )
-        print(f"Diagnostic metrics:\n{json.dumps(diag, indent=2)}")
-        artifacts_volume.commit()
+        if skip_diagnostics:
+            diag_path = output_dir / "diagnostic_metrics.json"
+            if diag_path.exists():
+                diag = json.loads(diag_path.read_text())
+                print(f"Skipping diagnostics (already exists):\n{json.dumps(diag, indent=2)}")
+            else:
+                print("skip_diagnostics=True but no diagnostic_metrics.json found; running anyway")
+                skip_diagnostics = False
 
-        config["shard_filter"] = eval_shards
+        if not skip_diagnostics:
+            diag = compute_diagnostic_metrics(
+                sae=sae,
+                activations_dir=activations_dir,
+                metadata=metadata,
+                shard_filter=eval_shards,
+                output_dir=output_dir,
+                on_shard_complete=_commit_shard,
+            )
+            print(f"Diagnostic metrics:\n{json.dumps(diag, indent=2)}")
+            artifacts_volume.commit()
+
+        # Domain shift analysis — compare clinical mean vs GemmaScope b_dec,
+        # compute re-centered EV variants to disentangle mean shift from
+        # feature mismatch. Runs on a small shard sample (fast).
+        domain_shift: dict | None = None
+        if clinical_mean_path is not None:
+            import torch
+
+            mean_tensor = torch.load(clinical_mean_path, weights_only=True)
+            clinical_mean_vec = mean_tensor.numpy().astype(np.float32)
+            domain_shift = compute_domain_shift_analysis(
+                sae=sae,
+                activations_dir=activations_dir,
+                metadata=metadata,
+                clinical_mean=clinical_mean_vec,
+                output_dir=output_dir,
+                shard_filter=eval_shards,
+                n_shards_sample=domain_shift_n_shards,
+            )
+            print(f"Domain shift analysis:\n{json.dumps(domain_shift, indent=2)}")
+            artifacts_volume.commit()
+
+        config["shard_filter"] = grounding_shards
         grounding = run_icd_eval(
             sae_checkpoint=sae,
             on_shard_complete=_commit_shard,
@@ -96,7 +140,9 @@ def run_gemma_scope_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     finally:
         artifacts_volume.commit()
 
-    result = {"diagnostic": diag, "grounding": grounding.summary_dict()}
+    result: dict[str, Any] = {"diagnostic": diag, "grounding": grounding.summary_dict()}
+    if domain_shift is not None:
+        result["domain_shift"] = domain_shift
     print(json.dumps(result, indent=2))
     return result
 

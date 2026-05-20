@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "modal>=0.64",
     "sae-lens>=0.3",
+    "scikit-learn>=1.4",
     "scipy>=1.13",
     "wandb>=0.16",
 ]

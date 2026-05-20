@@ -65,6 +65,8 @@ def run_icd_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     sae_checkpoint_path = config.pop("sae_checkpoint")
     eval_n_shards = config.pop("eval_n_shards", 31)
     diagnostics_only = config.pop("diagnostics_only", False)
+    skip_diagnostics = config.pop("skip_diagnostics", False)
+    grounding_n_shards = config.pop("grounding_n_shards", None)
 
     sae = JumpReLUSAE.from_checkpoint(sae_checkpoint_path)
 
@@ -73,27 +75,45 @@ def run_icd_eval_remote(config: dict[str, Any]) -> dict[str, Any]:
     all_shard_indices = sorted(metadata["shard"].unique())
     eval_shards = all_shard_indices[-eval_n_shards:] if eval_n_shards > 0 else all_shard_indices
 
+    if grounding_n_shards is not None:
+        grounding_shards = (
+            all_shard_indices[-grounding_n_shards:] if grounding_n_shards > 0 else all_shard_indices
+        )
+    else:
+        grounding_shards = eval_shards
+
     output_dir = Path(config["output_dir"])
 
     def _commit_shard(shard_idx: int) -> None:
         artifacts_volume.commit()
 
+    diag: dict | None = None
     try:
-        diag = compute_diagnostic_metrics(
-            sae=sae,
-            activations_dir=activations_dir,
-            metadata=metadata,
-            shard_filter=eval_shards,
-            output_dir=output_dir,
-            on_shard_complete=_commit_shard,
-        )
-        print(f"Diagnostic metrics:\n{json.dumps(diag, indent=2)}")
-        artifacts_volume.commit()
+        if skip_diagnostics:
+            diag_path = output_dir / "diagnostic_metrics.json"
+            if diag_path.exists():
+                diag = json.loads(diag_path.read_text())
+                print(f"Skipping diagnostics (already exists):\n{json.dumps(diag, indent=2)}")
+            else:
+                print("skip_diagnostics=True but no diagnostic_metrics.json found; running anyway")
+                skip_diagnostics = False
+
+        if not skip_diagnostics:
+            diag = compute_diagnostic_metrics(
+                sae=sae,
+                activations_dir=activations_dir,
+                metadata=metadata,
+                shard_filter=eval_shards,
+                output_dir=output_dir,
+                on_shard_complete=_commit_shard,
+            )
+            print(f"Diagnostic metrics:\n{json.dumps(diag, indent=2)}")
+            artifacts_volume.commit()
 
         if diagnostics_only:
             return {"diagnostic": diag}
 
-        config["shard_filter"] = eval_shards
+        config["shard_filter"] = grounding_shards
         grounding = run_icd_eval(
             sae_checkpoint=sae,
             on_shard_complete=_commit_shard,

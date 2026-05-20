@@ -628,6 +628,194 @@ def compute_diagnostic_metrics(
     return metrics
 
 
+def compute_domain_shift_analysis(
+    sae: JumpReLUSAE,
+    activations_dir: Path,
+    metadata: pd.DataFrame,
+    clinical_mean: np.ndarray,
+    output_dir: Path,
+    shard_filter: list[int] | None = None,
+    n_shards_sample: int = 5,
+    chunk_size: int = 4096,
+) -> dict:
+    """Diagnose domain shift between GemmaScope's training distribution and clinical data.
+
+    Runs three analyses on a sample of shards:
+      1. Mean comparison — clinical mean vs SAE's b_dec (norm, cosine, per-dim).
+      2. Scale comparison — clinical activation norms vs threshold distribution.
+      3. Re-centered EV — two variants to disentangle mean shift from feature mismatch:
+         a. mean-only fix: replace b_dec with clinical_mean in decode only.
+         b. full re-centering: center input before encode, use clinical_mean in decode.
+
+    If variant (a) recovers EV >> 0, the negative EV was primarily mean shift.
+    If both stay negative, GemmaScope's feature directions don't span clinical subspace.
+
+    Args:
+        sae:             Loaded GemmaScope SAE (subtract_b_dec=False, W_dec required).
+        activations_dir: Raw (non-centered) activation shards.
+        metadata:        DataFrame from load_metadata().
+        clinical_mean:   [d_model] float32 mean vector from centering step.
+        output_dir:      Where to write domain_shift_analysis.json.
+        shard_filter:    If set, sample from these shards only.
+        n_shards_sample: Number of shards to evaluate (default 5 for speed).
+        chunk_size:      Tokens per forward pass.
+    """
+    if sae.W_dec is None:
+        raise ValueError("domain shift analysis requires sae.W_dec for reconstruction.")
+
+    clinical_mean = clinical_mean.astype(np.float32)
+    b_dec = sae.b_dec.astype(np.float32)
+
+    # --- 1. Mean comparison ---
+    diff = clinical_mean - b_dec
+    clinical_norm = float(np.linalg.norm(clinical_mean))
+    bdec_norm = float(np.linalg.norm(b_dec))
+    diff_norm = float(np.linalg.norm(diff))
+    cos_sim = float(np.dot(clinical_mean, b_dec) / (clinical_norm * bdec_norm + 1e-12))
+    mean_comparison = {
+        "clinical_mean_norm": round(clinical_norm, 4),
+        "b_dec_norm": round(bdec_norm, 4),
+        "difference_norm": round(diff_norm, 4),
+        "relative_difference": round(diff_norm / (clinical_norm + 1e-12), 4),
+        "cosine_similarity": round(cos_sim, 6),
+    }
+    logger.info(f"Mean comparison: {mean_comparison}")
+
+    # --- 2 & 3. Stream through shards for scale stats + re-centered EV ---
+    if shard_filter is not None:
+        metadata = metadata[metadata["shard"].isin(shard_filter)]
+    shards_available = sorted(metadata["shard"].unique())
+    shards_to_use = shards_available[:n_shards_sample]
+    logger.info(
+        f"Domain shift analysis: sampling {len(shards_to_use)} shards "
+        f"from {len(shards_available)} available"
+    )
+
+    n_tokens = 0
+    # accumulators for standard EV
+    sum_x2_std = np.zeros(sae.d_model, dtype=np.float64)
+    sum_r2_std = np.zeros(sae.d_model, dtype=np.float64)
+    sum_x_std = np.zeros(sae.d_model, dtype=np.float64)
+    sum_r_std = np.zeros(sae.d_model, dtype=np.float64)
+    # accumulators for mean-only fix (replace b_dec with clinical_mean in decode)
+    sum_r2_mfix = np.zeros(sae.d_model, dtype=np.float64)
+    sum_r_mfix = np.zeros(sae.d_model, dtype=np.float64)
+    # accumulators for full re-centering (center input + replace b_dec)
+    sum_r2_full = np.zeros(sae.d_model, dtype=np.float64)
+    sum_r_full = np.zeros(sae.d_model, dtype=np.float64)
+    # scale stats
+    sum_act_norms: float = 0.0
+    sum_act_norms_sq: float = 0.0
+    sum_preact_abs = np.zeros(sae.d_sae, dtype=np.float64)
+
+    for shard_idx in shards_to_use:
+        shard_path = activations_dir / f"shard_{shard_idx:04d}.safetensors"
+        if not shard_path.exists():
+            continue
+        shard_data = load_safetensors(str(shard_path))
+        acts = shard_data[next(iter(shard_data))].astype(np.float32)
+
+        for start in range(0, acts.shape[0], chunk_size):
+            x = acts[start : start + chunk_size]
+            n = x.shape[0]
+            n_tokens += n
+
+            # activation norms
+            norms = np.linalg.norm(x, axis=1)
+            sum_act_norms += float(norms.sum())
+            sum_act_norms_sq += float((norms**2).sum())
+
+            # --- standard forward (GemmaScope as-is) ---
+            z_std = sae.encode(x)
+            x_hat_std = sae.decode(z_std)
+            r_std = x - x_hat_std
+
+            # pre-activation scale (for threshold comparison)
+            pre_act = x @ sae.W_enc + sae.b_enc
+            sum_preact_abs += np.abs(pre_act).sum(axis=0).astype(np.float64)
+
+            # EV accumulators — standard
+            sum_x_std += x.sum(axis=0).astype(np.float64)
+            sum_x2_std += (x**2).sum(axis=0).astype(np.float64)
+            sum_r_std += r_std.sum(axis=0).astype(np.float64)
+            sum_r2_std += (r_std**2).sum(axis=0).astype(np.float64)
+
+            # --- mean-only fix: same z, decode with clinical_mean instead of b_dec ---
+            x_hat_mfix = z_std @ sae.W_dec + clinical_mean
+            r_mfix = x - x_hat_mfix
+            sum_r_mfix += r_mfix.sum(axis=0).astype(np.float64)
+            sum_r2_mfix += (r_mfix**2).sum(axis=0).astype(np.float64)
+
+            # --- full re-centering: center input, encode, decode with clinical_mean ---
+            x_centered = x - clinical_mean
+            z_full = sae.encode(x_centered)
+            x_hat_full = z_full @ sae.W_dec + clinical_mean
+            r_full = x - x_hat_full
+            sum_r_full += r_full.sum(axis=0).astype(np.float64)
+            sum_r2_full += (r_full**2).sum(axis=0).astype(np.float64)
+
+    if n_tokens == 0:
+        raise RuntimeError("No tokens processed for domain shift analysis.")
+
+    def _ev(sum_x, sum_x2, sum_r, sum_r2):
+        mean_x = sum_x / n_tokens
+        var_x = (sum_x2 / n_tokens) - mean_x**2
+        mean_r = sum_r / n_tokens
+        var_r = (sum_r2 / n_tokens) - mean_r**2
+        total_var_x = float(var_x.sum())
+        total_var_r = float(var_r.sum())
+        return round(1.0 - total_var_r / total_var_x if total_var_x > 1e-12 else 0.0, 4)
+
+    ev_standard = _ev(sum_x_std, sum_x2_std, sum_r_std, sum_r2_std)
+    ev_mean_fix = _ev(sum_x_std, sum_x2_std, sum_r_mfix, sum_r2_mfix)
+    ev_full_recenter = _ev(sum_x_std, sum_x2_std, sum_r_full, sum_r2_full)
+
+    # Scale stats
+    mean_act_norm = sum_act_norms / n_tokens
+    std_act_norm = (sum_act_norms_sq / n_tokens - mean_act_norm**2) ** 0.5
+    mean_preact_abs = sum_preact_abs / n_tokens
+    threshold = sae.threshold
+
+    scale_comparison = {
+        "clinical_activation_norm_mean": round(float(mean_act_norm), 4),
+        "clinical_activation_norm_std": round(float(std_act_norm), 4),
+        "preactivation_abs_mean": round(float(mean_preact_abs.mean()), 4),
+        "preactivation_abs_std": round(float(mean_preact_abs.std()), 4),
+        "threshold_mean": round(float(threshold.mean()), 4),
+        "threshold_std": round(float(threshold.std()), 4),
+        "threshold_min": round(float(threshold.min()), 4),
+        "threshold_max": round(float(threshold.max()), 4),
+        "frac_preact_above_threshold": round(float((mean_preact_abs > threshold).mean()), 4),
+    }
+
+    result = {
+        "n_tokens_sampled": n_tokens,
+        "n_shards_sampled": len(shards_to_use),
+        "mean_comparison": mean_comparison,
+        "scale_comparison": scale_comparison,
+        "ev_standard": ev_standard,
+        "ev_mean_fix_decode_only": ev_mean_fix,
+        "ev_full_recentered": ev_full_recenter,
+        "interpretation": {
+            "if_mean_fix_recovers_ev": (
+                "Negative EV is primarily mean shift (b_dec mismatch), "
+                "not feature direction mismatch."
+            ),
+            "if_both_stay_negative": (
+                "GemmaScope's learned feature directions do not span "
+                "the clinical activation subspace — genuine domain mismatch."
+            ),
+        },
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / "domain_shift_analysis.json", "w") as f:
+        json.dump(result, f, indent=2)
+    logger.info(f"Domain shift analysis: {json.dumps(result, indent=2)}")
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 3.  ICD label alignment
 # ---------------------------------------------------------------------------
