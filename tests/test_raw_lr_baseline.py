@@ -163,3 +163,51 @@ def test_align_codes_preserves_code_names_order():
     raw_aligned, sae_aligned, _, _ = _align_codes(raw_cv, sae_cv, code_names)
     assert [r["code"] for r in raw_aligned] == code_names
     assert list(sae_aligned["code"]) == code_names
+
+
+# ---------------------------------------------------------------------------
+# _rename_compare_keys
+# ---------------------------------------------------------------------------
+
+
+def test_rename_compare_keys():
+    """tfidf is rewritten to raw in both keys and outcome values."""
+    from mech_interp_research.raw_lr_baseline import _rename_compare_keys
+
+    comparison = [
+        {
+            "code": "icd9_4019",
+            "auc_roc_tfidf": 0.81,
+            "auc_roc_sae": 0.84,
+            "delta_auc_roc": 0.03,
+            "outcome_auc_roc": "sae_above_tfidf",
+            "auc_pr_tfidf": 0.62,
+            "auc_pr_sae": 0.60,
+            "delta_auc_pr": -0.02,
+            "outcome_auc_pr": "tfidf_above_sae",
+        },
+        {
+            "code": "icd9_25000",
+            "auc_roc_tfidf": 0.70,
+            "auc_roc_sae": 0.70,
+            "delta_auc_roc": 0.00,
+            "outcome_auc_roc": "comparable",
+            "auc_pr_tfidf": 0.40,
+            "auc_pr_sae": None,
+            "delta_auc_pr": None,
+            "outcome_auc_pr": "insufficient_samples",
+        },
+    ]
+    out = _rename_compare_keys(comparison)
+    assert "auc_roc_raw" in out[0]
+    assert "auc_pr_raw" in out[0]
+    assert "auc_roc_tfidf" not in out[0]
+    assert out[0]["outcome_auc_roc"] == "sae_above_raw"
+    assert out[0]["outcome_auc_pr"] == "raw_above_sae"
+    # 'comparable' / 'insufficient_samples' contain no 'tfidf' substring →
+    # unchanged
+    assert out[1]["outcome_auc_roc"] == "comparable"
+    assert out[1]["outcome_auc_pr"] == "insufficient_samples"
+    # delta_auc_roc / code / None pass through
+    assert out[0]["delta_auc_roc"] == 0.03
+    assert out[1]["auc_pr_sae"] is None

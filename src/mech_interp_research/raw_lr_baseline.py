@@ -108,6 +108,34 @@ def _align_codes(
     return raw_aligned, sae_aligned, raw_only, sae_only
 
 
+def _rename_compare_keys(comparison: list[dict]) -> list[dict]:
+    """Rewrite 'tfidf' → 'raw' in compare_classification output.
+
+    ``compare_classification`` hardcodes 'tfidf' in:
+      * keys:           auc_roc_tfidf, auc_pr_tfidf
+      * outcome values: 'sae_above_tfidf', 'tfidf_above_sae'
+
+    Other outcomes ('comparable', 'insufficient_samples') contain no
+    'tfidf' substring and pass through unchanged. ``None`` AUC values
+    pass through.
+    """
+
+    def _rename(s: Any) -> Any:
+        return s.replace("tfidf", "raw") if isinstance(s, str) else s
+
+    out: list[dict] = []
+    for row in comparison:
+        new_row: dict = {}
+        for k, v in row.items():
+            new_key = _rename(k)
+            # Only attempt substring rewrite on string values; None and
+            # numerics pass through untouched.
+            new_val = _rename(v) if isinstance(v, str) else v
+            new_row[new_key] = new_val
+        out.append(new_row)
+    return out
+
+
 def pool_raw_activations(*args: Any, **kwargs: Any) -> Any:
     raise NotImplementedError
 
