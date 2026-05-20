@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_module_imports() -> None:
     """Module exports the expected public surface."""
@@ -49,7 +51,6 @@ def test_load_sae_cv_results_happy_path(tmp_path):
 def test_load_sae_cv_results_schema_validation(tmp_path):
     """Missing any required column raises ValueError naming the column."""
     import pandas as pd
-    import pytest
 
     from mech_interp_research.raw_lr_baseline import _load_sae_cv_results
 
@@ -67,4 +68,5 @@ def test_load_sae_cv_results_schema_validation(tmp_path):
         _load_sae_cv_results(path)
     msg = str(exc.value)
     assert "auc_roc_std" in msg
+    assert "n_positive" in msg
     assert str(path) in msg
