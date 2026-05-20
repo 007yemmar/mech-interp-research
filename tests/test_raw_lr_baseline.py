@@ -283,30 +283,39 @@ def test_pool_raw_activations_resume(synthetic_run_dir, tmp_path, caplog):
     metadata = load_metadata(synthetic_run_dir)
     ckpt = tmp_path / "raw_shard_ckpt"
 
-    # First pass: complete run.
-    pool_raw_activations(
+    # First pass: complete run. Capture shard 0's vectors.
+    vecs_pass1, meta_pass1 = pool_raw_activations(
         activations_dir=synthetic_run_dir,
         metadata=metadata,
         checkpoint_dir=ckpt,
     )
+    shard0_mask_p1 = meta_pass1["shard"].to_numpy() == 0
+    shard0_vecs_p1 = vecs_pass1[shard0_mask_p1]
+
     # Delete shard 1's checkpoint, keep shard 0's.
     (ckpt / "shard_0001_vectors.npy").unlink()
     (ckpt / "shard_0001_meta.jsonl").unlink()
 
-    # Second pass: shard 0 must be skipped, shard 1 re-run.
+    # Second pass: shard 0 must be skipped and reloaded from ckpt; shard 1 re-run.
     with caplog.at_level(logging.INFO, logger="mech_interp_research.raw_lr_baseline"):
-        vecs, meta = pool_raw_activations(
+        vecs_pass2, meta_pass2 = pool_raw_activations(
             activations_dir=synthetic_run_dir,
             metadata=metadata,
             checkpoint_dir=ckpt,
         )
-    assert vecs.shape == (5, 64)
+    assert vecs_pass2.shape == (5, 64)
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "skipping" in msgs.lower() or "resumed" in msgs.lower()
 
+    # Bit-for-bit preservation: shard 0's vectors must be identical across passes
+    # (proves the checkpoint was loaded, not re-encoded).
+    shard0_mask_p2 = meta_pass2["shard"].to_numpy() == 0
+    shard0_vecs_p2 = vecs_pass2[shard0_mask_p2]
+    np.testing.assert_array_equal(shard0_vecs_p1, shard0_vecs_p2)
+
 
 def test_pool_raw_activations_partial_checkpoint(synthetic_run_dir, tmp_path):
-    """Mismatched .npy and .jsonl row counts -> checkpoint discarded + re-encode."""
+    """Mismatched .npy and .jsonl row counts → checkpoint discarded + re-encode."""
     import json
 
     from mech_interp_research.icd_eval import load_metadata
@@ -316,9 +325,11 @@ def test_pool_raw_activations_partial_checkpoint(synthetic_run_dir, tmp_path):
     ckpt = tmp_path / "raw_shard_ckpt"
     ckpt.mkdir()
 
-    # Plant a corrupt checkpoint for shard 0: 1 vector row, 2 meta rows.
-    np.save(ckpt / "shard_0000_vectors.npy", np.zeros((1, 64), dtype=np.float32))
-    with open(ckpt / "shard_0000_meta.jsonl", "w") as f:
+    # Plant a corrupt checkpoint for shard 0: 1 vector row of zeros, 2 meta rows.
+    corrupt_vecs_path = ckpt / "shard_0000_vectors.npy"
+    corrupt_meta_path = ckpt / "shard_0000_meta.jsonl"
+    np.save(corrupt_vecs_path, np.zeros((1, 64), dtype=np.float32))
+    with open(corrupt_meta_path, "w") as f:
         for i in range(2):
             f.write(json.dumps({"note_idx": i, "shard": 0}) + "\n")
 
@@ -329,3 +340,20 @@ def test_pool_raw_activations_partial_checkpoint(synthetic_run_dir, tmp_path):
     )
     # Full re-encode of shard 0 produced 3 notes; shard 1 produced 2.
     assert vecs.shape == (5, 64)
+
+    # Discard semantics: the corrupt files must have been unlinked during the
+    # checkpoint scan (and then re-created by the re-encode pass), so they
+    # exist after the call — but with the correct row counts now.
+    assert corrupt_vecs_path.exists()
+    assert corrupt_meta_path.exists()
+    new_vecs = np.load(corrupt_vecs_path)
+    with open(corrupt_meta_path) as f:
+        new_meta = [json.loads(line) for line in f if line.strip()]
+    assert new_vecs.shape == (3, 64)  # 3 notes in shard 0 per conftest
+    assert len(new_meta) == 3
+
+    # The output must be the freshly re-encoded vectors, not the planted zeros.
+    # Shard 0's rows in the final output should not all be zero.
+    shard0_mask = meta["shard"].to_numpy() == 0
+    shard0_vecs = vecs[shard0_mask]
+    assert not np.allclose(shard0_vecs, 0.0)
