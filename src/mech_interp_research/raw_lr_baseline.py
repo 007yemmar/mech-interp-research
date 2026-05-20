@@ -56,6 +56,58 @@ def _load_sae_cv_results(path: str | Path) -> pd.DataFrame:
     return df
 
 
+def _align_codes(
+    raw_cv: list[dict],
+    sae_cv: pd.DataFrame,
+    code_names: list[str],
+) -> tuple[list[dict], pd.DataFrame, list[str], list[str]]:
+    """Restrict both CV tables to the intersection of code sets.
+
+    Resolves decision #2 in the design doc: if either side has codes the
+    other lacks, log a WARNING listing both disjoint sets, then filter to
+    the intersection in ``code_names`` order. Empty intersection → raise
+    ``ValueError`` (nothing to compare).
+
+    Returns:
+        (raw_cv_aligned, sae_cv_aligned, dropped_codes_raw_only,
+         dropped_codes_sae_only)
+    """
+    sae_codes = list(sae_cv["code"])
+    raw_set = set(code_names)
+    sae_set = set(sae_codes)
+
+    raw_only = sorted(raw_set - sae_set)
+    sae_only = sorted(sae_set - raw_set)
+
+    if raw_only or sae_only:
+
+        def _truncate(seq: list[str], cap: int = 20) -> str:
+            shown = seq[:cap]
+            tail = "" if len(seq) <= cap else f" (+{len(seq) - cap} more)"
+            return f"{shown}{tail}"
+
+        logger.warning(
+            "Code-set drift between raw and SAE sides. " "raw_only=%s sae_only=%s",
+            _truncate(raw_only),
+            _truncate(sae_only),
+        )
+
+    keep = [c for c in code_names if c in sae_set]
+    if not keep:
+        raise ValueError(
+            "No overlap between raw and SAE code sets — cannot compare. "
+            f"raw_codes={code_names}, sae_codes={sae_codes}"
+        )
+
+    raw_by_code = {r["code"]: r for r in raw_cv}
+    sae_by_code = sae_cv.set_index("code")
+
+    raw_aligned = [raw_by_code[c] for c in keep]
+    sae_aligned = sae_by_code.loc[keep].reset_index()
+
+    return raw_aligned, sae_aligned, raw_only, sae_only
+
+
 def pool_raw_activations(*args: Any, **kwargs: Any) -> Any:
     raise NotImplementedError
 
