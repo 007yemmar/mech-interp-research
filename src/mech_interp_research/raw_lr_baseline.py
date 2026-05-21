@@ -311,6 +311,7 @@ def run_raw_lr_baseline(
     topk: int = 10,
     shard_filter: list[int] | None = None,
     checkpoint_dir: str | Path | None = None,
+    on_shard_complete: Callable[[int], None] | None = None,
     join_key: str = "admission_id",
     icd_col_prefix: str = "icd9_",
     min_prevalence: float = 0.02,
@@ -328,6 +329,12 @@ def run_raw_lr_baseline(
     probe-design.md`` for the full design. CV protocol, classifier, and
     label-alignment filters match ``run_tfidf_lr_baseline`` exactly so
     the three baselines can be reported side by side.
+
+    Args:
+        on_shard_complete: optional callback invoked with the shard index
+            after each shard's checkpoint is written. Modal entrypoints pass
+            ``lambda _: artifacts_volume.commit()`` here to durably sync per
+            shard.
     """
     activations_dir = Path(activations_dir)
     sae_results_csv = Path(sae_results_csv)
@@ -393,6 +400,7 @@ def run_raw_lr_baseline(
         topk=topk,
         shard_filter=shard_filter,
         checkpoint_dir=checkpoint_dir,
+        on_shard_complete=on_shard_complete,
     )
 
     # ------------------------------------------------------------------

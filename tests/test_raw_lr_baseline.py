@@ -592,3 +592,51 @@ def test_run_raw_lr_baseline_rejects_sae_csv_as_directory(centered_run_dir, tmp_
             icd_csv_path=tmp_path / "icd.csv",
             output_dir=tmp_path / "out",
         )
+
+
+def test_run_raw_lr_baseline_invokes_on_shard_complete(centered_run_dir, tmp_path):
+    """run_raw_lr_baseline forwards on_shard_complete to pool_raw_activations."""
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019", "icd9_25000"])
+
+    seen_shards: list[int] = []
+
+    def _track(shard_idx: int) -> None:
+        seen_shards.append(shard_idx)
+
+    run_raw_lr_baseline(
+        activations_dir=centered_run_dir,
+        sae_results_csv=sae_csv,
+        icd_csv_path=icd_csv,
+        output_dir=tmp_path / "out",
+        on_shard_complete=_track,
+        join_key="note_idx",
+        icd_col_prefix="icd9_",
+        min_prevalence=0.0,
+        max_codes=50,
+        min_notes=1,
+        cv_n_splits=2,
+        lr_max_iter=200,
+        random_state=42,
+    )
+
+    # synthetic_run_dir/centered_run_dir has 2 shards (0 and 1) — both
+    # must trigger the callback.
+    assert sorted(seen_shards) == [0, 1]

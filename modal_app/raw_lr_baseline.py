@@ -30,7 +30,11 @@ DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "8"))
     },
 )
 def run_raw_lr_baseline_remote(config: dict[str, Any]) -> dict[str, Any]:
-    """Run the raw-activation LR baseline on Modal."""
+    """Run the raw-activation LR baseline on Modal.
+
+    Commits the artifacts volume after each shard so hard preemption during
+    the 30-60 minute pooling phase never loses checkpoint progress.
+    """
     import logging
 
     from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
@@ -40,8 +44,13 @@ def run_raw_lr_baseline_remote(config: dict[str, Any]) -> dict[str, Any]:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    def _commit_shard(_shard_idx: int) -> None:
+        # Per-shard volume commit so hard preemption never loses
+        # pooling progress. Matches modal_app/icd_eval.py's pattern.
+        artifacts_volume.commit()
+
     try:
-        summary = run_raw_lr_baseline(**config)
+        summary = run_raw_lr_baseline(**config, on_shard_complete=_commit_shard)
     finally:
         artifacts_volume.commit()
 
