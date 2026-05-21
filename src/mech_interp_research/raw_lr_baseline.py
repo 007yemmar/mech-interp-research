@@ -106,7 +106,7 @@ def _align_codes(
             return f"{shown}{tail}"
 
         logger.warning(
-            "Code-set drift between raw and SAE sides. " "raw_only=%s sae_only=%s",
+            "Code-set drift between raw and SAE sides. raw_only=%s sae_only=%s",
             _truncate(raw_only),
             _truncate(sae_only),
         )
