@@ -11,7 +11,7 @@ eval_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742
 icd_csv_path: /data/sample_50k.csv
 
 # Keyword dictionary (shipped into container image via app.py)
-keyword_dict_path: /root/configs/lexical_keywords.yaml
+keyword_dict_path: /root/configs/icd9_keywords_improved.yaml
 
 # Output directory
 output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/posthoc/lexical_baseline
