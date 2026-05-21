@@ -14,10 +14,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import wilcoxon
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
+from tqdm import tqdm
 
 from mech_interp_research.icd_eval import (
     _align_note_vectors_to_matched,
@@ -73,6 +75,9 @@ def evaluate_per_code_cv(
     n_splits: int = 5,
     max_iter: int = 5000,
     random_state: int = 42,
+    ckpt_dir: Path | None = None,
+    desc: str = "CV",
+    fold_ckpt: bool = False,
 ) -> list[dict]:
     """Run stratified k-fold LR per ICD code.
 
@@ -83,17 +88,32 @@ def evaluate_per_code_cv(
         n_splits: Number of CV folds.
         max_iter: LR solver max iterations.
         random_state: Reproducibility seed.
+        ckpt_dir: If set, completed codes are saved here and skipped on resume.
+        desc: Label shown in the tqdm progress bar.
+        fold_ckpt: If True (and ckpt_dir is set), checkpoint after every fold so
+            an interrupted code resumes from the next fold rather than from scratch.
 
     Returns:
         List of dicts (one per code) with AUC-ROC/PR mean/std.
     """
     import scipy.sparse as sp
 
+    if ckpt_dir is not None:
+        ckpt_dir = Path(ckpt_dir)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+
     results = []
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     dummy = np.zeros(X.shape[0])
 
-    for k, code in enumerate(code_names):
+    for k, code in tqdm(enumerate(code_names), total=len(code_names), desc=desc):
+        if ckpt_dir is not None:
+            ckpt_file = ckpt_dir / f"{code}.json"
+            if ckpt_file.exists():
+                with open(ckpt_file) as f:
+                    results.append(json.load(f))
+                logger.info(f"  {code}: loaded from checkpoint")
+                continue
         y = icd_matrix[:, k]
         n_pos = int(y.sum())
         n_neg = len(y) - n_pos
@@ -114,10 +134,24 @@ def evaluate_per_code_cv(
             logger.warning(f"  {code}: skipped (n_pos={n_pos}, n_neg={n_neg} < {n_splits} folds)")
             continue
 
-        aucrocs: list[float] = []
-        aucprs: list[float] = []
+        # Resume from a partial fold checkpoint if one exists.
+        partial_file = (ckpt_dir / f"{code}_partial.json") if (ckpt_dir and fold_ckpt) else None
+        if partial_file is not None and partial_file.exists():
+            with open(partial_file) as f:
+                partial = json.load(f)
+            aucrocs: list[float] = partial["aucrocs"]
+            aucprs: list[float] = partial["aucprs"]
+            folds_done: int = partial["folds_done"]
+            logger.info(f"  {code}: resuming from fold {folds_done}/{n_splits}")
+        else:
+            aucrocs = []
+            aucprs = []
+            folds_done = 0
 
-        for train_idx, test_idx in skf.split(dummy, y):
+        for fold_idx, (train_idx, test_idx) in enumerate(skf.split(dummy, y)):
+            if fold_idx < folds_done:
+                continue
+
             if sp.issparse(X):
                 X_train, X_test = X[train_idx], X[test_idx]
             else:
@@ -125,11 +159,12 @@ def evaluate_per_code_cv(
             y_train, y_test = y[train_idx], y[test_idx]
 
             if len(np.unique(y_test)) < 2:
+                folds_done += 1
                 continue
 
             clf = LogisticRegression(
                 l1_ratio=0,
-                solver="saga",
+                solver="lbfgs",
                 max_iter=max_iter,
                 random_state=random_state,
             )
@@ -138,6 +173,11 @@ def evaluate_per_code_cv(
 
             aucrocs.append(roc_auc_score(y_test, y_prob))
             aucprs.append(average_precision_score(y_test, y_prob))
+            folds_done += 1
+
+            if partial_file is not None:
+                with open(partial_file, "w") as f:
+                    json.dump({"aucrocs": aucrocs, "aucprs": aucprs, "folds_done": folds_done}, f)
 
         row = {
             "code": code,
@@ -150,6 +190,11 @@ def evaluate_per_code_cv(
             "status": "ok",
         }
         results.append(row)
+        if ckpt_dir is not None:
+            with open(ckpt_dir / f"{code}.json", "w") as f:
+                json.dump(row, f)
+            if partial_file is not None and partial_file.exists():
+                partial_file.unlink()
         if row["auc_roc_mean"] is not None:
             logger.info(
                 f"  {code}: AUC-ROC={row['auc_roc_mean']:.4f}+-{row['auc_roc_std']:.4f}, "
@@ -209,6 +254,62 @@ def compare_classification(
         comparison.append(row)
 
     return comparison
+
+
+def compute_paired_significance(
+    tfidf_results: list[dict],
+    sae_results: list[dict],
+) -> dict:
+    """Wilcoxon signed-rank test on per-code AUC deltas (SAE − TF-IDF).
+
+    Only includes codes where both arms produced valid AUCs.
+    Returns test statistics and p-values for AUC-ROC and AUC-PR.
+    """
+    results: dict = {}
+    for metric in ("auc_roc", "auc_pr"):
+        tfidf_vals = []
+        sae_vals = []
+        for tf_row, sae_row in zip(tfidf_results, sae_results, strict=True):
+            tf_val = tf_row[f"{metric}_mean"]
+            sae_val = sae_row[f"{metric}_mean"]
+            if tf_val is not None and sae_val is not None:
+                tfidf_vals.append(tf_val)
+                sae_vals.append(sae_val)
+
+        n_paired = len(tfidf_vals)
+        if n_paired < 10:
+            results[metric] = {
+                "n_paired_codes": n_paired,
+                "test": "wilcoxon",
+                "statistic": None,
+                "p_value": None,
+                "note": f"Too few paired codes ({n_paired}) for reliable test",
+            }
+            continue
+
+        diffs = np.array(sae_vals) - np.array(tfidf_vals)
+        if np.all(diffs == 0):
+            results[metric] = {
+                "n_paired_codes": n_paired,
+                "test": "wilcoxon",
+                "statistic": None,
+                "p_value": 1.0,
+                "note": "All deltas are zero",
+            }
+            continue
+
+        stat, p_val = wilcoxon(diffs, alternative="two-sided")
+        median_delta = float(np.median(diffs))
+        results[metric] = {
+            "n_paired_codes": n_paired,
+            "test": "wilcoxon_signed_rank",
+            "statistic": round(float(stat), 4),
+            "p_value": round(float(p_val), 6),
+            "median_delta_sae_minus_tfidf": round(median_delta, 4),
+            "significant_at_0.05": p_val < 0.05,
+        }
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +456,8 @@ def run_tfidf_lr_baseline(
         n_splits=cv_n_splits,
         max_iter=lr_max_iter,
         random_state=random_state,
+        ckpt_dir=output_dir / "cv_ckpt_tfidf",
+        desc="TF-IDF CV",
     )
 
     # ------------------------------------------------------------------
@@ -368,6 +471,9 @@ def run_tfidf_lr_baseline(
         n_splits=cv_n_splits,
         max_iter=lr_max_iter,
         random_state=random_state,
+        ckpt_dir=output_dir / "cv_ckpt_sae",
+        desc="SAE CV",
+        fold_ckpt=True,
     )
 
     # ------------------------------------------------------------------
@@ -381,9 +487,24 @@ def run_tfidf_lr_baseline(
     )
 
     # ------------------------------------------------------------------
-    # 9. Correlation comparison (best-feature r_pb)
+    # 8b. Paired statistical test (Wilcoxon signed-rank on per-code AUC deltas)
     # ------------------------------------------------------------------
-    logger.info("Step 9: Computing correlation comparison...")
+    logger.info("Step 8b: Paired significance test...")
+    paired_tests = compute_paired_significance(tfidf_cv, sae_cv)
+    for metric, res in paired_tests.items():
+        if res["p_value"] is not None:
+            logger.info(
+                f"  {metric}: Wilcoxon p={res['p_value']:.6f}, "
+                f"median Δ={res['median_delta_sae_minus_tfidf']:+.4f} "
+                f"(n={res['n_paired_codes']})"
+            )
+        else:
+            logger.info(f"  {metric}: {res.get('note', 'no result')}")
+
+    # ------------------------------------------------------------------
+    # 9. Supplementary: correlation comparison (best-feature r_pb)
+    # ------------------------------------------------------------------
+    logger.info("Step 9: Computing supplementary correlation comparison...")
     sae_code_idx = [sae_code_names.index(c) for c in code_names]
     r_sae_aligned = r_pb_sae[:, sae_code_idx]  # [d_sae, n_eval_codes]
 
@@ -448,7 +569,8 @@ def run_tfidf_lr_baseline(
             "n_tfidf_wins": _count("outcome_auc_pr", "tfidf_above_sae"),
             "n_comparable": _count("outcome_auc_pr", "comparable"),
         },
-        "correlation": {
+        "paired_significance_tests": paired_tests,
+        "supplementary_correlation": {
             "mean_best_r_sae": round(float(np.mean([c["best_r_sae"] for c in cls_comparison])), 4),
             "mean_best_r_tfidf": round(
                 float(np.mean([c["best_r_tfidf"] for c in cls_comparison])), 4
@@ -499,7 +621,14 @@ def run_tfidf_lr_baseline(
         f"TF-IDF wins: {pr['n_tfidf_wins']}, "
         f"comparable: {pr['n_comparable']}"
     )
-    corr = summary["correlation"]
+    for metric in ("auc_roc", "auc_pr"):
+        t = summary["paired_significance_tests"].get(metric, {})
+        if t.get("p_value") is not None:
+            logger.info(
+                f"  Wilcoxon {metric}: p={t['p_value']:.6f}, "
+                f"median Δ={t['median_delta_sae_minus_tfidf']:+.4f}"
+            )
+    corr = summary["supplementary_correlation"]
     logger.info(
         f"  Best-feature r — SAE: {corr['mean_best_r_sae']}, TF-IDF: {corr['mean_best_r_tfidf']}"
     )
