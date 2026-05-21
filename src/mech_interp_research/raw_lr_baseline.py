@@ -312,11 +312,13 @@ def run_raw_lr_baseline(
     shard_filter: list[int] | None = None,
     checkpoint_dir: str | Path | None = None,
     on_shard_complete: Callable[[int], None] | None = None,
+    on_code_complete: Callable[[str], None] | None = None,
     join_key: str = "admission_id",
     icd_col_prefix: str = "icd9_",
     min_prevalence: float = 0.02,
     max_codes: int = 50,
     min_notes: int = 100,
+    cv_checkpoint_dir: str | Path | None = None,
     cv_n_splits: int = 5,
     lr_max_iter: int = 5000,
     lr_solver: str = "saga",
@@ -352,6 +354,10 @@ def run_raw_lr_baseline(
     if checkpoint_dir is None:
         checkpoint_dir = output_dir / "raw_shard_ckpt"
     checkpoint_dir = Path(checkpoint_dir)
+
+    if cv_checkpoint_dir is None:
+        cv_checkpoint_dir = output_dir / "cv_ckpt_raw"
+    cv_checkpoint_dir = Path(cv_checkpoint_dir)
 
     logger.info("=" * 60)
     logger.info(
@@ -442,7 +448,10 @@ def run_raw_lr_baseline(
     # ------------------------------------------------------------------
     # 5. Per-code CV on raw features (reuse the existing protocol)
     # ------------------------------------------------------------------
-    logger.info(f"Step 5: Evaluating raw features (per-code CV, solver={lr_solver})...")
+    logger.info(
+        f"Step 5: Evaluating raw features (per-code CV, solver={lr_solver}, "
+        f"cv_ckpt={cv_checkpoint_dir})..."
+    )
     raw_cv = evaluate_per_code_cv(
         X_raw,
         icd_matrix,
@@ -451,6 +460,8 @@ def run_raw_lr_baseline(
         max_iter=lr_max_iter,
         random_state=random_state,
         solver=lr_solver,
+        cv_checkpoint_dir=cv_checkpoint_dir,
+        on_code_complete=on_code_complete,
     )
 
     def _safe_mean(vals: list) -> float | None:

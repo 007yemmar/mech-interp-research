@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -79,6 +81,8 @@ def evaluate_per_code_cv(
     desc: str = "CV",
     fold_ckpt: bool = False,
     solver: str = "saga",
+    cv_checkpoint_dir: str | Path | None = None,
+    on_code_complete: Callable[[str], None] | None = None,
 ) -> list[dict]:
     """Run stratified k-fold LR per ICD code.
 
@@ -96,45 +100,74 @@ def evaluate_per_code_cv(
         solver: sklearn LogisticRegression solver. Default 'saga' (sparse-friendly,
             used by TF-IDF/SAE baselines). Pass 'lbfgs' for dense data — ~50-100×
             faster than saga on dense matrices at the same L2 optimum.
+        cv_checkpoint_dir: If set, save each code's result row to
+            ``<dir>/<code>.json`` immediately on completion. On entry, load any
+            existing per-code files and skip those codes. Atomic via ``.tmp``
+            sidecar + ``os.replace``. Makes the loop resumable across Modal
+            preemptions.
+        on_code_complete: Optional callback invoked with the code name after
+            each code's checkpoint is written. Modal entrypoints pass
+            ``lambda _: artifacts_volume.commit()`` to durably sync per code.
 
     Returns:
-        List of dicts (one per code) with AUC-ROC/PR mean/std.
+        List of dicts (one per code) with AUC-ROC/PR mean/std, in ``code_names``
+        order (including any codes loaded from the checkpoint dir).
     """
     import scipy.sparse as sp
 
+    # Accept either ckpt_dir (TF-IDF/SAE callers) or cv_checkpoint_dir (raw-LR
+    # caller) — they refer to the same on-disk per-code checkpoint directory.
+    if ckpt_dir is None and cv_checkpoint_dir is not None:
+        ckpt_dir = cv_checkpoint_dir
     if ckpt_dir is not None:
         ckpt_dir = Path(ckpt_dir)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    results = []
+    cached: dict[str, dict] = {}
+    if ckpt_dir is not None and ckpt_dir.exists():
+        for p in sorted(ckpt_dir.glob("*.json")):
+            if p.name.endswith("_partial.json"):
+                continue
+            try:
+                with open(p) as f:
+                    row = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            code = row.get("code")
+            if code is not None:
+                cached[code] = row
+        if cached:
+            logger.info(f"CV checkpoint: resuming with {len(cached)} codes already done")
+
+    results: list[dict] = []
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     dummy = np.zeros(X.shape[0])
 
     for k, code in tqdm(enumerate(code_names), total=len(code_names), desc=desc):
-        if ckpt_dir is not None:
-            ckpt_file = ckpt_dir / f"{code}.json"
-            if ckpt_file.exists():
-                with open(ckpt_file) as f:
-                    results.append(json.load(f))
+        if code in cached:
+            row = cached[code]
+            results.append(row)
+            if row.get("auc_roc_mean") is not None:
                 logger.info(f"  {code}: loaded from checkpoint")
-                continue
+            continue
+
         y = icd_matrix[:, k]
         n_pos = int(y.sum())
         n_neg = len(y) - n_pos
 
         if min(n_pos, n_neg) < n_splits:
-            results.append(
-                {
-                    "code": code,
-                    "auc_roc_mean": None,
-                    "auc_roc_std": None,
-                    "auc_pr_mean": None,
-                    "auc_pr_std": None,
-                    "n_valid_folds": 0,
-                    "n_positive": n_pos,
-                    "status": "insufficient_samples",
-                }
-            )
+            row = {
+                "code": code,
+                "auc_roc_mean": None,
+                "auc_roc_std": None,
+                "auc_pr_mean": None,
+                "auc_pr_std": None,
+                "n_valid_folds": 0,
+                "n_positive": n_pos,
+                "status": "insufficient_samples",
+            }
+            results.append(row)
+            _persist_cv_row(ckpt_dir, row, on_code_complete)
             logger.warning(f"  {code}: skipped (n_pos={n_pos}, n_neg={n_neg} < {n_splits} folds)")
             continue
 
@@ -199,11 +232,9 @@ def evaluate_per_code_cv(
             "status": "ok",
         }
         results.append(row)
-        if ckpt_dir is not None:
-            with open(ckpt_dir / f"{code}.json", "w") as f:
-                json.dump(row, f)
-            if partial_file is not None and partial_file.exists():
-                partial_file.unlink()
+        _persist_cv_row(ckpt_dir, row, on_code_complete)
+        if partial_file is not None and partial_file.exists():
+            partial_file.unlink()
         if row["auc_roc_mean"] is not None:
             logger.info(
                 f"  {code}: AUC-ROC={row['auc_roc_mean']:.4f}+-{row['auc_roc_std']:.4f}, "
@@ -211,6 +242,30 @@ def evaluate_per_code_cv(
             )
 
     return results
+
+
+def _persist_cv_row(
+    ckpt_dir: Path | None,
+    row: dict,
+    on_code_complete: Callable[[str], None] | None,
+) -> None:
+    """Atomically write a single per-code CV row to ``<ckpt_dir>/<code>.json``.
+
+    Write goes to a ``.tmp`` sidecar first, then ``os.replace`` into place — so
+    a crash mid-write leaves no half-written file and resume re-computes the code.
+    No-op when ``ckpt_dir`` is None.
+    """
+    if ckpt_dir is None:
+        return
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    code = row["code"]
+    target = ckpt_dir / f"{code}.json"
+    tmp = target.with_suffix(".json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(row, f, indent=2)
+    os.replace(tmp, target)
+    if on_code_complete is not None:
+        on_code_complete(code)
 
 
 # ---------------------------------------------------------------------------

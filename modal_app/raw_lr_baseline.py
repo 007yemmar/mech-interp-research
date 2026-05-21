@@ -49,8 +49,18 @@ def run_raw_lr_baseline_remote(config: dict[str, Any]) -> dict[str, Any]:
         # pooling progress. Matches modal_app/icd_eval.py's pattern.
         artifacts_volume.commit()
 
+    def _commit_code(_code: str) -> None:
+        # Per-code volume commit so cv_ckpt_raw/*.json files are durable
+        # across preemption. Without this, Step 5 progress would only
+        # survive if preemption happened after the whole run finished.
+        artifacts_volume.commit()
+
     try:
-        summary = run_raw_lr_baseline(**config, on_shard_complete=_commit_shard)
+        summary = run_raw_lr_baseline(
+            **config,
+            on_shard_complete=_commit_shard,
+            on_code_complete=_commit_code,
+        )
     finally:
         artifacts_volume.commit()
 
