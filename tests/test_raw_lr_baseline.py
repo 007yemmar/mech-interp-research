@@ -513,3 +513,82 @@ def test_run_raw_lr_baseline_with_code_drift(centered_run_dir, tmp_path, caplog)
     assert summary["dropped_codes_sae_only"] == []
     per_code_codes = {row["code"] for row in summary["per_code"]}
     assert per_code_codes == {"icd9_4019"}
+
+
+def test_run_raw_lr_baseline_rejects_uncentered(synthetic_run_dir, tmp_path):
+    """Pointing at uncentered shards raises ValueError."""
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    with pytest.raises(ValueError, match="uncentered"):
+        run_raw_lr_baseline(
+            activations_dir=synthetic_run_dir,  # NOT centered
+            sae_results_csv=sae_csv,
+            icd_csv_path=tmp_path / "icd.csv",  # doesn't matter — fails earlier
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_rejects_malformed_manifest(centered_run_dir, tmp_path):
+    """A non-JSON manifest.json raises ValueError with the path."""
+    import shutil
+
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    # Corrupt the manifest in a copy of the centered dir.
+    bad_dir = tmp_path / "bad_centered"
+    shutil.copytree(centered_run_dir, bad_dir)
+    (bad_dir / "manifest.json").write_text("{not valid json")
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        run_raw_lr_baseline(
+            activations_dir=bad_dir,
+            sae_results_csv=sae_csv,
+            icd_csv_path=tmp_path / "icd.csv",
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_rejects_missing_icd_csv(centered_run_dir, tmp_path):
+    """Missing icd_csv_path fails fast (before expensive pooling)."""
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    with pytest.raises(FileNotFoundError, match="icd_csv_path"):
+        run_raw_lr_baseline(
+            activations_dir=centered_run_dir,
+            sae_results_csv=sae_csv,
+            icd_csv_path=tmp_path / "does_not_exist.csv",
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_rejects_sae_csv_as_directory(centered_run_dir, tmp_path):
+    """Passing a directory as sae_results_csv fails fast."""
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    sae_as_dir = tmp_path / "sae_as_dir"
+    sae_as_dir.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="not a file"):
+        run_raw_lr_baseline(
+            activations_dir=centered_run_dir,
+            sae_results_csv=sae_as_dir,  # directory, not a file
+            icd_csv_path=tmp_path / "icd.csv",
+            output_dir=tmp_path / "out",
+        )

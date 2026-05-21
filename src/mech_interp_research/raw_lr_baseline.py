@@ -351,8 +351,11 @@ def run_raw_lr_baseline(
     # carries 'centered: true'.
     manifest_path = activations_dir / "manifest.json"
     if manifest_path.exists():
-        with open(manifest_path) as f:
-            manifest = json.load(f)
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"manifest.json at {manifest_path} is not valid JSON: {exc}") from exc
         if not manifest.get("centered", False):
             raise ValueError(
                 f"activations_dir {activations_dir} is uncentered "
@@ -361,12 +364,17 @@ def run_raw_lr_baseline(
     else:
         logger.warning(f"No manifest.json at {manifest_path}; skipping centered check.")
 
-    # Fail fast if the SAE CSV is missing.
-    if not sae_results_csv.exists():
+    # Fail fast if the SAE CSV is missing or not a file.
+    if not sae_results_csv.is_file():
         raise FileNotFoundError(
-            f"sae_results_csv not found at {sae_results_csv}. Run "
-            "tfidf_lr_baseline first to produce sae_cv_results.csv."
+            f"sae_results_csv not found or is not a file at {sae_results_csv}. "
+            "Run tfidf_lr_baseline first to produce sae_cv_results.csv."
         )
+
+    # Fail fast if the ICD CSV is missing — saves the ~1-2 hour pooling step
+    # if the path is wrong.
+    if not icd_csv_path.is_file():
+        raise FileNotFoundError(f"icd_csv_path not found or is not a file at {icd_csv_path}.")
 
     # ------------------------------------------------------------------
     # 1. Load metadata
