@@ -264,7 +264,8 @@ def test_run_tfidf_lr_baseline_integration(synthetic_run_dir: Path, tmp_path: Pa
     assert "n_codes" in result
     assert "classification_auc_roc" in result
     assert "classification_auc_pr" in result
-    assert "correlation" in result
+    assert "paired_significance_tests" in result
+    assert "supplementary_correlation" in result
     assert "per_code" in result
     assert len(result["per_code"]) == 2
 

@@ -1,0 +1,1932 @@
+# Lexical keyword dictionary for ICD-9 clinical grounding baseline (IMPROVED).
+#
+# Sources: ICD-9-CM descriptions, clinical abbreviations, common medications,
+# distinctive lab values / procedures, clinical note phrasing, discharge summary
+# conventions. No UMLS dependency.
+#
+# Matching rules (implemented in lexical_baseline.py):
+#   - Default: case-insensitive substring match
+#   - Keywords ≤3 characters: word-boundary regex (\bKEYWORD\b) to avoid
+#     false positives in longer strings
+#
+# Expansion strategy vs original:
+#   - Added broader medication coverage (generic + brand, all major drug classes)
+#   - Added clinical abbreviations used in notes (PMH, vitals, labs)
+#   - Added symptom / physical-exam language (dyspnea, edema, crackles, etc.)
+#   - Added procedure / imaging terms (echo, cath, CXR findings)
+#   - Added lab-value / biomarker references
+#   - Avoided hyper-specific MIMIC phrasing to keep generalisability
+#
+# One entry per icd9_* column name from the eval. Codes not listed here are
+# skipped in the baseline comparison (reported as "no keywords").
+
+# ─────────────────────── CARDIOVASCULAR ───────────────────────
+
+icd9_4019:
+  description: "Unspecified essential hypertension"
+  keywords:
+    # Core terms
+    - hypertension
+    - hypertensive
+    - HTN
+    - high blood pressure
+    - elevated blood pressure
+    - blood pressure
+    # Medications – ACE inhibitors
+    - lisinopril
+    - enalapril
+    - ramipril
+    - captopril
+    - benazepril
+    # Medications – ARBs
+    - losartan
+    - valsartan
+    - irbesartan
+    - olmesartan
+    - candesartan
+    # Medications – CCBs
+    - amlodipine
+    - nifedipine
+    - diltiazem
+    # Medications – Beta-blockers (overlap with other CV codes is acceptable)
+    - metoprolol
+    - atenolol
+    - carvedilol
+    - labetalol
+    # Medications – Diuretics
+    - hydrochlorothiazide
+    - HCTZ
+    - chlorthalidone
+    # Medications – Other
+    - hydralazine
+    - clonidine
+    - antihypertensive
+    # Clinical language
+    - SBP
+    - DBP
+    - hypertensive urgency
+    - hypertensive emergency
+    - BP control
+    - BP management
+
+icd9_41401:
+  description: "Coronary atherosclerosis of native coronary artery"
+  keywords:
+    # Core terms
+    - coronary atherosclerosis
+    - coronary artery disease
+    - CAD
+    - ischemic heart disease
+    - coronary artery
+    # Symptoms
+    - angina
+    - chest pain
+    - exertional chest pain
+    - anginal
+    # Procedures
+    - stent
+    - angioplasty
+    - cardiac catheterization
+    - cardiac cath
+    - coronary angiography
+    - angiogram
+    - CABG
+    - coronary bypass
+    - PCI
+    - percutaneous coronary intervention
+    - drug-eluting stent
+    - bare metal stent
+    # Medications
+    - atorvastatin
+    - clopidogrel
+    - plavix
+    - aspirin
+    - nitroglycerin
+    - nitrate
+    - isosorbide
+    - ranolazine
+    # Lab / Diagnostic
+    - troponin
+    - stress test
+    - nuclear stress
+    - perfusion defect
+    - stenosis
+    - ECG
+    - EKG
+
+icd9_42731:
+  description: "Atrial fibrillation"
+  keywords:
+    # Core terms
+    - atrial fibrillation
+    - afib
+    - a-fib
+    - a fib
+    - AF with RVR
+    - rapid ventricular response
+    # Subtypes
+    - paroxysmal atrial fibrillation
+    - persistent atrial fibrillation
+    - permanent atrial fibrillation
+    - new-onset atrial fibrillation
+    # Symptoms / Signs
+    - irregularly irregular
+    - palpitation
+    - palpitations
+    # Medications – Anticoagulation
+    - warfarin
+    - coumadin
+    - anticoagulation
+    - apixaban
+    - eliquis
+    - rivaroxaban
+    - xarelto
+    - dabigatran
+    - heparin
+    - enoxaparin
+    - lovenox
+    # Medications – Rate control
+    - diltiazem
+    - metoprolol
+    - digoxin
+    # Medications – Rhythm control
+    - amiodarone
+    - flecainide
+    - sotalol
+    - dronedarone
+    # Procedures
+    - cardioversion
+    - ablation
+    - pulmonary vein isolation
+    # Labs / Monitoring
+    - INR
+    - CHA2DS2-VASc
+    - CHADS
+
+icd9_4280:
+  description: "Congestive heart failure, unspecified"
+  keywords:
+    # Core terms
+    - heart failure
+    - CHF
+    - congestive
+    - congestive heart
+    - HFrEF
+    - HFpEF
+    - decompensated heart failure
+    - acute heart failure
+    # Pathophysiology
+    - cardiomyopathy
+    - systolic dysfunction
+    - diastolic dysfunction
+    - ejection fraction
+    - LVEF
+    - reduced ejection fraction
+    - preserved ejection fraction
+    - left ventricular dysfunction
+    # Symptoms / Signs
+    - dyspnea on exertion
+    - orthopnea
+    - paroxysmal nocturnal dyspnea
+    - PND
+    - JVD
+    - jugular venous distension
+    - lower extremity edema
+    - peripheral edema
+    - pulmonary edema
+    - crackles
+    - rales
+    - S3 gallop
+    - volume overload
+    - fluid overload
+    # Medications
+    - furosemide
+    - lasix
+    - bumetanide
+    - bumex
+    - torsemide
+    - diuretic
+    - spironolactone
+    - eplerenone
+    - sacubitril
+    - entresto
+    - carvedilol
+    - metoprolol succinate
+    - lisinopril
+    - losartan
+    - digoxin
+    - hydralazine
+    - isosorbide dinitrate
+    - milrinone
+    - dobutamine
+    # Labs / Imaging
+    - BNP
+    - NT-proBNP
+    - pro-BNP
+    - brain natriuretic peptide
+    - echocardiogram
+    - echo
+    - chest x-ray
+    # Clinical terms
+    - NYHA class
+    - fluid restriction
+    - daily weights
+    - net negative
+    - diuresis
+
+icd9_412:
+  description: "Old myocardial infarction"
+  keywords:
+    - myocardial infarction
+    - MI
+    - heart attack
+    - STEMI
+    - NSTEMI
+    - non-ST elevation
+    - ST elevation
+    - troponin
+    - troponin elevation
+    - acute coronary syndrome
+    - ACS
+    - infarct
+    - wall motion abnormality
+    - akinesis
+    - Q wave
+
+icd9_4148:
+  description: "Other forms of chronic ischemic heart disease"
+  keywords:
+    - ischemic heart
+    - ischemia
+    - ischemic
+    - coronary
+    - angina
+    - demand ischemia
+    - myocardial ischemia
+    - chronic ischemic
+    - cardiac
+    - cardiac ischemia
+
+icd9_4168:
+  description: "Other chronic pulmonary heart diseases"
+  keywords:
+    - pulmonary hypertension
+    - cor pulmonale
+    - right heart failure
+    - right ventricular failure
+    - pulmonary heart
+    - right heart strain
+    - RV dysfunction
+    - right ventricular hypertrophy
+    - elevated PA pressure
+    - RVSP
+    - tricuspid regurgitation
+
+icd9_4241:
+  description: "Aortic valve disorders"
+  keywords:
+    - aortic valve
+    - aortic stenosis
+    - aortic regurgitation
+    - aortic insufficiency
+    - aortic sclerosis
+    - bicuspid aortic valve
+    - AS
+    - AI
+    - AR
+    - valve replacement
+    - AVR
+    - TAVR
+    - SAVR
+    - aortic gradient
+    - aortic valve area
+
+icd9_4439:
+  description: "Peripheral vascular disease, unspecified"
+  keywords:
+    - peripheral vascular
+    - PVD
+    - PAD
+    - peripheral arterial disease
+    - claudication
+    - intermittent claudication
+    - peripheral arterial
+    - ABI
+    - ankle-brachial index
+    - lower extremity ischemia
+    - arterial insufficiency
+    - nonhealing ulcer
+    - amputation
+    - bypass graft
+    - endovascular
+    - cilostazol
+    - gangrene
+
+icd9_40390:
+  description: "Hypertensive chronic kidney disease, stage I-IV"
+  keywords:
+    - hypertensive kidney
+    - hypertensive renal
+    - hypertensive nephropathy
+    - hypertensive chronic kidney
+    - CKD
+    - chronic kidney disease
+    - chronic kidney
+    - creatinine
+    - GFR
+    - eGFR
+    - renal insufficiency
+    - nephrosclerosis
+
+icd9_40391:
+  description: "Hypertensive chronic kidney disease, stage V / ESRD"
+  keywords:
+    - hypertensive kidney
+    - ESRD
+    - CKD stage 5
+    - CKD stage V
+    - dialysis
+    - end stage renal
+    - end-stage renal
+    - hemodialysis
+    - peritoneal dialysis
+
+# ─────────────────────── PULMONARY ───────────────────────
+
+icd9_486:
+  description: "Pneumonia, organism unspecified"
+  keywords:
+    # Core terms
+    - pneumonia
+    - PNA
+    - community-acquired pneumonia
+    - CAP
+    - hospital-acquired pneumonia
+    - HAP
+    - ventilator-associated pneumonia
+    - VAP
+    # Imaging findings
+    - consolidation
+    - infiltrate
+    - opacity
+    - air bronchogram
+    - lobar infiltrate
+    - bilateral infiltrates
+    # Symptoms / Signs
+    - productive cough
+    - sputum
+    - sputum culture
+    - fever
+    - cough
+    # Medications
+    - ceftriaxone
+    - azithromycin
+    - levofloxacin
+    - moxifloxacin
+    - piperacillin
+    - tazobactam
+    - zosyn
+    - vancomycin
+    - cefepime
+    # Clinical
+    - respiratory infection
+    - lower respiratory
+
+icd9_51881:
+  description: "Acute respiratory failure"
+  keywords:
+    # Core terms
+    - respiratory failure
+    - acute respiratory failure
+    - hypoxic respiratory failure
+    - hypercapnic respiratory failure
+    - type 1 respiratory failure
+    - type 2 respiratory failure
+    # Procedures / Devices
+    - intubation
+    - intubated
+    - ventilator
+    - mechanical ventilation
+    - mechanically ventilated
+    - extubation
+    - extubated
+    - endotracheal tube
+    - ETT
+    - tracheostomy
+    - reintubation
+    # Non-invasive
+    - BiPAP
+    - CPAP
+    - NIPPV
+    - non-invasive ventilation
+    - high-flow nasal cannula
+    - HFNC
+    - high flow
+    # Symptoms / Signs
+    - hypoxia
+    - hypoxemic
+    - hypoxemic
+    - hypercapnia
+    - hypercapnic
+    - desaturation
+    - respiratory distress
+    - tachypnea
+    - accessory muscles
+    # Labs / Monitoring
+    - PaO2
+    - PaCO2
+    - SpO2
+    - oxygen saturation
+    - ABG
+    - arterial blood gas
+    - FiO2
+    - P/F ratio
+    - PEEP
+    - tidal volume
+
+icd9_5070:
+  description: "Pneumonitis due to food/vomitus (aspiration)"
+  keywords:
+    - aspiration
+    - aspiration pneumonia
+    - pneumonitis
+    - aspiration pneumonitis
+    - aspiration event
+    - aspiration risk
+    - witnessed aspiration
+    - dysphagia
+    - swallow evaluation
+    - speech and swallow
+    - NPO
+    - thickened liquids
+    - Mendelsohn
+    - aspiration precautions
+    - video swallow
+
+icd9_496:
+  description: "Chronic airway obstruction, NEC"
+  keywords:
+    # Core terms
+    - COPD
+    - chronic obstructive
+    - chronic obstructive pulmonary
+    - emphysema
+    - chronic bronchitis
+    - airway obstruction
+    # Exacerbation
+    - COPD exacerbation
+    - acute exacerbation
+    - AECOPD
+    # Pulmonary function
+    - FEV1
+    - FVC
+    - spirometry
+    - obstructive pattern
+    - air trapping
+    - hyperinflation
+    # Medications
+    - albuterol
+    - ipratropium
+    - tiotropium
+    - spiriva
+    - inhaler
+    - nebulizer
+    - bronchodilator
+    - prednisone
+    - methylprednisolone
+    - salmeterol
+    - formoterol
+    - fluticasone
+    - advair
+    - symbicort
+    - duoneb
+    # Clinical
+    - supplemental oxygen
+    - home oxygen
+    - oxygen dependent
+    - barrel chest
+    - wheezing
+    - wheeze
+    - pursed lip breathing
+    - pulmonary rehab
+
+icd9_5119:
+  description: "Unspecified pleural effusion"
+  keywords:
+    - pleural effusion
+    - effusion
+    - thoracentesis
+    - pleural fluid
+    - pleurisy
+    - pleural tap
+    - chest tube
+    - pigtail catheter
+    - parapneumonic
+    - loculated
+    - empyema
+    - pleural space
+    - costophrenic angle
+    - meniscus sign
+    - blunting
+
+# ─────────────────────── ENDOCRINE / METABOLIC ───────────────────────
+
+icd9_25000:
+  description: "Diabetes mellitus type II without complications"
+  keywords:
+    # Core terms
+    - diabetes
+    - diabetic
+    - diabetes mellitus
+    - DM2
+    - DMII
+    - type 2 diabetes
+    - type II diabetes
+    - NIDDM
+    # Medications – Oral
+    - metformin
+    - glipizide
+    - glyburide
+    - glimepiride
+    - sitagliptin
+    - januvia
+    - pioglitazone
+    - empagliflozin
+    - jardiance
+    - dapagliflozin
+    - canagliflozin
+    - SGLT2
+    # Medications – Injectable
+    - insulin
+    - lantus
+    - glargine
+    - lispro
+    - humalog
+    - novolog
+    - aspart
+    - NPH
+    - sliding scale
+    - insulin drip
+    - semaglutide
+    - liraglutide
+    - GLP-1
+    # Labs
+    - blood glucose
+    - blood sugar
+    - fingerstick
+    - fingerstick glucose
+    - fasting blood glucose
+    - A1c
+    - HbA1c
+    - hemoglobin a1c
+    - glycated hemoglobin
+    - fasting glucose
+    # Clinical
+    - hyperglycemia
+    - hypoglycemia
+    - diabetic diet
+    - carbohydrate counting
+    - endocrinology
+
+icd9_2724:
+  description: "Other and unspecified hyperlipidemia"
+  keywords:
+    - hyperlipidemia
+    - dyslipidemia
+    - hypercholesterolemia
+    - cholesterol
+    - high cholesterol
+    - lipid
+    - lipid panel
+    - lipid profile
+    # Medications
+    - statin
+    - atorvastatin
+    - lipitor
+    - simvastatin
+    - rosuvastatin
+    - crestor
+    - pravastatin
+    - ezetimibe
+    - zetia
+    - fenofibrate
+    - fish oil
+    - niacin
+    - PCSK9
+    # Labs
+    - LDL
+    - HDL
+    - triglyceride
+    - triglycerides
+    - total cholesterol
+    - non-HDL
+
+icd9_2449:
+  description: "Unspecified hypothyroidism"
+  keywords:
+    - hypothyroidism
+    - hypothyroid
+    - underactive thyroid
+    # Medications
+    - levothyroxine
+    - synthroid
+    - thyroid replacement
+    - liothyronine
+    - armour thyroid
+    # Labs
+    - TSH
+    - free T4
+    - T4
+    - thyroid
+    - elevated TSH
+    - thyroid function
+    - thyroid stimulating hormone
+    # Clinical
+    - myxedema
+
+icd9_2762:
+  description: "Acidosis"
+  keywords:
+    - acidosis
+    - metabolic acidosis
+    - lactic acidosis
+    - respiratory acidosis
+    - anion gap
+    - elevated anion gap
+    - non-anion gap
+    - NAGMA
+    - HAGMA
+    # Labs
+    - lactate
+    - lactic acid
+    - bicarbonate
+    - bicarb
+    - pH
+    - base deficit
+    - base excess
+    - CO2
+    - ABG
+    - arterial blood gas
+    - serum bicarbonate
+
+icd9_2761:
+  description: "Hyposmolality / hyponatremia"
+  keywords:
+    - hyponatremia
+    - low sodium
+    - hyposmolality
+    - SIADH
+    - syndrome of inappropriate
+    - free water restriction
+    - fluid restriction
+    - hypertonic saline
+    - serum sodium
+    - serum osmolality
+    - salt tablets
+    - sodium correction
+    - cerebral salt wasting
+
+# ─────────────────────── HEMATOLOGIC ───────────────────────
+
+icd9_2800:
+  description: "Iron deficiency anemia"
+  keywords:
+    - iron deficiency
+    - iron deficiency anemia
+    - IDA
+    # Labs
+    - ferritin
+    - iron
+    - TIBC
+    - transferrin saturation
+    - iron saturation
+    - low ferritin
+    - microcytic
+    - microcytic anemia
+    - low hemoglobin
+    # Treatment
+    - iron supplementation
+    - ferrous sulfate
+    - ferrous gluconate
+    - IV iron
+    - iron infusion
+    - iron sucrose
+    - ferric carboxymaltose
+    - transfusion
+
+icd9_2851:
+  description: "Acute posthemorrhagic anemia"
+  keywords:
+    - hemorrhage
+    - hemorrhagic
+    - bleeding
+    - blood loss
+    - acute blood loss
+    - posthemorrhagic
+    - exsanguination
+    # Treatment
+    - transfusion
+    - blood transfusion
+    - packed red blood cells
+    - PRBC
+    - pRBC
+    - red cell transfusion
+    - crossmatch
+    - type and screen
+    - type and cross
+    - massive transfusion protocol
+    - MTP
+    # Labs
+    - hemoglobin drop
+    - hematocrit drop
+    - H&H
+    - Hgb
+    - Hct
+    # Clinical
+    - anemia
+    - hemorrhagic shock
+    - tachycardia
+    - hypotension
+
+icd9_2859:
+  description: "Anemia, unspecified"
+  keywords:
+    - anemia
+    - anaemia
+    - low hemoglobin
+    - low hematocrit
+    - Hgb
+    - Hct
+    - H&H
+    - hemoglobin drop
+    # Treatment
+    - transfusion
+    - blood transfusion
+    - PRBC
+    - epoetin
+    - erythropoietin
+    - EPO
+    - darbepoetin
+    - iron
+    - ferritin
+    # Labs
+    - reticulocyte
+    - reticulocyte count
+    - MCV
+    - RDW
+    - CBC
+
+icd9_2875:
+  description: "Thrombocytopenia, unspecified"
+  keywords:
+    - thrombocytopenia
+    - low platelets
+    - low platelet count
+    - platelet transfusion
+    - PLT
+    - HIT
+    - heparin-induced thrombocytopenia
+    - ITP
+    - immune thrombocytopenia
+    - TTP
+    - thrombotic thrombocytopenic
+    - DIC
+    - pancytopenia
+
+# ─────────────────────── RENAL ───────────────────────
+
+icd9_5849:
+  description: "Acute kidney failure, unspecified"
+  keywords:
+    # Core terms
+    - acute kidney injury
+    - acute kidney failure
+    - acute renal failure
+    - AKI
+    - ARF
+    - acute renal insufficiency
+    # Etiology
+    - prerenal
+    - intrinsic renal
+    - postrenal
+    - ATN
+    - acute tubular necrosis
+    # Labs / Criteria
+    - creatinine
+    - rising creatinine
+    - elevated creatinine
+    - creatinine elevation
+    - BUN
+    - blood urea nitrogen
+    - oliguria
+    - anuria
+    - urine output
+    - GFR
+    # Treatment
+    - renal replacement
+    - dialysis
+    - hemodialysis
+    - CRRT
+    - continuous renal replacement
+    # Staging
+    - RIFLE
+    - AKIN
+    - KDIGO
+
+icd9_5845:
+  description: "Acute kidney failure with tubular necrosis"
+  keywords:
+    - acute tubular necrosis
+    - ATN
+    - tubular necrosis
+    - acute kidney
+    - acute renal failure
+    - AKI
+    - creatinine
+    - renal failure
+    - muddy brown casts
+    - granular casts
+    - ischemic ATN
+    - nephrotoxic
+    - FeNa
+    - fractional excretion
+
+icd9_5856:
+  description: "End stage renal disease"
+  keywords:
+    - end stage renal
+    - end-stage renal
+    - ESRD
+    - dialysis
+    - hemodialysis
+    - HD
+    - peritoneal dialysis
+    - PD
+    - CAPD
+    # Access
+    - fistula
+    - AV fistula
+    - AV graft
+    - dialysis catheter
+    - permcath
+    - tunneled catheter
+    # Clinical
+    - nephrology
+    - renal replacement
+    - renal replacement therapy
+    - RRT
+    - transplant
+    - renal transplant
+    - kidney transplant
+    # Labs
+    - creatinine
+    - BUN
+    - uremia
+    - uremic
+
+icd9_5859:
+  description: "Chronic kidney disease, unspecified"
+  keywords:
+    - chronic kidney disease
+    - chronic kidney
+    - CKD
+    - chronic renal
+    - chronic renal insufficiency
+    - chronic renal failure
+    - renal insufficiency
+    # Labs
+    - creatinine
+    - baseline creatinine
+    - GFR
+    - eGFR
+    - estimated GFR
+    - proteinuria
+    - albuminuria
+    - microalbuminuria
+    # Clinical
+    - nephropathy
+    - nephrology
+    - renal diet
+    - renal dosing
+
+icd9_5990:
+  description: "Urinary tract infection, site not specified"
+  keywords:
+    # Core terms
+    - urinary tract infection
+    - UTI
+    - urosepsis
+    - cystitis
+    - pyelonephritis
+    # Symptoms
+    - dysuria
+    - urinary frequency
+    - urinary urgency
+    - suprapubic pain
+    - flank pain
+    - hematuria
+    # Labs
+    - pyuria
+    - bacteriuria
+    - urine culture
+    - urinalysis
+    - UA
+    - leukocyte esterase
+    - nitrite
+    - WBC in urine
+    # Medications
+    - ciprofloxacin
+    - nitrofurantoin
+    - macrobid
+    - trimethoprim
+    - sulfamethoxazole
+    - bactrim
+    - cephalexin
+    - ceftriaxone
+    - fosfomycin
+
+# ─────────────────────── GI / HEPATIC ───────────────────────
+
+icd9_53081:
+  description: "Esophageal reflux"
+  keywords:
+    - reflux
+    - GERD
+    - gastroesophageal reflux
+    - esophageal reflux
+    - acid reflux
+    - heartburn
+    # Medications
+    - omeprazole
+    - pantoprazole
+    - protonix
+    - lansoprazole
+    - esomeprazole
+    - nexium
+    - proton pump inhibitor
+    - PPI
+    - famotidine
+    - pepcid
+    - ranitidine
+    - H2 blocker
+    # Clinical
+    - dyspepsia
+    - epigastric
+    - regurgitation
+
+icd9_5715:
+  description: "Cirrhosis of liver without alcohol"
+  keywords:
+    # Core terms
+    - cirrhosis
+    - cirrhotic
+    - hepatic cirrhosis
+    - liver cirrhosis
+    - liver disease
+    - chronic liver disease
+    - decompensated cirrhosis
+    - compensated cirrhosis
+    # Complications
+    - portal hypertension
+    - ascites
+    - varices
+    - variceal
+    - esophageal varices
+    - hepatic encephalopathy
+    - hepatorenal syndrome
+    - HRS
+    - SBP
+    - spontaneous bacterial peritonitis
+    - coagulopathy
+    - hepatocellular carcinoma
+    - HCC
+    # Labs / Scoring
+    - MELD
+    - MELD score
+    - Child-Pugh
+    - bilirubin
+    - albumin
+    - INR
+    - ammonia
+    - AST
+    - ALT
+    - alkaline phosphatase
+    - liver function
+    - LFT
+    # Medications
+    - lactulose
+    - rifaximin
+    - spironolactone
+    - furosemide
+    - nadolol
+    - propranolol
+    - octreotide
+    # Procedures
+    - TIPS
+    - paracentesis
+    - liver biopsy
+    - liver transplant
+    - endoscopy
+    - band ligation
+
+icd9_5723:
+  description: "Portal hypertension"
+  keywords:
+    - portal hypertension
+    - portal pressure
+    - varices
+    - variceal
+    - esophageal varices
+    - gastric varices
+    - variceal bleeding
+    - variceal hemorrhage
+    - ascites
+    - splenomegaly
+    - TIPS
+    - transjugular intrahepatic portosystemic shunt
+    - portocaval
+    - caput medusae
+    - collateral vessels
+
+icd9_5781:
+  description: "Blood in stool / melena"
+  keywords:
+    - melena
+    - hematochezia
+    - GI bleed
+    - GI bleeding
+    - gastrointestinal bleed
+    - gastrointestinal bleeding
+    - GIB
+    - upper GI bleed
+    - lower GI bleed
+    - UGIB
+    - LGIB
+    - blood in stool
+    - bloody stool
+    - hematemesis
+    - coffee ground emesis
+    - coffee-ground
+    - guaiac positive
+    - occult blood
+    - FOBT
+    - nasogastric lavage
+    - EGD
+    - esophagogastroduodenoscopy
+    - colonoscopy
+    - endoscopy
+    - transfusion
+
+# ─────────────────────── INFECTIOUS / SEPSIS ───────────────────────
+
+icd9_99592:
+  description: "Severe sepsis"
+  keywords:
+    # Core terms
+    - sepsis
+    - septic
+    - septicemia
+    - severe sepsis
+    - septic shock
+    - bacteremia
+    - blood culture
+    - positive blood culture
+    # Clinical criteria
+    - SIRS
+    - systemic inflammatory
+    - SOFA
+    - qSOFA
+    - organ dysfunction
+    - multiorgan failure
+    - end-organ damage
+    # Vitals / Hemodynamics
+    - vasopressor
+    - vasopressors
+    - norepinephrine
+    - levophed
+    - phenylephrine
+    - vasopressin
+    - dopamine
+    - epinephrine
+    - MAP
+    - mean arterial pressure
+    - hemodynamic instability
+    - pressor
+    - pressors
+    # Labs
+    - lactate
+    - lactic acid
+    - elevated lactate
+    - procalcitonin
+    - leukocytosis
+    - bandemia
+    - WBC
+    - white blood cell
+    # Treatment
+    - broad-spectrum antibiotics
+    - empiric antibiotics
+    - fluid resuscitation
+    - crystalloid
+    - central line
+    - central venous catheter
+    - source control
+
+# ─────────────────────── NEUROPSYCH ───────────────────────
+
+icd9_2930:
+  description: "Delirium due to conditions classified elsewhere"
+  keywords:
+    # Core terms
+    - delirium
+    - delirious
+    - acute confusional state
+    - acute confusion
+    # Symptoms
+    - confusion
+    - confused
+    - agitation
+    - agitated
+    - disoriented
+    - disorientation
+    - altered mental status
+    - altered sensorium
+    - inattention
+    - fluctuating mental status
+    - sundowning
+    - combative
+    - hallucination
+    - hallucinations
+    # Screening
+    - CAM
+    - CAM-ICU
+    - confusion assessment
+    - RASS
+    # Treatment
+    - haloperidol
+    - haldol
+    - quetiapine
+    - seroquel
+    - olanzapine
+    - reorientation
+    - restraint
+    - restraints
+    - sitter
+    - one-to-one
+    # Clinical
+    - encephalopathy
+
+icd9_34830:
+  description: "Encephalopathy, unspecified"
+  keywords:
+    - encephalopathy
+    - metabolic encephalopathy
+    - toxic-metabolic encephalopathy
+    - hepatic encephalopathy
+    - uremic encephalopathy
+    - hypoxic encephalopathy
+    - anoxic encephalopathy
+    - altered mental status
+    - AMS
+    - change in mental status
+    - obtunded
+    - lethargy
+    - lethargic
+    - somnolent
+    - somnolence
+    - confusion
+    - unresponsive
+    - decreased level of consciousness
+    - LOC
+    - GCS
+    - Glasgow coma scale
+    - asterixis
+    - ammonia
+
+icd9_30000:
+  description: "Anxiety state, unspecified"
+  keywords:
+    - anxiety
+    - anxious
+    - anxiety disorder
+    - generalized anxiety
+    - GAD
+    - panic
+    - panic attack
+    - nervousness
+    # Medications
+    - lorazepam
+    - ativan
+    - alprazolam
+    - xanax
+    - clonazepam
+    - klonopin
+    - benzodiazepine
+    - buspirone
+    - hydroxyzine
+    # Clinical
+    - anxiolytic
+
+icd9_311:
+  description: "Depressive disorder, not elsewhere classified"
+  keywords:
+    - depression
+    - depressive
+    - depressed
+    - depressive disorder
+    - major depression
+    - MDD
+    - dysthymia
+    - depressed mood
+    - low mood
+    # Medications
+    - SSRI
+    - sertraline
+    - zoloft
+    - fluoxetine
+    - prozac
+    - citalopram
+    - escitalopram
+    - lexapro
+    - paroxetine
+    - venlafaxine
+    - effexor
+    - duloxetine
+    - cymbalta
+    - bupropion
+    - wellbutrin
+    - mirtazapine
+    - remeron
+    - trazodone
+    - antidepressant
+    - SNRI
+    # Clinical
+    - suicidal ideation
+    - SI
+    - psychiatry
+
+icd9_3051:
+  description: "Tobacco use disorder"
+  keywords:
+    - tobacco
+    - tobacco use
+    - smoking
+    - smoker
+    - current smoker
+    - active smoker
+    - nicotine
+    - nicotine dependence
+    - cigarette
+    - cigarettes
+    - pack-year
+    - pack year
+    - packs per day
+    - ppd
+    - nicotine patch
+    - nicotine gum
+    - nicotine replacement
+    - varenicline
+    - chantix
+    - smoking cessation
+    - tobacco cessation
+    - tobacco abuse
+
+icd9_V1582:
+  description: "Personal history of tobacco use"
+  keywords:
+    - tobacco history
+    - smoking history
+    - former smoker
+    - ex-smoker
+    - prior smoker
+    - quit smoking
+    - remote smoking history
+    - previous smoker
+    - nicotine
+    - pack-year
+    - pack year
+    - prior tobacco
+
+icd9_32723:
+  description: "Obstructive sleep apnea"
+  keywords:
+    - sleep apnea
+    - obstructive sleep apnea
+    - OSA
+    - CPAP
+    - BiPAP
+    - apnea-hypopnea
+    - apnea hypopnea index
+    - AHI
+    - obstructive sleep
+    - polysomnography
+    - sleep study
+    - sleep-disordered breathing
+    - nocturnal hypoxia
+    - snoring
+
+# ─────────────────────── PROCEDURAL COMPLICATIONS ───────────────────────
+
+icd9_E8788:
+  description: "Other specified surgical operations as cause of abnormal reaction"
+  keywords:
+    - surgical complication
+    - postoperative
+    - post-surgical
+    - post-op
+    - postop
+    - complication of surgery
+    - surgical site
+    - wound complication
+    - operative complication
+    - intraoperative
+    - perioperative
+
+icd9_E8798:
+  description: "Other specified procedures as cause of abnormal reaction"
+  keywords:
+    - procedural complication
+    - post-procedure
+    - post procedure
+    - complication of procedure
+    - complication of
+    - iatrogenic
+    - adverse reaction
+    - procedure-related
+
+icd9_99811:
+  description: "Hemorrhage complicating a procedure"
+  keywords:
+    - hemorrhage
+    - bleeding
+    - surgical bleeding
+    - postoperative hemorrhage
+    - postoperative bleeding
+    - post-procedural bleeding
+    - blood loss
+    - operative blood loss
+    - intraoperative bleeding
+    - surgical drain
+    - hematoma
+    - hemostasis
+    - re-exploration
+    - return to OR
+
+icd9_V4581:
+  description: "Aortocoronary bypass status"
+  keywords:
+    - CABG
+    - coronary artery bypass graft
+    - bypass graft
+    - coronary bypass
+    - aortocoronary
+    - aortocoronary bypass
+    - status post CABG
+    - bypass surgery
+    - saphenous vein graft
+    - SVG
+    - LIMA
+    - internal mammary
+    - graft patency
+
+# ─────────────────────── NEWLY ADDED (GAP-FILL) ───────────────────────
+
+icd9_49390:
+  description: "Asthma, unspecified"
+  keywords:
+    # Core terms
+    - asthma
+    - asthmatic
+    - reactive airway
+    - reactive airway disease
+    - bronchospasm
+    - bronchospastic
+    - wheezing
+    - wheeze
+    # Medications
+    - albuterol
+    - ProAir
+    - ventolin
+    - levalbuterol
+    - ipratropium
+    - inhaler
+    - nebulizer
+    - metered dose inhaler
+    - MDI
+    - spacer
+    - fluticasone
+    - budesonide
+    - montelukast
+    - singulair
+    - prednisone
+    - methylprednisolone
+    - advair
+    - symbicort
+    - salmeterol
+    - formoterol
+    # Clinical
+    - peak flow
+    - PEF
+    - FEV1
+    - spirometry
+    - asthma exacerbation
+    - asthma attack
+    - status asthmaticus
+    - bronchodilator
+    - steroid taper
+
+icd9_27800:
+  description: "Obesity, unspecified"
+  keywords:
+    - obesity
+    - obese
+    - morbid obesity
+    - morbidly obese
+    - BMI
+    - body mass index
+    - overweight
+    - bariatric
+    - bariatric surgery
+    - gastric bypass
+    - gastric sleeve
+    - Roux-en-Y
+    - weight management
+    - weight loss surgery
+    - orlistat
+
+icd9_73300:
+  description: "Osteoporosis, unspecified"
+  keywords:
+    - osteoporosis
+    - osteoporotic
+    - osteopenia
+    - bone density
+    - bone mineral density
+    - DEXA
+    - DXA
+    - T-score
+    - fragility fracture
+    - compression fracture
+    - vertebral fracture
+    - pathologic fracture
+    # Medications
+    - alendronate
+    - fosamax
+    - risedronate
+    - ibandronate
+    - bisphosphonate
+    - denosumab
+    - prolia
+    - teriparatide
+    - forteo
+    - calcium
+    - vitamin D
+    - calcitonin
+    - raloxifene
+    - zoledronic acid
+
+icd9_2749:
+  description: "Gout, unspecified"
+  keywords:
+    - gout
+    - gouty
+    - gouty arthritis
+    - gout flare
+    - acute gout
+    - chronic gout
+    - tophaceous
+    - tophi
+    - tophus
+    - podagra
+    # Labs
+    - uric acid
+    - hyperuricemia
+    - urate
+    # Medications
+    - allopurinol
+    - febuxostat
+    - uloric
+    - colchicine
+    - probenecid
+    - indomethacin
+    - prednisone
+
+icd9_60000:
+  description: "Benign prostatic hyperplasia (BPH), unspecified"
+  keywords:
+    - BPH
+    - benign prostatic hyperplasia
+    - benign prostatic hypertrophy
+    - prostatic
+    - prostate
+    - prostate enlargement
+    - enlarged prostate
+    # Symptoms
+    - urinary retention
+    - urinary hesitancy
+    - nocturia
+    - urinary frequency
+    - weak stream
+    - incomplete emptying
+    - post-void residual
+    - LUTS
+    - lower urinary tract symptoms
+    # Medications
+    - tamsulosin
+    - flomax
+    - finasteride
+    - proscar
+    - dutasteride
+    - avodart
+    - alfuzosin
+    - doxazosin
+    - terazosin
+    - silodosin
+    # Procedures
+    - TURP
+    - transurethral resection
+    - Foley catheter
+    - straight cath
+
+icd9_41400:
+  description: "Coronary atherosclerosis, unspecified vessel"
+  keywords:
+    # Same clinical profile as 41401
+    - coronary atherosclerosis
+    - coronary artery disease
+    - CAD
+    - ischemic heart disease
+    - coronary artery
+    - angina
+    - chest pain
+    - exertional chest pain
+    # Procedures
+    - stent
+    - angioplasty
+    - cardiac catheterization
+    - cardiac cath
+    - coronary angiography
+    - angiogram
+    - CABG
+    - coronary bypass
+    - PCI
+    - percutaneous coronary intervention
+    # Medications
+    - atorvastatin
+    - clopidogrel
+    - plavix
+    - aspirin
+    - nitroglycerin
+    - nitrate
+    - isosorbide
+    - ranolazine
+    # Labs / Diagnostic
+    - troponin
+    - stress test
+    - nuclear stress
+    - stenosis
+    - ECG
+    - EKG
+
+icd9_27651:
+  description: "Dehydration"
+  keywords:
+    - dehydration
+    - dehydrated
+    - volume depletion
+    - volume depleted
+    - hypovolemia
+    - hypovolemic
+    - dry mucous membranes
+    - poor skin turgor
+    - decreased urine output
+    - low urine output
+    # Treatment
+    - IV fluids
+    - IVF
+    - fluid resuscitation
+    - fluid bolus
+    - normal saline
+    - lactated Ringer
+    - Ringer lactate
+    - volume resuscitation
+    - fluid repletion
+    # Labs
+    - elevated BUN
+    - BUN/creatinine ratio
+    - hemoconcentration
+    - prerenal
+    - concentrated urine
+    - orthostatic
+
+icd9_33829:
+  description: "Other diabetic polyneuropathy"
+  keywords:
+    - diabetic neuropathy
+    - diabetic polyneuropathy
+    - diabetic peripheral neuropathy
+    - neuropathy
+    - peripheral neuropathy
+    - neuropathic pain
+    - neuropathic
+    # Symptoms
+    - numbness
+    - tingling
+    - paresthesia
+    - paresthesias
+    - burning feet
+    - loss of sensation
+    - decreased sensation
+    # Medications
+    - gabapentin
+    - neurontin
+    - pregabalin
+    - lyrica
+    - duloxetine
+    - cymbalta
+    - amitriptyline
+    - nortriptyline
+    - capsaicin
+    # Clinical
+    - monofilament
+    - foot exam
+    - stocking-glove
+
+icd9_3572:
+  description: "Polyneuropathy in diabetes / peripheral neuropathy"
+  keywords:
+    - peripheral neuropathy
+    - polyneuropathy
+    - neuropathy
+    - neuropathic
+    - neuropathic pain
+    # Symptoms
+    - numbness
+    - tingling
+    - paresthesia
+    - paresthesias
+    - burning
+    - loss of sensation
+    - decreased sensation
+    - stocking-glove
+    # Medications
+    - gabapentin
+    - neurontin
+    - pregabalin
+    - lyrica
+    - duloxetine
+    - amitriptyline
+    - nortriptyline
+    - capsaicin
+    # Clinical
+    - monofilament
+    - nerve conduction
+    - EMG
+    - electromyography
+
+icd9_42789:
+  description: "Other cardiac dysrhythmias"
+  keywords:
+    - arrhythmia
+    - dysrhythmia
+    - cardiac arrhythmia
+    - cardiac dysrhythmia
+    - irregular rhythm
+    - irregular heart rhythm
+    # Specific arrhythmias
+    - SVT
+    - supraventricular tachycardia
+    - bradycardia
+    - sinus bradycardia
+    - tachycardia
+    - sinus tachycardia
+    - ventricular tachycardia
+    - VT
+    - ventricular fibrillation
+    - VF
+    - PVC
+    - premature ventricular
+    - PAC
+    - premature atrial
+    - atrial flutter
+    - heart block
+    - AV block
+    - first degree
+    - second degree
+    - third degree
+    - bundle branch block
+    - LBBB
+    - RBBB
+    - sick sinus
+    # Devices / Procedures
+    - pacemaker
+    - defibrillator
+    - ICD
+    - implantable cardioverter
+    - telemetry
+    - cardiac monitor
+    # Medications
+    - amiodarone
+    - lidocaine
+    - adenosine
+    - sotalol
+    - flecainide
+
+icd9_56400:
+  description: "Constipation, unspecified"
+  keywords:
+    - constipation
+    - constipated
+    - no bowel movement
+    - absent bowel movement
+    - decreased bowel movements
+    - hard stool
+    - straining
+    - obstipation
+    - ileus
+    - bowel regimen
+    # Medications
+    - laxative
+    - senna
+    - sennosides
+    - docusate
+    - colace
+    - miralax
+    - polyethylene glycol
+    - PEG
+    - lactulose
+    - bisacodyl
+    - dulcolax
+    - magnesium citrate
+    - enema
+    - fleet enema
+    - suppository
+    - fiber
+
+icd9_2720:
+  description: "Pure hypercholesterolemia"
+  keywords:
+    # Same clinical profile as 2724
+    - hypercholesterolemia
+    - high cholesterol
+    - elevated cholesterol
+    - cholesterol
+    - dyslipidemia
+    - hyperlipidemia
+    - lipid
+    - lipid panel
+    # Medications
+    - statin
+    - atorvastatin
+    - lipitor
+    - simvastatin
+    - rosuvastatin
+    - crestor
+    - pravastatin
+    - ezetimibe
+    - zetia
+    - PCSK9
+    # Labs
+    - LDL
+    - elevated LDL
+    - HDL
+    - total cholesterol
+    - non-HDL
+
+icd9_V1251:
+  description: "Personal history of malignant neoplasm of colon"
+  keywords:
+    - colon cancer
+    - colorectal cancer
+    - colorectal
+    - colon carcinoma
+    - rectal cancer
+    - history of colon
+    - colectomy
+    - hemicolectomy
+    - colostomy
+    - sigmoid resection
+    - CEA
+    - carcinoembryonic
+    - oncology
+    - chemotherapy
+    - colonoscopy surveillance
+    - colorectal neoplasm
+    - colon polyp
+
+icd9_V1254:
+  description: "Personal history of malignant neoplasm of lung"
+  keywords:
+    - lung cancer
+    - lung carcinoma
+    - lung neoplasm
+    - non-small cell
+    - small cell lung
+    - NSCLC
+    - SCLC
+    - history of lung
+    - lobectomy
+    - pneumonectomy
+    - lung resection
+    - lung mass
+    - pulmonary mass
+    - pulmonary nodule
+    - lung nodule
+    - oncology
+    - chemotherapy
+    - radiation therapy
+    - thoracic surgery
+
+# ─────────────────────── V-CODES: LONG-TERM MEDICATION USE ───────────────────────
+
+icd9_V5861:
+  description: "Long-term (current) use of anticoagulants"
+  keywords:
+    # Core terms
+    - anticoagulation
+    - anticoagulant
+    - anticoagulated
+    - blood thinner
+    - long-term anticoagulation
+    # Medications – Warfarin
+    - warfarin
+    - coumadin
+    - INR
+    - therapeutic INR
+    # Medications – DOACs
+    - apixaban
+    - eliquis
+    - rivaroxaban
+    - xarelto
+    - dabigatran
+    - pradaxa
+    - edoxaban
+    # Medications – Heparin (long-term bridge)
+    - enoxaparin
+    - lovenox
+    # Clinical
+    - anticoagulant therapy
+    - on anticoagulation
+
+icd9_V5867:
+  description: "Long-term (current) use of insulin"
+  keywords:
+    - insulin
+    - insulin dependent
+    - insulin-dependent
+    - insulin therapy
+    - on insulin
+    - insulin regimen
+    # Specific insulins
+    - glargine
+    - lantus
+    - levemir
+    - detemir
+    - degludec
+    - tresiba
+    - NPH
+    - lispro
+    - humalog
+    - aspart
+    - novolog
+    - regular insulin
+    - insulin pump
+    # Clinical
+    - basal insulin
+    - basal-bolus
+    - sliding scale insulin
+    - insulin drip
+
+icd9_V5866:
+  description: "Long-term (current) use of aspirin"
+  keywords:
+    - aspirin
+    - ASA
+    - daily aspirin
+    - low-dose aspirin
+    - baby aspirin
+    - aspirin 81
+    - aspirin 325
+    - antiplatelet
+    - acetylsalicylic acid
+    - enteric-coated aspirin
+    - aspirin therapy
+    - on aspirin
+
+icd9_V4582:
+  description: "Percutaneous transluminal coronary angioplasty status"
+  keywords:
+    - PTCA
+    - angioplasty
+    - percutaneous coronary intervention
+    - PCI
+    - stent
+    - coronary stent
+    - drug-eluting stent
+    - DES
+    - bare metal stent
+    - BMS
+    - balloon angioplasty
+    - status post stent
+    - status post PCI
+    - stent placement
+    - in-stent restenosis

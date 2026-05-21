@@ -32,6 +32,9 @@ image = (
     .add_local_python_source("mech_interp_research")
     .add_local_python_source("modal_app")
     .add_local_file("configs/lexical_keywords.yaml", "/root/configs/lexical_keywords.yaml")
+    .add_local_file(
+        "configs/icd9_keywords_improved.yaml", "/root/configs/icd9_keywords_improved.yaml"
+    )
 )
 
 raw_volume = modal.Volume.from_name("mimic-iv-raw", create_if_missing=False)
