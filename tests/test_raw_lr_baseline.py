@@ -640,3 +640,61 @@ def test_run_raw_lr_baseline_invokes_on_shard_complete(centered_run_dir, tmp_pat
     # synthetic_run_dir/centered_run_dir has 2 shards (0 and 1) — both
     # must trigger the callback.
     assert sorted(seen_shards) == [0, 1]
+
+
+def test_run_raw_lr_baseline_solo_mode(centered_run_dir, tmp_path):
+    """sae_results_csv=None → write raw-only outputs, skip comparison."""
+
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    output_dir = tmp_path / "raw_lr_solo_output"
+    summary = run_raw_lr_baseline(
+        activations_dir=centered_run_dir,
+        sae_results_csv=None,  # solo mode
+        icd_csv_path=icd_csv,
+        output_dir=output_dir,
+        join_key="note_idx",
+        icd_col_prefix="icd9_",
+        min_prevalence=0.0,
+        max_codes=50,
+        min_notes=1,
+        cv_n_splits=2,
+        lr_max_iter=200,
+        random_state=42,
+    )
+
+    # Only raw-side outputs exist; no comparison artifacts.
+    assert (output_dir / "raw_lr_summary.json").exists()
+    assert (output_dir / "raw_cv_results.csv").exists()
+    assert (output_dir / "raw_shard_ckpt").is_dir()
+    assert not (output_dir / "per_code_comparison.csv").exists()
+    assert not (output_dir / "sae_cv_results.csv").exists()
+
+    # Summary has solo shape: no classification_* or dropped_codes_* sections.
+    assert summary["mode"] == "solo"
+    assert summary["n_codes"] == 2
+    assert "auc_roc_mean" in summary
+    assert "auc_pr_mean" in summary
+    assert "classification_auc_roc" not in summary
+    assert "dropped_codes_raw_only" not in summary
+
+    # raw_cv_results.csv carries the per-code AUCs that the caller will read.
+    raw_df = pd.read_csv(output_dir / "raw_cv_results.csv")
+    assert set(raw_df["code"]) == {"icd9_4019", "icd9_25000"}
+    assert "auc_roc_mean" in raw_df.columns
+    assert "auc_pr_mean" in raw_df.columns

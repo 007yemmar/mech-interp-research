@@ -304,7 +304,7 @@ def pool_raw_activations(
 
 def run_raw_lr_baseline(
     activations_dir: str | Path,
-    sae_results_csv: str | Path,
+    sae_results_csv: str | Path | None,
     icd_csv_path: str | Path,
     output_dir: str | Path,
     pooling: PoolingStrategy = "max",
@@ -322,8 +322,13 @@ def run_raw_lr_baseline(
     delta_auc_threshold: float = 0.02,
     random_state: int = 42,
 ) -> dict:
-    """Run the raw-activation LR baseline and compare against an existing
-    SAE-probe ``sae_cv_results.csv``.
+    """Run the raw-activation LR baseline.
+
+    With ``sae_results_csv`` set: head-to-head comparison against the SAE-side
+    CV results from a prior ``tfidf_lr_baseline`` run.
+
+    With ``sae_results_csv=None`` (solo mode): compute and write per-code raw
+    AUCs only; skip alignment, comparison, and rename steps.
 
     See ``docs/superpowers/specs/2026-05-20-baseline-3-raw-activation-
     probe-design.md`` for the full design. CV protocol, classifier, and
@@ -337,17 +342,21 @@ def run_raw_lr_baseline(
             shard.
     """
     activations_dir = Path(activations_dir)
-    sae_results_csv = Path(sae_results_csv)
+    sae_results_csv = Path(sae_results_csv) if sae_results_csv is not None else None
     icd_csv_path = Path(icd_csv_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    solo_mode = sae_results_csv is None
 
     if checkpoint_dir is None:
         checkpoint_dir = output_dir / "raw_shard_ckpt"
     checkpoint_dir = Path(checkpoint_dir)
 
     logger.info("=" * 60)
-    logger.info("Raw-Activation LR Baseline (Baseline 3)")
+    logger.info(
+        "Raw-Activation LR Baseline (Baseline 3)%s",
+        " — SOLO mode (no SAE comparison)" if solo_mode else "",
+    )
     logger.info("=" * 60)
     logger.info(f"  pooling={pooling} topk={topk}")
     logger.info(f"  activations_dir={activations_dir}")
@@ -371,11 +380,12 @@ def run_raw_lr_baseline(
     else:
         logger.warning(f"No manifest.json at {manifest_path}; skipping centered check.")
 
-    # Fail fast if the SAE CSV is missing or not a file.
-    if not sae_results_csv.is_file():
+    # Fail fast if the SAE CSV is missing or not a file (skipped in solo mode).
+    if not solo_mode and not sae_results_csv.is_file():
         raise FileNotFoundError(
             f"sae_results_csv not found or is not a file at {sae_results_csv}. "
-            "Run tfidf_lr_baseline first to produce sae_cv_results.csv."
+            "Run tfidf_lr_baseline first to produce sae_cv_results.csv, or set "
+            "sae_results_csv=None for solo mode."
         )
 
     # Fail fast if the ICD CSV is missing — saves the ~1-2 hour pooling step
@@ -441,6 +451,40 @@ def run_raw_lr_baseline(
         random_state=random_state,
     )
 
+    def _safe_mean(vals: list) -> float | None:
+        clean = [v for v in vals if v is not None]
+        return round(float(np.mean(clean)), 4) if clean else None
+
+    if solo_mode:
+        # Solo mode: write per-code raw AUCs only. Skip Steps 6-9.
+        raw_valid = [r for r in raw_cv if r.get("status") == "ok"]
+        summary: dict[str, Any] = {
+            "n_notes": int(len(icd_matrix)),
+            "n_codes": len(code_names),
+            "n_codes_evaluated": len(raw_valid),
+            "raw_features": int(X_raw.shape[1]),
+            "pooling": pooling,
+            "cv_folds": cv_n_splits,
+            "mode": "solo",
+            "auc_roc_mean": _safe_mean([r["auc_roc_mean"] for r in raw_valid]),
+            "auc_pr_mean": _safe_mean([r["auc_pr_mean"] for r in raw_valid]),
+            "per_code": raw_cv,
+        }
+        with open(output_dir / "raw_lr_summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+        pd.DataFrame(raw_cv).to_csv(output_dir / "raw_cv_results.csv", index=False)
+
+        logger.info("=" * 60)
+        logger.info("RAW-ACTIVATION LR BASELINE SUMMARY (SOLO)")
+        logger.info("=" * 60)
+        logger.info(
+            f"  Notes: {summary['n_notes']}, Codes evaluated: {summary['n_codes_evaluated']}"
+        )
+        logger.info(f"  AUC-ROC mean: {summary['auc_roc_mean']}")
+        logger.info(f"  AUC-PR  mean: {summary['auc_pr_mean']}")
+        logger.info("=" * 60)
+        return summary
+
     # ------------------------------------------------------------------
     # 6. Load SAE-side results (no recompute), validate schema
     # ------------------------------------------------------------------
@@ -481,11 +525,7 @@ def run_raw_lr_baseline(
     def _count(field: str, value: str) -> int:
         return sum(1 for c in valid if c.get(field) == value)
 
-    def _safe_mean(vals: list) -> float | None:
-        clean = [v for v in vals if v is not None]
-        return round(float(np.mean(clean)), 4) if clean else None
-
-    summary: dict[str, Any] = {
+    summary = {
         "n_notes": int(len(icd_matrix)),
         "n_codes": len(code_names),
         "n_codes_evaluated": n_valid,
