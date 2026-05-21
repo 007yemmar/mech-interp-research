@@ -420,7 +420,10 @@ def load_train_state(
         scheduler.load_state_dict(state["scheduler"])
     torch.set_rng_state(state["torch_rng"].cpu())
     if torch.cuda.is_available() and state.get("cuda_rng") is not None:
-        torch.cuda.set_rng_state_all(state["cuda_rng"])
+        # torch.load(map_location="cuda") moves the saved per-device ByteTensors
+        # onto CUDA; set_rng_state_all requires them on CPU, so coerce back.
+        cuda_rng = [s.cpu() if isinstance(s, torch.Tensor) else s for s in state["cuda_rng"]]
+        torch.cuda.set_rng_state_all(cuda_rng)
     return {
         "step": state["step"],
         "epoch": state["epoch"],
@@ -629,6 +632,17 @@ def train(config: JumpReLUConfig) -> dict[str, Any]:
                 if step % config.log_every_n_steps == 0:
                     l0 = (z_mon > 0).float().sum(dim=-1).mean().item()
 
+                    # Per-batch dead fraction — a feature is "dead this batch"
+                    # if it fired for zero of the train_batch_size_tokens tokens.
+                    # This is stricter than the post-hoc eval's activation_freq
+                    # < 1e-6 criterion (which is a per-token rate over a larger
+                    # sample), but the two metrics track each other closely
+                    # in practice and the batch version costs nothing extra.
+                    # Lets us SEE feature death as it unfolds rather than waiting
+                    # for the next checkpoint scan.
+                    fired_this_batch = (z_mon > 0).any(dim=0).float()  # [d_sae]
+                    dead_frac_batch = 1.0 - fired_this_batch.mean().item()
+
                     # Threshold statistics — useful for diagnosing training dynamics.
                     # mean_threshold: if this keeps rising, lambda_l0 may be too high.
                     # threshold_std: healthy spread means features are specialising.
@@ -643,6 +657,7 @@ def train(config: JumpReLUConfig) -> dict[str, Any]:
                     log_data = {
                         **metrics,
                         "l0": l0,
+                        "dead_frac_batch": dead_frac_batch,
                         "mean_threshold": mean_threshold,
                         "threshold_std": threshold_std,
                         "explained_variance": ev,
@@ -654,7 +669,8 @@ def train(config: JumpReLUConfig) -> dict[str, Any]:
                     print(
                         f"step {step:7d} | loss {metrics['loss/total']:.4f} "
                         f"| mse {metrics['loss/mse']:.4f} "
-                        f"| L0 {l0:.1f} | θ_mean {mean_threshold:.5f} "
+                        f"| L0 {l0:.1f} | dead {dead_frac_batch:.3f} "
+                        f"| θ_mean {mean_threshold:.5f} "
                         f"| θ_std {threshold_std:.5f} "
                         f"| ev {ev:.3f} | λ {effective_lambda:.4f}"
                     )

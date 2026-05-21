@@ -15,23 +15,33 @@
 #   MODAL_GPU=A100-40GB modal run modal_app/train_jumprelu.py \
 #     --config-file configs/jumprelu_50k.yaml
 
+resume_from: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00026000
+
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 
 # Architecture — identical to the vanilla SAE for an apples-to-apples comparison
 d_in: 2304
 expansion_factor: 8          # d_sae = 18432
 
-# JumpReLU specific — values copied from jumprelu_cal.yaml after calibration
-# (see jumprelu_cal.yaml header for the L0-vs-lambda_l0 tuning table).
-lambda_l0: 10               # gives equilibrium L0 ≈ 25 on the calibration subset
-bandwidth: 0.5               # rectangular STE kernel half-width, scaled to σ ≈ 3.42
-log_threshold_init: 2.3      # θ₀ = exp(2.3) ≈ 10, near the calibrated equilibrium —
-                             # avoids the cold-start instability of θ₀ ≈ 0.001
-
-# Sparsity warmup — scaled up from the calibration value (50 steps over ~540)
-# to mirror the vanilla l1_warmup_steps: 3000 (~6% of the 50k-step budget).
-# Ramps lambda_l0 from 0 → 1.5 to prevent mass feature death at the start.
-lambda_l0_warmup_steps: 1000
+# JumpReLU specific — second-pass values designed to revive the dead features
+# observed in the first full run. Diagnosis: with log_threshold_init=2.3
+# (θ₀≈10) and bandwidth=0.5, ~55% of features had pre-activations that never
+# reached the kernel band |π−θ| < ε/2 during warmup, so they received zero
+# gradient from either the recon or L0 path and stayed dormant. The fix
+# combines three orthogonal levers:
+#   1. log_threshold_init=-2.0 → θ₀≈0.135, so virtually every feature fires
+#      at init and can establish a useful encoder direction before sparsity
+#      pressure forces it to specialise.
+#   2. lambda_l0_warmup_steps=5000 → 5× longer warmup gives features more
+#      time to learn directions before the L0 penalty starts pushing thresholds
+#      up. Reduces the "feature death during ramp" failure mode.
+#   3. bandwidth=1.0 → 2× wider kernel band keeps more features within the
+#      gradient window as their thresholds drift, slowing the rate at which
+#      features fall out of the self-correction loop.
+lambda_l0: 10
+bandwidth: 1.0
+log_threshold_init: -2.0
+lambda_l0_warmup_steps: 5000
 
 # Training — mirrors configs/sae_train_50k.yaml exactly
 lr: 0.0002
@@ -50,11 +60,10 @@ run_id: null                 # auto-generated: jumprelu_d2304_e8_l0<λ>_bw<ε>_<
 
 # Monitoring — cadences match the vanilla 50k run for directly comparable W&B traces
 log_every_n_steps: 100
-# 3000-step cadence (matches the printed log block) caps the worst-case work
-# lost on a mid-run crash to ~3000 steps. Each train_state.pt is ~360 MB
-# (Adam first + second moments at d_sae=18432, fp32), so ~17 checkpoints over
-# the full run fits comfortably on the Modal volume.
-save_every_n_steps: 3000
+# 2000-step cadence gives an earlier bail-out window for short experimental
+# runs (decide at step ~6000 whether the dead-fraction fix worked) while still
+# fitting ~25 checkpoints + train_state.pt's on the Modal volume.
+save_every_n_steps: 2000
 wandb_project: sae-mimic     # log alongside the vanilla run for side-by-side curves
 wandb_run_name: null
 
