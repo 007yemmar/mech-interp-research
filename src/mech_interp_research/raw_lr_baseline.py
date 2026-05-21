@@ -319,6 +319,7 @@ def run_raw_lr_baseline(
     min_notes: int = 100,
     cv_n_splits: int = 5,
     lr_max_iter: int = 5000,
+    lr_solver: str = "saga",
     delta_auc_threshold: float = 0.02,
     random_state: int = 42,
 ) -> dict:
@@ -441,7 +442,7 @@ def run_raw_lr_baseline(
     # ------------------------------------------------------------------
     # 5. Per-code CV on raw features (reuse the existing protocol)
     # ------------------------------------------------------------------
-    logger.info("Step 5: Evaluating raw features (per-code CV)...")
+    logger.info(f"Step 5: Evaluating raw features (per-code CV, solver={lr_solver})...")
     raw_cv = evaluate_per_code_cv(
         X_raw,
         icd_matrix,
@@ -449,6 +450,7 @@ def run_raw_lr_baseline(
         n_splits=cv_n_splits,
         max_iter=lr_max_iter,
         random_state=random_state,
+        solver=lr_solver,
     )
 
     def _safe_mean(vals: list) -> float | None:
