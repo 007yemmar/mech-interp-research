@@ -1,0 +1,38 @@
+# Raw-activation LR probe — Baseline 3 — GemmaScope comparator.
+#
+# Run:
+#   modal run modal_app/raw_lr_baseline.py --config-file configs/raw_lr_baseline_gemmascope.yaml
+#
+# Requires an existing tfidf_lr_baseline_gemmascope run (we read sae_cv_results.csv from it).
+# The 'pooling' field MUST match the icd_eval run that produced sae_results_csv
+# — sae_cv_results.csv carries no provenance for the pooling strategy used to
+# produce it, so a mismatch silently invalidates the comparison.
+
+# --- paths ---------------------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+
+sae_results_csv: /out/icd_eval/gemma_scope_16k/posthoc/tfidf_lr_baseline/sae_cv_results.csv
+
+output_dir: /out/icd_eval/gemma_scope_16k/posthoc/raw_lr_baseline
+checkpoint_dir: null    # null → <output_dir>/raw_shard_ckpt
+
+# --- pooling (MUST match the icd_eval run that produced sae_results_csv) -
+pooling: max
+topk: 10
+shard_filter: null
+
+# --- classification settings (identical to tfidf_lr_baseline) -----------
+cv_n_splits: 5
+lr_max_iter: 5000
+random_state: 42
+delta_auc_threshold: 0.02
+
+# --- label alignment (identical to icd_eval / tfidf_lr_baseline) --------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+logging_level: INFO
