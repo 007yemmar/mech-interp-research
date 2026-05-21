@@ -357,3 +357,159 @@ def test_pool_raw_activations_partial_checkpoint(synthetic_run_dir, tmp_path):
     shard0_mask = meta["shard"].to_numpy() == 0
     shard0_vecs = vecs[shard0_mask]
     assert not np.allclose(shard0_vecs, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# run_raw_lr_baseline — integration
+# ---------------------------------------------------------------------------
+
+
+def _build_fake_sae_cv_csv(path, code_names, roc=0.78, pr=0.55):
+    """Write a fake sae_cv_results.csv with the required schema."""
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "code": c,
+                "auc_roc_mean": roc,
+                "auc_roc_std": 0.01,
+                "auc_pr_mean": pr,
+                "auc_pr_std": 0.02,
+                "n_valid_folds": 5,
+                "n_positive": 100,
+                "status": "ok",
+            }
+            for c in code_names
+        ]
+    ).to_csv(path, index=False)
+
+
+def test_run_raw_lr_baseline_integration(centered_run_dir, tmp_path):
+    """Full orchestrator round-trip on synthetic centered shards."""
+    import json
+
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    # Inline ICD CSV with two codes that have real signal across the 5 notes.
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    # Pre-write a fake SAE-side CV results CSV.
+    sae_csv = tmp_path / "sae_cv_results.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019", "icd9_25000"])
+
+    output_dir = tmp_path / "raw_lr_output"
+    run_raw_lr_baseline(
+        activations_dir=centered_run_dir,
+        sae_results_csv=sae_csv,
+        icd_csv_path=icd_csv,
+        output_dir=output_dir,
+        join_key="note_idx",
+        icd_col_prefix="icd9_",
+        min_prevalence=0.0,
+        max_codes=50,
+        min_notes=1,
+        cv_n_splits=2,
+        lr_max_iter=200,
+        random_state=42,
+    )
+
+    # Output files exist.
+    assert (output_dir / "raw_lr_summary.json").exists()
+    assert (output_dir / "per_code_comparison.csv").exists()
+    assert (output_dir / "raw_cv_results.csv").exists()
+    assert (output_dir / "sae_cv_results.csv").exists()
+    assert (output_dir / "raw_shard_ckpt").is_dir()
+
+    # Summary structure.
+    with open(output_dir / "raw_lr_summary.json") as f:
+        summary = json.load(f)
+    assert summary["n_codes"] == 2
+    assert summary["pooling"] == "max"
+    assert summary["raw_features"] == 64  # d_model from conftest
+    assert summary["sae_features_compared_against"] is None or isinstance(
+        summary["sae_features_compared_against"], int
+    )
+    assert "classification_auc_roc" in summary
+    assert "mean_raw" in summary["classification_auc_roc"]
+    assert "mean_sae" in summary["classification_auc_roc"]
+    assert "n_raw_wins" in summary["classification_auc_roc"]
+    assert "n_sae_wins" in summary["classification_auc_roc"]
+    assert "dropped_codes_raw_only" in summary
+    assert "dropped_codes_sae_only" in summary
+    assert summary["dropped_codes_raw_only"] == []
+    assert summary["dropped_codes_sae_only"] == []
+
+    # per_code rows have the renamed keys.
+    assert len(summary["per_code"]) == 2
+    for row in summary["per_code"]:
+        assert "code" in row
+        assert "auc_roc_sae" in row
+        # auc_roc_raw is present for at least one of the codes; if a code is
+        # marked insufficient_samples both may be skipped — tolerate that.
+        assert "auc_roc_raw" in row or row.get("outcome_auc_roc") == "insufficient_samples"
+
+
+def test_run_raw_lr_baseline_with_code_drift(centered_run_dir, tmp_path, caplog):
+    """A code present in raw but missing from sae_cv is dropped + recorded."""
+    import json
+    import logging
+
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    # SAE-side CSV only knows about icd9_4019.
+    sae_csv = tmp_path / "sae_cv_results.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    output_dir = tmp_path / "raw_lr_output"
+    with caplog.at_level(logging.WARNING, logger="mech_interp_research.raw_lr_baseline"):
+        run_raw_lr_baseline(
+            activations_dir=centered_run_dir,
+            sae_results_csv=sae_csv,
+            icd_csv_path=icd_csv,
+            output_dir=output_dir,
+            join_key="note_idx",
+            icd_col_prefix="icd9_",
+            min_prevalence=0.0,
+            max_codes=50,
+            min_notes=1,
+            cv_n_splits=2,
+            lr_max_iter=200,
+            random_state=42,
+        )
+
+    with open(output_dir / "raw_lr_summary.json") as f:
+        summary = json.load(f)
+
+    assert "icd9_25000" in summary["dropped_codes_raw_only"]
+    assert summary["dropped_codes_sae_only"] == []
+    per_code_codes = {row["code"] for row in summary["per_code"]}
+    assert per_code_codes == {"icd9_4019"}

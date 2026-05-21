@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,18 @@ import numpy as np
 import pandas as pd
 from safetensors.numpy import load_file as load_safetensors
 
-from mech_interp_research.icd_eval import PoolingStrategy, _pool_note
+from mech_interp_research.icd_eval import (
+    PoolingStrategy,
+    _align_note_vectors_to_matched,
+    _pool_note,
+    load_and_align_icd_labels,
+    load_metadata,
+    reassemble_note_vectors,
+)
+from mech_interp_research.tfidf_lr_baseline import (
+    compare_classification,
+    evaluate_per_code_cv,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -285,5 +297,241 @@ def pool_raw_activations(
     return note_vectors, note_meta
 
 
-def run_raw_lr_baseline(*args: Any, **kwargs: Any) -> Any:
-    raise NotImplementedError
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+
+def run_raw_lr_baseline(
+    activations_dir: str | Path,
+    sae_results_csv: str | Path,
+    icd_csv_path: str | Path,
+    output_dir: str | Path,
+    pooling: PoolingStrategy = "max",
+    topk: int = 10,
+    shard_filter: list[int] | None = None,
+    checkpoint_dir: str | Path | None = None,
+    join_key: str = "admission_id",
+    icd_col_prefix: str = "icd9_",
+    min_prevalence: float = 0.02,
+    max_codes: int = 50,
+    min_notes: int = 100,
+    cv_n_splits: int = 5,
+    lr_max_iter: int = 5000,
+    delta_auc_threshold: float = 0.02,
+    random_state: int = 42,
+) -> dict:
+    """Run the raw-activation LR baseline and compare against an existing
+    SAE-probe ``sae_cv_results.csv``.
+
+    See ``docs/superpowers/specs/2026-05-20-baseline-3-raw-activation-
+    probe-design.md`` for the full design. CV protocol, classifier, and
+    label-alignment filters match ``run_tfidf_lr_baseline`` exactly so
+    the three baselines can be reported side by side.
+    """
+    activations_dir = Path(activations_dir)
+    sae_results_csv = Path(sae_results_csv)
+    icd_csv_path = Path(icd_csv_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if checkpoint_dir is None:
+        checkpoint_dir = output_dir / "raw_shard_ckpt"
+    checkpoint_dir = Path(checkpoint_dir)
+
+    logger.info("=" * 60)
+    logger.info("Raw-Activation LR Baseline (Baseline 3)")
+    logger.info("=" * 60)
+    logger.info(f"  pooling={pooling} topk={topk}")
+    logger.info(f"  activations_dir={activations_dir}")
+    logger.info(f"  sae_results_csv={sae_results_csv}")
+    logger.info(f"  output_dir={output_dir}")
+
+    # Fail fast if pointed at uncentered shards. The centered manifest
+    # carries 'centered: true'.
+    manifest_path = activations_dir / "manifest.json"
+    if manifest_path.exists():
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        if not manifest.get("centered", False):
+            raise ValueError(
+                f"activations_dir {activations_dir} is uncentered "
+                "(manifest.centered=False). Point at the centered shards dir."
+            )
+    else:
+        logger.warning(f"No manifest.json at {manifest_path}; skipping centered check.")
+
+    # Fail fast if the SAE CSV is missing.
+    if not sae_results_csv.exists():
+        raise FileNotFoundError(
+            f"sae_results_csv not found at {sae_results_csv}. Run "
+            "tfidf_lr_baseline first to produce sae_cv_results.csv."
+        )
+
+    # ------------------------------------------------------------------
+    # 1. Load metadata
+    # ------------------------------------------------------------------
+    logger.info("Step 1: Loading metadata...")
+    metadata = load_metadata(activations_dir)
+
+    # ------------------------------------------------------------------
+    # 2. Pool raw activations (resumable, checkpointed per shard)
+    # ------------------------------------------------------------------
+    logger.info("Step 2: Pooling raw centered activations to note level...")
+    pool_raw_activations(
+        activations_dir=activations_dir,
+        metadata=metadata,
+        pooling=pooling,
+        topk=topk,
+        shard_filter=shard_filter,
+        checkpoint_dir=checkpoint_dir,
+    )
+
+    # ------------------------------------------------------------------
+    # 3. Reassemble note vectors from per-shard checkpoints
+    # ------------------------------------------------------------------
+    logger.info("Step 3: Reassembling note vectors...")
+    note_vectors, note_meta = reassemble_note_vectors(checkpoint_dir)
+    logger.info(f"Note vectors: {note_vectors.shape}")
+
+    # ------------------------------------------------------------------
+    # 4. Load + align ICD labels (identical filters to other baselines)
+    # ------------------------------------------------------------------
+    logger.info("Step 4: Loading ICD labels...")
+    icd_matrix, code_names, matched_meta = load_and_align_icd_labels(
+        icd_csv_path=icd_csv_path,
+        note_meta=note_meta,
+        min_prevalence=min_prevalence,
+        max_codes=max_codes,
+        icd_col_prefix=icd_col_prefix,
+        join_key=join_key,
+        min_notes=min_notes,
+    )
+    X_raw = _align_note_vectors_to_matched(note_vectors, note_meta, matched_meta)
+    logger.info(
+        f"Aligned: {X_raw.shape[0]} notes, {len(code_names)} codes, d_model={X_raw.shape[1]}"
+    )
+
+    # ------------------------------------------------------------------
+    # 5. Per-code CV on raw features (reuse the existing protocol)
+    # ------------------------------------------------------------------
+    logger.info("Step 5: Evaluating raw features (per-code CV)...")
+    raw_cv = evaluate_per_code_cv(
+        X_raw,
+        icd_matrix,
+        code_names,
+        n_splits=cv_n_splits,
+        max_iter=lr_max_iter,
+        random_state=random_state,
+    )
+
+    # ------------------------------------------------------------------
+    # 6. Load SAE-side results (no recompute), validate schema
+    # ------------------------------------------------------------------
+    logger.info("Step 6: Loading SAE-side CV results...")
+    sae_cv_df = _load_sae_cv_results(sae_results_csv)
+
+    # ------------------------------------------------------------------
+    # 7. Code-set drift check → align both sides to the intersection
+    # ------------------------------------------------------------------
+    logger.info("Step 7: Aligning code sets...")
+    raw_cv_aligned, sae_cv_aligned, dropped_raw_only, dropped_sae_only = _align_codes(
+        raw_cv, sae_cv_df, code_names
+    )
+    sae_cv_list = sae_cv_aligned.to_dict(orient="records")
+
+    # ------------------------------------------------------------------
+    # 8. Head-to-head compare + rewrite tfidf→raw in keys/outcomes
+    # ------------------------------------------------------------------
+    logger.info("Step 8: Comparing classification performance...")
+    cls_comparison_raw_keys = compare_classification(
+        raw_cv_aligned,
+        sae_cv_list,
+        delta_auc_threshold=delta_auc_threshold,
+    )
+    cls_comparison = _rename_compare_keys(cls_comparison_raw_keys)
+
+    # Attach n_positive (the comparison loop doesn't carry it through).
+    raw_by_code = {r["code"]: r for r in raw_cv_aligned}
+    for row in cls_comparison:
+        row["n_positive"] = raw_by_code[row["code"]]["n_positive"]
+
+    # ------------------------------------------------------------------
+    # 9. Aggregate summary
+    # ------------------------------------------------------------------
+    valid = [c for c in cls_comparison if c.get("outcome_auc_roc") != "insufficient_samples"]
+    n_valid = len(valid)
+
+    def _count(field: str, value: str) -> int:
+        return sum(1 for c in valid if c.get(field) == value)
+
+    def _safe_mean(vals: list) -> float | None:
+        clean = [v for v in vals if v is not None]
+        return round(float(np.mean(clean)), 4) if clean else None
+
+    summary: dict[str, Any] = {
+        "n_notes": int(len(icd_matrix)),
+        "n_codes": len(code_names),
+        "n_codes_evaluated": n_valid,
+        "raw_features": int(X_raw.shape[1]),
+        "sae_features_compared_against": None,  # not recorded in sae_cv_results.csv
+        "pooling": pooling,
+        "cv_folds": cv_n_splits,
+        "delta_auc_threshold": delta_auc_threshold,
+        "classification_auc_roc": {
+            "mean_raw": _safe_mean([c["auc_roc_raw"] for c in valid]),
+            "mean_sae": _safe_mean([c["auc_roc_sae"] for c in valid]),
+            "n_raw_wins": _count("outcome_auc_roc", "raw_above_sae"),
+            "n_sae_wins": _count("outcome_auc_roc", "sae_above_raw"),
+            "n_comparable": _count("outcome_auc_roc", "comparable"),
+        },
+        "classification_auc_pr": {
+            "mean_raw": _safe_mean([c["auc_pr_raw"] for c in valid]),
+            "mean_sae": _safe_mean([c["auc_pr_sae"] for c in valid]),
+            "n_raw_wins": _count("outcome_auc_pr", "raw_above_sae"),
+            "n_sae_wins": _count("outcome_auc_pr", "sae_above_raw"),
+            "n_comparable": _count("outcome_auc_pr", "comparable"),
+        },
+        "dropped_codes_raw_only": dropped_raw_only,
+        "dropped_codes_sae_only": dropped_sae_only,
+        "per_code": cls_comparison,
+    }
+
+    # ------------------------------------------------------------------
+    # 10. Write outputs
+    # ------------------------------------------------------------------
+    with open(output_dir / "raw_lr_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+
+    pd.DataFrame(cls_comparison).to_csv(output_dir / "per_code_comparison.csv", index=False)
+    pd.DataFrame(raw_cv).to_csv(output_dir / "raw_cv_results.csv", index=False)
+    # Copy SAE CSV verbatim so the output dir is self-contained.
+    shutil.copyfile(sae_results_csv, output_dir / "sae_cv_results.csv")
+
+    # ------------------------------------------------------------------
+    # 11. Summary log
+    # ------------------------------------------------------------------
+    logger.info("=" * 60)
+    logger.info("RAW-ACTIVATION LR BASELINE SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"  Notes: {summary['n_notes']}, Codes evaluated: {n_valid}")
+    roc = summary["classification_auc_roc"]
+    logger.info(f"  AUC-ROC — Raw: {roc['mean_raw']}, SAE: {roc['mean_sae']}")
+    logger.info(
+        f"    Raw wins: {roc['n_raw_wins']}, SAE wins: {roc['n_sae_wins']}, "
+        f"comparable: {roc['n_comparable']}"
+    )
+    pr = summary["classification_auc_pr"]
+    logger.info(f"  AUC-PR  — Raw: {pr['mean_raw']}, SAE: {pr['mean_sae']}")
+    logger.info(
+        f"    Raw wins: {pr['n_raw_wins']}, SAE wins: {pr['n_sae_wins']}, "
+        f"comparable: {pr['n_comparable']}"
+    )
+    if dropped_raw_only or dropped_sae_only:
+        logger.info(
+            f"  Dropped codes — raw_only: {len(dropped_raw_only)}, "
+            f"sae_only: {len(dropped_sae_only)}"
+        )
+    logger.info("=" * 60)
+
+    return summary
