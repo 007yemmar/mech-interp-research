@@ -55,6 +55,69 @@ def test_fit_tfidf_bigrams() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_evaluate_per_code_cv_checkpointing(tmp_path) -> None:
+    """Per-code checkpoint: completed codes are persisted and skipped on re-run."""
+    import json
+
+    from mech_interp_research.tfidf_lr_baseline import evaluate_per_code_cv
+
+    rng = np.random.default_rng(7)
+    N, D = 60, 8
+    X = rng.standard_normal((N, D)).astype(np.float32)
+    icd_matrix = np.zeros((N, 3), dtype=np.int8)
+    icd_matrix[:20, 0] = 1
+    icd_matrix[:25, 1] = 1
+    icd_matrix[:18, 2] = 1
+    code_names = ["code_A", "code_B", "code_C"]
+
+    seen: list[str] = []
+
+    ckpt = tmp_path / "cv_ckpt"
+    results_pass1 = evaluate_per_code_cv(
+        X,
+        icd_matrix,
+        code_names,
+        n_splits=3,
+        max_iter=200,
+        cv_checkpoint_dir=ckpt,
+        on_code_complete=seen.append,
+    )
+
+    # All three codes were processed in pass 1.
+    assert seen == code_names
+    assert all((ckpt / f"{c}.json").exists() for c in code_names)
+    # Files contain the per-code rows.
+    for c in code_names:
+        with open(ckpt / f"{c}.json") as f:
+            saved = json.load(f)
+        assert saved["code"] == c
+        assert saved["status"] == "ok"
+
+    # Pass 2: delete one code's checkpoint to simulate partial completion.
+    (ckpt / "code_B.json").unlink()
+    seen.clear()
+
+    results_pass2 = evaluate_per_code_cv(
+        X,
+        icd_matrix,
+        code_names,
+        n_splits=3,
+        max_iter=200,
+        cv_checkpoint_dir=ckpt,
+        on_code_complete=seen.append,
+    )
+
+    # Only code_B was re-computed.
+    assert seen == ["code_B"]
+    # All codes are present in the final list in code_names order, with same
+    # AUC values as pass 1 (cached rows for A and C are identical).
+    assert [r["code"] for r in results_pass2] == code_names
+    for r1, r2 in zip(results_pass1, results_pass2, strict=True):
+        assert r1["code"] == r2["code"]
+        if r1["code"] != "code_B":
+            assert r1["auc_roc_mean"] == r2["auc_roc_mean"]
+
+
 def test_evaluate_per_code_cv_returns_auc() -> None:
     """Per-code CV returns AUC metrics for codes with enough samples."""
     from mech_interp_research.tfidf_lr_baseline import evaluate_per_code_cv

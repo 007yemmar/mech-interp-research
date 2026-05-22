@@ -1,0 +1,700 @@
+"""Tests for raw-activation LR baseline (Baseline 3)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+
+def test_module_imports() -> None:
+    """Module exports the expected public surface."""
+    from mech_interp_research import raw_lr_baseline as mod
+
+    expected = {
+        "pool_raw_activations",
+        "run_raw_lr_baseline",
+    }
+    missing = expected - set(dir(mod))
+    assert not missing, f"raw_lr_baseline missing: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# _load_sae_cv_results
+# ---------------------------------------------------------------------------
+
+
+def test_load_sae_cv_results_happy_path(tmp_path):
+    """Reads a CSV with all required columns and returns a DataFrame."""
+    import pandas as pd
+
+    from mech_interp_research.raw_lr_baseline import _load_sae_cv_results
+
+    path = tmp_path / "sae_cv_results.csv"
+    pd.DataFrame(
+        {
+            "code": ["icd9_4019", "icd9_25000"],
+            "auc_roc_mean": [0.81, 0.78],
+            "auc_roc_std": [0.01, 0.02],
+            "auc_pr_mean": [0.62, 0.55],
+            "auc_pr_std": [0.03, 0.04],
+            "n_valid_folds": [5, 5],
+            "n_positive": [123, 84],
+            "status": ["ok", "ok"],
+            "extra_column": ["x", "y"],
+        }
+    ).to_csv(path, index=False)
+
+    out = _load_sae_cv_results(path)
+    assert list(out["code"]) == ["icd9_4019", "icd9_25000"]
+    assert "extra_column" in out.columns  # extras tolerated
+
+
+def test_load_sae_cv_results_schema_validation(tmp_path):
+    """Missing any required column raises ValueError naming the column."""
+    import pandas as pd
+
+    from mech_interp_research.raw_lr_baseline import _load_sae_cv_results
+
+    path = tmp_path / "broken.csv"
+    pd.DataFrame(
+        {
+            "code": ["icd9_4019"],
+            "auc_roc_mean": [0.81],
+            # missing auc_roc_std, auc_pr_mean, auc_pr_std, n_valid_folds,
+            # n_positive, status
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError) as exc:
+        _load_sae_cv_results(path)
+    msg = str(exc.value)
+    assert "auc_roc_std" in msg
+    assert "n_positive" in msg
+    assert str(path) in msg
+
+
+# ---------------------------------------------------------------------------
+# _align_codes
+# ---------------------------------------------------------------------------
+
+
+def _make_cv_row(code: str, roc: float = 0.8, pr: float = 0.6) -> dict:
+    return {
+        "code": code,
+        "auc_roc_mean": roc,
+        "auc_roc_std": 0.01,
+        "auc_pr_mean": pr,
+        "auc_pr_std": 0.02,
+        "n_valid_folds": 5,
+        "n_positive": 100,
+        "status": "ok",
+    }
+
+
+def test_align_codes_no_drift():
+    """Identical code sets → no warning, frames unchanged, empty drop lists."""
+
+    import pandas as pd
+
+    from mech_interp_research.raw_lr_baseline import _align_codes
+
+    code_names = ["icd9_4019", "icd9_25000"]
+    raw_cv = [_make_cv_row(c) for c in code_names]
+    sae_cv = pd.DataFrame([_make_cv_row(c) for c in code_names])
+
+    raw_aligned, sae_aligned, raw_only, sae_only = _align_codes(raw_cv, sae_cv, code_names)
+    assert [r["code"] for r in raw_aligned] == code_names
+    assert list(sae_aligned["code"]) == code_names
+    assert raw_only == []
+    assert sae_only == []
+
+
+def test_align_codes_drift_warn_and_filter(caplog):
+    """Disjoint codes on each side → warn, filter to intersection."""
+    import logging
+
+    import pandas as pd
+
+    from mech_interp_research.raw_lr_baseline import _align_codes
+
+    # code_names has 4019 (shared) + AAAA (raw-only)
+    code_names = ["icd9_4019", "icd9_AAAA"]
+    raw_cv = [_make_cv_row("icd9_4019"), _make_cv_row("icd9_AAAA")]
+    # SAE side has 4019 (shared) + BBBB (sae-only)
+    sae_cv = pd.DataFrame([_make_cv_row("icd9_4019"), _make_cv_row("icd9_BBBB")])
+
+    with caplog.at_level(logging.WARNING, logger="mech_interp_research.raw_lr_baseline"):
+        raw_aligned, sae_aligned, raw_only, sae_only = _align_codes(raw_cv, sae_cv, code_names)
+
+    assert [r["code"] for r in raw_aligned] == ["icd9_4019"]
+    assert list(sae_aligned["code"]) == ["icd9_4019"]
+    assert raw_only == ["icd9_AAAA"]
+    assert sae_only == ["icd9_BBBB"]
+
+    warn_msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("icd9_AAAA" in m for m in warn_msgs)
+    assert any("icd9_BBBB" in m for m in warn_msgs)
+
+
+def test_align_codes_empty_intersection_raises():
+    """Fully disjoint code sets → ValueError."""
+    import pandas as pd
+
+    from mech_interp_research.raw_lr_baseline import _align_codes
+
+    code_names = ["icd9_AAAA"]
+    raw_cv = [_make_cv_row("icd9_AAAA")]
+    sae_cv = pd.DataFrame([_make_cv_row("icd9_BBBB")])
+
+    with pytest.raises(ValueError, match="No overlap"):
+        _align_codes(raw_cv, sae_cv, code_names)
+
+
+def test_align_codes_preserves_code_names_order():
+    """Aligned outputs follow code_names ordering, not sae_cv row order."""
+    import pandas as pd
+
+    from mech_interp_research.raw_lr_baseline import _align_codes
+
+    code_names = ["icd9_A", "icd9_B", "icd9_C"]
+    raw_cv = [_make_cv_row(c) for c in code_names]
+    # SAE rows in reversed order
+    sae_cv = pd.DataFrame([_make_cv_row(c) for c in reversed(code_names)])
+
+    raw_aligned, sae_aligned, _, _ = _align_codes(raw_cv, sae_cv, code_names)
+    assert [r["code"] for r in raw_aligned] == code_names
+    assert list(sae_aligned["code"]) == code_names
+
+
+# ---------------------------------------------------------------------------
+# _rename_compare_keys
+# ---------------------------------------------------------------------------
+
+
+def test_rename_compare_keys():
+    """tfidf is rewritten to raw in both keys and outcome values."""
+    from mech_interp_research.raw_lr_baseline import _rename_compare_keys
+
+    comparison = [
+        {
+            "code": "icd9_4019",
+            "auc_roc_tfidf": 0.81,
+            "auc_roc_sae": 0.84,
+            "delta_auc_roc": 0.03,
+            "outcome_auc_roc": "sae_above_tfidf",
+            "auc_pr_tfidf": 0.62,
+            "auc_pr_sae": 0.60,
+            "delta_auc_pr": -0.02,
+            "outcome_auc_pr": "tfidf_above_sae",
+        },
+        {
+            "code": "icd9_25000",
+            "auc_roc_tfidf": 0.70,
+            "auc_roc_sae": 0.70,
+            "delta_auc_roc": 0.00,
+            "outcome_auc_roc": "comparable",
+            "auc_pr_tfidf": 0.40,
+            "auc_pr_sae": None,
+            "delta_auc_pr": None,
+            "outcome_auc_pr": "insufficient_samples",
+        },
+    ]
+    out = _rename_compare_keys(comparison)
+    assert "auc_roc_raw" in out[0]
+    assert "auc_pr_raw" in out[0]
+    assert "auc_roc_tfidf" not in out[0]
+    assert out[0]["outcome_auc_roc"] == "sae_above_raw"
+    assert out[0]["outcome_auc_pr"] == "raw_above_sae"
+    # 'comparable' / 'insufficient_samples' contain no 'tfidf' substring →
+    # unchanged
+    assert out[1]["outcome_auc_roc"] == "comparable"
+    assert out[1]["outcome_auc_pr"] == "insufficient_samples"
+    # delta_auc_roc / code / None pass through
+    assert out[0]["delta_auc_roc"] == 0.03
+    assert out[1]["auc_pr_sae"] is None
+
+
+# ---------------------------------------------------------------------------
+# pool_raw_activations
+# ---------------------------------------------------------------------------
+
+
+def test_pool_raw_activations_shape_and_dtype(synthetic_run_dir, tmp_path):
+    """Pooled output has shape (n_notes, d_model) and is float32."""
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+    ckpt = tmp_path / "raw_shard_ckpt"
+
+    vecs, meta = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="max",
+        checkpoint_dir=ckpt,
+    )
+    assert vecs.shape == (5, 64)  # 5 notes, d_model=64 (per conftest)
+    assert vecs.dtype == np.float32
+    assert len(meta) == 5
+    assert "note_idx" in meta.columns
+
+
+def test_pool_raw_activations_pooling_strategies(synthetic_run_dir, tmp_path):
+    """max >= topk_mean >= mean elementwise (when all token-axis values are real-valued)."""
+    import numpy as np
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+
+    vecs_max, _ = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="max",
+        checkpoint_dir=tmp_path / "ck_max",
+    )
+    vecs_mean, _ = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="mean",
+        checkpoint_dir=tmp_path / "ck_mean",
+    )
+    vecs_topk, _ = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        pooling="topk_mean",
+        topk=5,
+        checkpoint_dir=tmp_path / "ck_topk",
+    )
+
+    assert vecs_max.shape == vecs_mean.shape == vecs_topk.shape
+    assert np.all(vecs_max >= vecs_topk - 1e-5)
+    assert np.all(vecs_topk >= vecs_mean - 1e-5)
+
+
+def test_pool_raw_activations_resume(synthetic_run_dir, tmp_path, caplog):
+    """Pre-existing checkpoint for one shard is reused; second shard re-runs."""
+    import logging
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+    ckpt = tmp_path / "raw_shard_ckpt"
+
+    # First pass: complete run. Capture shard 0's vectors.
+    vecs_pass1, meta_pass1 = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        checkpoint_dir=ckpt,
+    )
+    shard0_mask_p1 = meta_pass1["shard"].to_numpy() == 0
+    shard0_vecs_p1 = vecs_pass1[shard0_mask_p1]
+
+    # Delete shard 1's checkpoint, keep shard 0's.
+    (ckpt / "shard_0001_vectors.npy").unlink()
+    (ckpt / "shard_0001_meta.jsonl").unlink()
+
+    # Second pass: shard 0 must be skipped and reloaded from ckpt; shard 1 re-run.
+    with caplog.at_level(logging.INFO, logger="mech_interp_research.raw_lr_baseline"):
+        vecs_pass2, meta_pass2 = pool_raw_activations(
+            activations_dir=synthetic_run_dir,
+            metadata=metadata,
+            checkpoint_dir=ckpt,
+        )
+    assert vecs_pass2.shape == (5, 64)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "skipping" in msgs.lower() or "resumed" in msgs.lower()
+
+    # Bit-for-bit preservation: shard 0's vectors must be identical across passes
+    # (proves the checkpoint was loaded, not re-encoded).
+    shard0_mask_p2 = meta_pass2["shard"].to_numpy() == 0
+    shard0_vecs_p2 = vecs_pass2[shard0_mask_p2]
+    np.testing.assert_array_equal(shard0_vecs_p1, shard0_vecs_p2)
+
+
+def test_pool_raw_activations_partial_checkpoint(synthetic_run_dir, tmp_path):
+    """Mismatched .npy and .jsonl row counts → checkpoint discarded + re-encode."""
+    import json
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import pool_raw_activations
+
+    metadata = load_metadata(synthetic_run_dir)
+    ckpt = tmp_path / "raw_shard_ckpt"
+    ckpt.mkdir()
+
+    # Plant a corrupt checkpoint for shard 0: 1 vector row of zeros, 2 meta rows.
+    corrupt_vecs_path = ckpt / "shard_0000_vectors.npy"
+    corrupt_meta_path = ckpt / "shard_0000_meta.jsonl"
+    np.save(corrupt_vecs_path, np.zeros((1, 64), dtype=np.float32))
+    with open(corrupt_meta_path, "w") as f:
+        for i in range(2):
+            f.write(json.dumps({"note_idx": i, "shard": 0}) + "\n")
+
+    vecs, meta = pool_raw_activations(
+        activations_dir=synthetic_run_dir,
+        metadata=metadata,
+        checkpoint_dir=ckpt,
+    )
+    # Full re-encode of shard 0 produced 3 notes; shard 1 produced 2.
+    assert vecs.shape == (5, 64)
+
+    # Discard semantics: the corrupt files must have been unlinked during the
+    # checkpoint scan (and then re-created by the re-encode pass), so they
+    # exist after the call — but with the correct row counts now.
+    assert corrupt_vecs_path.exists()
+    assert corrupt_meta_path.exists()
+    new_vecs = np.load(corrupt_vecs_path)
+    with open(corrupt_meta_path) as f:
+        new_meta = [json.loads(line) for line in f if line.strip()]
+    assert new_vecs.shape == (3, 64)  # 3 notes in shard 0 per conftest
+    assert len(new_meta) == 3
+
+    # The output must be the freshly re-encoded vectors, not the planted zeros.
+    # Shard 0's rows in the final output should not all be zero.
+    shard0_mask = meta["shard"].to_numpy() == 0
+    shard0_vecs = vecs[shard0_mask]
+    assert not np.allclose(shard0_vecs, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# run_raw_lr_baseline — integration
+# ---------------------------------------------------------------------------
+
+
+def _build_fake_sae_cv_csv(path, code_names, roc=0.78, pr=0.55):
+    """Write a fake sae_cv_results.csv with the required schema."""
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "code": c,
+                "auc_roc_mean": roc,
+                "auc_roc_std": 0.01,
+                "auc_pr_mean": pr,
+                "auc_pr_std": 0.02,
+                "n_valid_folds": 5,
+                "n_positive": 100,
+                "status": "ok",
+            }
+            for c in code_names
+        ]
+    ).to_csv(path, index=False)
+
+
+def test_run_raw_lr_baseline_integration(centered_run_dir, tmp_path):
+    """Full orchestrator round-trip on synthetic centered shards."""
+    import json
+
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    # Inline ICD CSV with two codes that have real signal across the 5 notes.
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    # Pre-write a fake SAE-side CV results CSV.
+    sae_csv = tmp_path / "sae_cv_results.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019", "icd9_25000"])
+
+    output_dir = tmp_path / "raw_lr_output"
+    run_raw_lr_baseline(
+        activations_dir=centered_run_dir,
+        sae_results_csv=sae_csv,
+        icd_csv_path=icd_csv,
+        output_dir=output_dir,
+        join_key="note_idx",
+        icd_col_prefix="icd9_",
+        min_prevalence=0.0,
+        max_codes=50,
+        min_notes=1,
+        cv_n_splits=2,
+        lr_max_iter=200,
+        random_state=42,
+    )
+
+    # Output files exist.
+    assert (output_dir / "raw_lr_summary.json").exists()
+    assert (output_dir / "per_code_comparison.csv").exists()
+    assert (output_dir / "raw_cv_results.csv").exists()
+    assert (output_dir / "sae_cv_results.csv").exists()
+    assert (output_dir / "raw_shard_ckpt").is_dir()
+
+    # Summary structure.
+    with open(output_dir / "raw_lr_summary.json") as f:
+        summary = json.load(f)
+    assert summary["n_codes"] == 2
+    assert summary["pooling"] == "max"
+    assert summary["raw_features"] == 64  # d_model from conftest
+    assert summary["sae_features_compared_against"] is None or isinstance(
+        summary["sae_features_compared_against"], int
+    )
+    assert "classification_auc_roc" in summary
+    assert "mean_raw" in summary["classification_auc_roc"]
+    assert "mean_sae" in summary["classification_auc_roc"]
+    assert "n_raw_wins" in summary["classification_auc_roc"]
+    assert "n_sae_wins" in summary["classification_auc_roc"]
+    assert "dropped_codes_raw_only" in summary
+    assert "dropped_codes_sae_only" in summary
+    assert summary["dropped_codes_raw_only"] == []
+    assert summary["dropped_codes_sae_only"] == []
+
+    # per_code rows have the renamed keys.
+    assert len(summary["per_code"]) == 2
+    for row in summary["per_code"]:
+        assert "code" in row
+        assert "auc_roc_sae" in row
+        # auc_roc_raw is present for at least one of the codes; if a code is
+        # marked insufficient_samples both may be skipped — tolerate that.
+        assert "auc_roc_raw" in row or row.get("outcome_auc_roc") == "insufficient_samples"
+
+
+def test_run_raw_lr_baseline_with_code_drift(centered_run_dir, tmp_path, caplog):
+    """A code present in raw but missing from sae_cv is dropped + recorded."""
+    import json
+    import logging
+
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    # SAE-side CSV only knows about icd9_4019.
+    sae_csv = tmp_path / "sae_cv_results.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    output_dir = tmp_path / "raw_lr_output"
+    with caplog.at_level(logging.WARNING, logger="mech_interp_research.raw_lr_baseline"):
+        run_raw_lr_baseline(
+            activations_dir=centered_run_dir,
+            sae_results_csv=sae_csv,
+            icd_csv_path=icd_csv,
+            output_dir=output_dir,
+            join_key="note_idx",
+            icd_col_prefix="icd9_",
+            min_prevalence=0.0,
+            max_codes=50,
+            min_notes=1,
+            cv_n_splits=2,
+            lr_max_iter=200,
+            random_state=42,
+        )
+
+    with open(output_dir / "raw_lr_summary.json") as f:
+        summary = json.load(f)
+
+    assert "icd9_25000" in summary["dropped_codes_raw_only"]
+    assert summary["dropped_codes_sae_only"] == []
+    per_code_codes = {row["code"] for row in summary["per_code"]}
+    assert per_code_codes == {"icd9_4019"}
+
+
+def test_run_raw_lr_baseline_rejects_uncentered(synthetic_run_dir, tmp_path):
+    """Pointing at uncentered shards raises ValueError."""
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    with pytest.raises(ValueError, match="uncentered"):
+        run_raw_lr_baseline(
+            activations_dir=synthetic_run_dir,  # NOT centered
+            sae_results_csv=sae_csv,
+            icd_csv_path=tmp_path / "icd.csv",  # doesn't matter — fails earlier
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_rejects_malformed_manifest(centered_run_dir, tmp_path):
+    """A non-JSON manifest.json raises ValueError with the path."""
+    import shutil
+
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    # Corrupt the manifest in a copy of the centered dir.
+    bad_dir = tmp_path / "bad_centered"
+    shutil.copytree(centered_run_dir, bad_dir)
+    (bad_dir / "manifest.json").write_text("{not valid json")
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        run_raw_lr_baseline(
+            activations_dir=bad_dir,
+            sae_results_csv=sae_csv,
+            icd_csv_path=tmp_path / "icd.csv",
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_rejects_missing_icd_csv(centered_run_dir, tmp_path):
+    """Missing icd_csv_path fails fast (before expensive pooling)."""
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019"])
+
+    with pytest.raises(FileNotFoundError, match="icd_csv_path"):
+        run_raw_lr_baseline(
+            activations_dir=centered_run_dir,
+            sae_results_csv=sae_csv,
+            icd_csv_path=tmp_path / "does_not_exist.csv",
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_rejects_sae_csv_as_directory(centered_run_dir, tmp_path):
+    """Passing a directory as sae_results_csv fails fast."""
+    import pytest
+
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    sae_as_dir = tmp_path / "sae_as_dir"
+    sae_as_dir.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="not a file"):
+        run_raw_lr_baseline(
+            activations_dir=centered_run_dir,
+            sae_results_csv=sae_as_dir,  # directory, not a file
+            icd_csv_path=tmp_path / "icd.csv",
+            output_dir=tmp_path / "out",
+        )
+
+
+def test_run_raw_lr_baseline_invokes_on_shard_complete(centered_run_dir, tmp_path):
+    """run_raw_lr_baseline forwards on_shard_complete to pool_raw_activations."""
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    sae_csv = tmp_path / "sae.csv"
+    _build_fake_sae_cv_csv(sae_csv, ["icd9_4019", "icd9_25000"])
+
+    seen_shards: list[int] = []
+
+    def _track(shard_idx: int) -> None:
+        seen_shards.append(shard_idx)
+
+    run_raw_lr_baseline(
+        activations_dir=centered_run_dir,
+        sae_results_csv=sae_csv,
+        icd_csv_path=icd_csv,
+        output_dir=tmp_path / "out",
+        on_shard_complete=_track,
+        join_key="note_idx",
+        icd_col_prefix="icd9_",
+        min_prevalence=0.0,
+        max_codes=50,
+        min_notes=1,
+        cv_n_splits=2,
+        lr_max_iter=200,
+        random_state=42,
+    )
+
+    # synthetic_run_dir/centered_run_dir has 2 shards (0 and 1) — both
+    # must trigger the callback.
+    assert sorted(seen_shards) == [0, 1]
+
+
+def test_run_raw_lr_baseline_solo_mode(centered_run_dir, tmp_path):
+    """sae_results_csv=None → write raw-only outputs, skip comparison."""
+
+    import pandas as pd
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.raw_lr_baseline import run_raw_lr_baseline
+
+    metadata = load_metadata(centered_run_dir)
+    n_notes = len(metadata)
+
+    icd_csv = tmp_path / "icd_labels.csv"
+    pd.DataFrame(
+        {
+            "note_idx": metadata["note_idx"].values,
+            "icd9_4019": [1, 0, 0, 1, 0][:n_notes],
+            "icd9_25000": [1, 0, 0, 0, 1][:n_notes],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    output_dir = tmp_path / "raw_lr_solo_output"
+    summary = run_raw_lr_baseline(
+        activations_dir=centered_run_dir,
+        sae_results_csv=None,  # solo mode
+        icd_csv_path=icd_csv,
+        output_dir=output_dir,
+        join_key="note_idx",
+        icd_col_prefix="icd9_",
+        min_prevalence=0.0,
+        max_codes=50,
+        min_notes=1,
+        cv_n_splits=2,
+        lr_max_iter=200,
+        random_state=42,
+    )
+
+    # Only raw-side outputs exist; no comparison artifacts.
+    assert (output_dir / "raw_lr_summary.json").exists()
+    assert (output_dir / "raw_cv_results.csv").exists()
+    assert (output_dir / "raw_shard_ckpt").is_dir()
+    assert not (output_dir / "per_code_comparison.csv").exists()
+    assert not (output_dir / "sae_cv_results.csv").exists()
+
+    # Summary has solo shape: no classification_* or dropped_codes_* sections.
+    assert summary["mode"] == "solo"
+    assert summary["n_codes"] == 2
+    assert "auc_roc_mean" in summary
+    assert "auc_pr_mean" in summary
+    assert "classification_auc_roc" not in summary
+    assert "dropped_codes_raw_only" not in summary
+
+    # raw_cv_results.csv carries the per-code AUCs that the caller will read.
+    raw_df = pd.read_csv(output_dir / "raw_cv_results.csv")
+    assert set(raw_df["code"]) == {"icd9_4019", "icd9_25000"}
+    assert "auc_roc_mean" in raw_df.columns
+    assert "auc_pr_mean" in raw_df.columns
