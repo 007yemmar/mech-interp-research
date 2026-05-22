@@ -24,6 +24,19 @@ output_dir: /out/icd_eval/gemma_scope_16k
 # Diagnostic metrics use the last N shards (matches SAE training eval set split)
 eval_n_shards: 31
 
+# Reuse the already-completed diagnostic_metrics.json from a prior run instead
+# of re-streaming all eval shards through encode+decode. The existing JSON was
+# computed on ~290 shards (15.17M tokens); L0/EV/dead-frac are sample-stable so
+# this is fine for the GemmaScope baseline. Set to false to force a fresh run.
+skip_diagnostics: true
+
+# Resume the partial prior run: it encoded 243/312 shards before stopping.
+# grounding_n_shards: 0 means "ground on all shards", so encode_and_pool will
+# skip the 243 cached shard_ckpts and encode only the missing ~69. Without
+# this, eval_n_shards: 31 would narrow to the last 31 shards and ignore most
+# of the cached work. Set this to a positive N to ground on the last N shards.
+grounding_n_shards: 0
+
 # --- ICD eval settings (identical to icd_eval.yaml) -----------------------
 pooling: max
 topk: 10
