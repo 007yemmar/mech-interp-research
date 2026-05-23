@@ -306,7 +306,7 @@ def compute_paired_significance(
             "statistic": round(float(stat), 4),
             "p_value": round(float(p_val), 6),
             "median_delta_sae_minus_tfidf": round(median_delta, 4),
-            "significant_at_0.05": p_val < 0.05,
+            "significant_at_0.05": bool(p_val < 0.05),
         }
 
     return results
@@ -337,6 +337,7 @@ def run_tfidf_lr_baseline(
     delta_r_threshold: float = 0.05,
     fdr_q: float = 0.05,
     random_state: int = 42,
+    tfidf_cv_ckpt_dir: str | Path | None = None,
 ) -> dict:
     """Run TF-IDF + LR baseline comparison against SAE features.
 
@@ -448,7 +449,11 @@ def run_tfidf_lr_baseline(
     # ------------------------------------------------------------------
     # 6. Per-code CV on TF-IDF features
     # ------------------------------------------------------------------
-    logger.info("Step 6: Evaluating TF-IDF features (per-code CV)...")
+    tfidf_ckpt = Path(tfidf_cv_ckpt_dir) if tfidf_cv_ckpt_dir else output_dir / "cv_ckpt_tfidf"
+    if tfidf_cv_ckpt_dir is not None:
+        logger.info(f"Step 6: Using TF-IDF CV checkpoints from {tfidf_ckpt}")
+    else:
+        logger.info("Step 6: Evaluating TF-IDF features (per-code CV)...")
     tfidf_cv = evaluate_per_code_cv(
         X_tfidf,
         icd_matrix,
@@ -456,7 +461,7 @@ def run_tfidf_lr_baseline(
         n_splits=cv_n_splits,
         max_iter=lr_max_iter,
         random_state=random_state,
-        ckpt_dir=output_dir / "cv_ckpt_tfidf",
+        ckpt_dir=tfidf_ckpt,
         desc="TF-IDF CV",
     )
 

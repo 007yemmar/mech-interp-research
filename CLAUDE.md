@@ -58,6 +58,10 @@ modal run modal_app/icd_eval_posthoc.py --config-file configs/icd_eval_posthoc.y
 modal run modal_app/lexical_baseline.py --config-file configs/lexical_baseline.yaml
 modal run modal_app/tfidf_lr_baseline.py --config-file configs/tfidf_lr_baseline_jumprelu.yaml
 
+# Modal — latent feature inspection (run after icd_eval produces top_associations.csv + shard_ckpt/)
+modal run modal_app/feature_inspector.py --config-file configs/feature_inspector.yaml
+modal run modal_app/feature_inspector.py --config-file configs/feature_inspector_jumprelu.yaml
+
 # Inspect Modal volumes (paths are relative to volume root, no /out/ prefix)
 modal volume ls sae-artifacts activations/
 modal volume ls sae-artifacts saes/
@@ -95,6 +99,8 @@ modal_app/icd_eval_posthoc.py      # threshold sweep, partial-r (n_tokens confou
     ↓
 modal_app/lexical_baseline.py      # keyword co-occurrence control baseline
 modal_app/tfidf_lr_baseline.py     # TF-IDF + LR classification baseline (stratified k-fold CV)
+    ↓
+modal_app/feature_inspector.py     # token-level evidence for top SAE-ICD associations
 ```
 
 All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sae-artifacts` holds every downstream artifact (activations, centered activations, SAE checkpoints).
@@ -118,6 +124,7 @@ All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sa
 | `icd_eval.py` | ICD-9 grounding pipeline: `JumpReLUSAE` (numpy-only encoder), `encode_and_pool`, vectorised point-biserial correlation, BH FDR correction, `run_icd_eval` orchestrator; post-hoc helpers: `reassemble_note_vectors`, `compute_partial_point_biserial`, `compute_monospecificity`, `run_posthoc_analyses` |
 | `lexical_baseline.py` | Keyword co-occurrence baseline: YAML keyword dict → regex indicators → point-biserial correlation → head-to-head vs SAE; keyword-absent recall analysis |
 | `tfidf_lr_baseline.py` | TF-IDF + LR baseline: per-code stratified k-fold CV (AUC-ROC/PR), Wilcoxon signed-rank paired significance, supplementary best-feature correlation comparison |
+| `feature_inspector.py` | Token-level feature inspection: two-pass algorithm scans activation shards for top-k tokens per grounded latent, re-tokenizes matched notes for context extraction, computes firing statistics and diversity metrics |
 
 ### `modal_app/` — Modal entrypoints
 
@@ -147,7 +154,7 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
     mean.pt                                # float32 [d_model] — keep for inference
     manifest.json                          # centered: true
 /out/saes/<sae_run_id>/                    # vanilla or JumpReLU
-    best/sae_weights.safetensors           # best eval-EV checkpoint (vanilla only; JumpReLU uses final)
+    best/sae_weights.safetensors           # best eval-EV checkpoint (vanilla only; JumpReLU uses step_00036000)
     best/sae_config.yaml
     step_NNNNNNNN/                         # periodic checkpoints (+ train_state.pt for resume)
     final/sae_weights.safetensors          # W_enc, W_dec, b_enc, b_dec [+ log_threshold for JumpReLU]
@@ -180,6 +187,9 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
         tfidf_cv_results.csv / sae_cv_results.csv
         tfidf_vocabulary.json
         cv_ckpt_tfidf/ cv_ckpt_sae/      # per-code CV checkpoints (resume support)
+    feature_inspection/                   # latent feature inspection output
+        feature_inspection_report.json    # full report: top tokens, firing stats, diversity per latent
+        feature_inspection_details.csv    # flat CSV: one row per token hit
 ```
 
 ### Data handling rules (MIMIC-IV / PHI)
@@ -208,7 +218,7 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
 
 ### ICD-9 grounding eval
 
-`icd_eval.py` runs after a trained SAE is available. Edit `configs/icd_eval.yaml` to point at the centered activations dir, SAE checkpoint (`best/` for vanilla, `final/` for JumpReLU), ICD CSV, and output dir, then run:
+`icd_eval.py` runs after a trained SAE is available. Edit `configs/icd_eval.yaml` to point at the centered activations dir, SAE checkpoint (`best/` for vanilla, `step_00036000/` for JumpReLU — best EV checkpoint), ICD CSV, and output dir, then run:
 
 ```bash
 modal run modal_app/icd_eval.py --config-file configs/icd_eval.yaml

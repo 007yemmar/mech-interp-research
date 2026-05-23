@@ -1,0 +1,36 @@
+# Feature inspector config — JumpReLU SAE
+#
+# Produces token-level evidence for SAE-ICD associations.
+# Requires a completed icd_eval run (top_associations.csv + shard_ckpt/).
+#
+# Run:
+#   modal run modal_app/feature_inspector.py --config-file configs/feature_inspector_jumprelu.yaml
+
+# --- paths ---------------------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/feature_inspection
+
+# --- tokenizer -----------------------------------------------------------
+model_name: google/gemma-2-2b
+max_length: 8192
+
+# --- inspection settings -------------------------------------------------
+n_pairs: 20          # number of top latent-code pairs to inspect
+top_k: 50            # top activating tokens per latent
+context_window: 5    # ±N tokens around each hit
+n_shards: 20         # shards to sample (out of 312)
+
+# --- alignment settings (must match original eval) -----------------------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+text_col: note_text
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+# --- misc ----------------------------------------------------------------
+rng_seed: 42
+logging_level: INFO
