@@ -1,0 +1,35 @@
+# Post-hoc ICD grounding analyses — vanilla SAE TEST SPLIT (held-out 31 shards).
+#
+# Reads correlation_matrices.npz + shard_ckpt/ from the test-split eval output
+# (produced by modal_app/test_split_eval.py).
+#
+# Run after configs/test_split_eval.yaml has completed.
+#
+# Run:
+#   modal run modal_app/icd_eval_posthoc.py --config-file configs/icd_eval_posthoc_vanilla_test.yaml
+
+eval_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+posthoc_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split/posthoc
+
+# Auto-resolves to test_split/shard_ckpt (populated by copy_shard_ckpt=true)
+checkpoint_dir: null
+
+r_thresholds:
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  - 0.5
+  - 0.6
+  - 0.7
+
+fdr_q: 0.05
+min_prevalence: 0.02
+max_codes: 50
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+
+logging_level: INFO

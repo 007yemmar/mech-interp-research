@@ -1,0 +1,26 @@
+# Test-split ICD grounding recomputation — GemmaScope SAE.
+#
+# GemmaScope is zero-shot cross-domain — it wasn't trained on MIMIC at all,
+# so all 312 shards are unseen to it. Running on shards 281..311 here is
+# purely for symmetry with the vanilla / JumpReLU test-split eval (so the
+# three SAEs are scored on the same 5,000 notes).
+#
+# Run:
+#   modal run modal_app/test_split_eval.py --config-file configs/test_split_eval_gemma_scope.yaml
+
+eval_output_dir: /out/icd_eval/gemma_scope_16k
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/icd_eval/gemma_scope_16k/test_split
+checkpoint_dir: null
+
+# Same shard range as vanilla / JumpReLU
+test_shard_start: 281
+test_shard_end: 312
+
+fdr_q: 0.05
+r_threshold: 0.1
+join_key: admission_id
+min_notes: 100
+copy_shard_ckpt: true
+
+logging_level: INFO

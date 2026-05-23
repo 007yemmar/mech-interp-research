@@ -1,0 +1,32 @@
+# Test-split ICD grounding recomputation — JumpReLU SAE.
+#
+# Recomputes the [d_sae × n_codes] correlation matrix using only the
+# SAE-training held-out shards (last 31 of 312). Reads existing per-shard
+# pooled vectors from the JumpReLU grounding eval's shard_ckpt/.
+#
+# CAVEAT: the JumpReLU 50k training config does not pass eval_n_shards to
+# ActivationsBuffer, so JumpReLU was actually trained on all 312 shards.
+# This config still evaluates on shards 281..311 for symmetry with vanilla,
+# but those shards are NOT held out from JumpReLU's training. The result is
+# a re-evaluation on a subset of the training data, not a generalisation
+# test. See .tmp/verifications/research_gaps.md.
+#
+# Run:
+#   modal run modal_app/test_split_eval.py --config-file configs/test_split_eval_jumprelu.yaml
+
+eval_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/test_split
+checkpoint_dir: null
+
+# Same shard range as vanilla so the three SAEs are scored on the same notes
+test_shard_start: 281
+test_shard_end: 312
+
+fdr_q: 0.05
+r_threshold: 0.1
+join_key: admission_id
+min_notes: 100
+copy_shard_ckpt: true
+
+logging_level: INFO
