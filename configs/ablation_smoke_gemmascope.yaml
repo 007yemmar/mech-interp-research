@@ -1,0 +1,107 @@
+# Causal ablation SMOKE — GemmaScope SAE, 250 held-out notes, 4 target features.
+#
+# Cross-SAE comparator for ablation_smoke.yaml (vanilla). Same notes, same
+# methodology, same loss window, same statistics — only the SAE changes.
+# This lets us directly contrast a domain-trained SAE (vanilla) against a
+# general-purpose published SAE (GemmaScope) on identical clinical text.
+#
+# Key differences from vanilla smoke:
+#   - is_centered: false           GemmaScope was trained on raw activations
+#   - mean_path: null              no un-centering needed
+#   - sae_checkpoint_dir: null     SAE downloaded from HF, not from volume
+#   - sae_hf_repo_id/filename set  matches the existing gemma_scope_eval config
+#   - activations_dir: raw         we just need metadata.jsonl; both raw and
+#                                  centered dirs have it, but using raw matches
+#                                  the convention in gemma_scope_eval.yaml
+#   - output_dir: gemma_scope_smoke (new, no collision with vanilla)
+#   - targets: GemmaScope's top 2 grounded latents + 2 controls (see header below)
+#
+# CRITICAL expectation — recon_tax will be MUCH larger than vanilla's 0.027:
+#   GemmaScope's EV on clinical activations is ≈ -4.2 (per the existing
+#   domain-shift analysis). That means loss_recon will be substantially
+#   higher than loss_clean — possibly +0.5 to +2.0 nats per token. This is
+#   not a bug; it's the well-documented domain-shift behaviour that motivated
+#   training our own SAE. The interesting question is whether GemmaScope's
+#   grounded features still show specific ablation effects (positive Cliff's δ)
+#   despite the poor reconstruction.
+#
+# Estimated runtime: ~40 min on A100-40GB (same as vanilla smoke).
+#
+# Run:
+#   modal run --detach modal_app/ablation.py --config-file configs/ablation_smoke_gemmascope.yaml --detach
+
+# --- SAE identity ----------------------------------------------------------
+sae_name: gemma_scope_smoke
+
+# Same SAE as gemma_scope_eval.yaml so the comparison is on the SAE we
+# already grounded with point-biserial correlation.
+sae_checkpoint_dir: null
+sae_hf_repo_id: google/gemma-scope-2b-pt-res
+sae_hf_filename: layer_16/width_16k/average_l0_42/params.npz
+
+# GemmaScope was NOT trained on centered activations — disable mean-centering
+is_centered: false
+
+# --- Activations / model ---------------------------------------------------
+# Use the RAW (non-centered) activations dir — metadata.jsonl is identical to
+# the _centered dir but using raw matches the convention in gemma_scope_eval.yaml.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z
+mean_path: null
+centered_activations_dir: null
+
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards (identical to vanilla smoke for direct comparison) ----
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (pre-selected by ablation_features.select_smoke_targets) ------
+# From .tmp/evaluations/gemmascope/top_associations.csv (the GemmaScope-on-MIMIC
+# grounding analysis). Note that GemmaScope's top |r_pb| values cap around
+# 0.55 — much lower than vanilla's 0.86 — because the published SAE doesn't
+# have features specifically dedicated to clinical concepts.
+#
+#   - feature 2121  ↔ icd9_V5867 (long-term use of insulin)        r_pb = 0.545
+#   - feature 1459  ↔ icd9_V5861 (long-term use of anticoag)       r_pb = 0.538
+#   - feature 16193 ↔ icd9_2749  (random control)                  r_pb = unknown
+#   - feature 11107 ↔ icd9_5849  (low-r control)                   r_pb = -0.100
+targets:
+  - feature_idx: 2121
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.545
+  - feature_idx: 1459
+    code: icd9_V5861
+    kind: grounded
+    r_pb: 0.538
+  - feature_idx: 16193
+    code: icd9_2749
+    kind: random_control
+    r_pb: null
+  - feature_idx: 11107
+    code: icd9_5849
+    kind: low_r_control
+    r_pb: -0.1002
+
+# --- Forward / measurement (identical to vanilla smoke) --------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: 250
+
+# --- Output (fresh dir; do NOT collide with vanilla_smoke or any other run) -
+output_dir: /out/ablation/gemma_scope_smoke
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

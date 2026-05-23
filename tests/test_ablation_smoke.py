@@ -467,3 +467,101 @@ def test_monospecificity_count():
     # At |r| >= 0.5: latent 1 has A,B (2 codes); latent 2 has A (1); latent 3 has A (1)
     mono = compute_monospecificity(df, r_floor=0.5)
     assert mono == {1: 2, 2: 1, 3: 1}
+
+
+# ---------------------------------------------------------------------------
+# 8.  Activation-in-window diagnostic
+# ---------------------------------------------------------------------------
+
+
+def test_compute_statistics_in_window_column_populated():
+    """When per_feature_mean_act_in_window is set, statistics surface it."""
+    from mech_interp_research.ablation import NoteAblationResult
+
+    # 5 positive notes with high in-window activation; 5 negative with low.
+    per_note: list[NoteAblationResult] = []
+    for i in range(5):
+        per_note.append(
+            NoteAblationResult(
+                note_idx=i,
+                admission_id=i,
+                n_tokens_real=200,
+                n_tokens_in_window=50,
+                loss_clean=2.0,
+                loss_recon=2.05,
+                per_feature={11: 2.05 + 0.5},
+                per_feature_mean_act={11: 0.3},
+                per_feature_mean_act_in_window={11: 0.7},  # fires more in window
+            )
+        )
+    for i in range(5, 15):
+        per_note.append(
+            NoteAblationResult(
+                note_idx=i,
+                admission_id=i,
+                n_tokens_real=200,
+                n_tokens_in_window=50,
+                loss_clean=2.0,
+                loss_recon=2.05,
+                per_feature={11: 2.05 + 0.0},
+                per_feature_mean_act={11: 0.05},
+                per_feature_mean_act_in_window={11: 0.01},  # nearly silent in window
+            )
+        )
+
+    icd_matrix = np.array([[1]] * 5 + [[0]] * 10, dtype=np.int8)
+    note_idx_to_row = {r.note_idx: i for i, r in enumerate(per_note)}
+
+    df = compute_statistics(
+        per_note_results=per_note,
+        targets=[{"feature_idx": 11, "code": "icd9_TEST", "kind": "grounded", "r_pb": 0.7}],
+        icd_matrix=icd_matrix,
+        code_names=["icd9_TEST"],
+        note_idx_to_row=note_idx_to_row,
+    )
+    row = df.iloc[0]
+    assert "mean_target_activation_in_window_pos" in df.columns
+    assert "mean_target_activation_in_window_neg" in df.columns
+    assert abs(row["mean_target_activation_in_window_pos"] - 0.7) < 1e-6
+    assert abs(row["mean_target_activation_in_window_neg"] - 0.01) < 1e-6
+    # Sanity: the all-tokens version differs from the in-window version
+    assert abs(row["mean_target_activation_pos"] - 0.3) < 1e-6
+
+
+def test_compute_statistics_in_window_backward_compat():
+    """Old shard checkpoints without the in-window field still load and analyze."""
+    from mech_interp_research.ablation import NoteAblationResult
+
+    # Simulate "loaded from old shard": empty per_feature_mean_act_in_window
+    per_note = [
+        NoteAblationResult(
+            note_idx=i,
+            admission_id=i,
+            n_tokens_real=200,
+            n_tokens_in_window=50,
+            loss_clean=2.0,
+            loss_recon=2.05,
+            per_feature={9: 2.05 + 0.01 * (1 if i < 5 else 0)},
+            per_feature_mean_act={9: 0.1},
+            per_feature_mean_act_in_window={},  # the legacy case
+        )
+        for i in range(15)
+    ]
+    icd_matrix = np.array([[1]] * 5 + [[0]] * 10, dtype=np.int8)
+    note_idx_to_row = {r.note_idx: i for i, r in enumerate(per_note)}
+
+    df = compute_statistics(
+        per_note_results=per_note,
+        targets=[{"feature_idx": 9, "code": "icd9_LEGACY", "kind": "grounded", "r_pb": 0.5}],
+        icd_matrix=icd_matrix,
+        code_names=["icd9_LEGACY"],
+        note_idx_to_row=note_idx_to_row,
+    )
+    row = df.iloc[0]
+    # NaN expected since the legacy records didn't carry in-window activations
+    assert np.isnan(row["mean_target_activation_in_window_pos"])
+    assert np.isnan(row["mean_target_activation_in_window_neg"])
+    # But the rest of the analysis still works
+    assert row["n_pos"] == 5
+    assert row["n_neg"] == 10
+    assert not np.isnan(row["cliffs_delta"])

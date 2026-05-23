@@ -555,12 +555,17 @@ def cross_entropy_in_window(
     if not window_mask.any():
         return float("nan")
 
-    # Shift to causal-LM prediction alignment.
-    shift_logits = logits[:, :-1, :].float()  # [1, seq_len-1, vocab]
+    # Memory-aware ordering: SELECT the in-window rows from the fp16 logits
+    # tensor first, THEN cast the small selected subset to fp32. The naive
+    # ordering (.float() on the full logits, then mask) doubles peak memory:
+    # for Gemma-2-2B (vocab=256k, max_len=8192) the full fp32 cast is 8.4 GB
+    # and OOMs on A100-40GB when stacked with model + Gemma activations
+    # + SAE intermediates. With this ordering peak is ~2 GB.
+    shift_logits = logits[:, :-1, :]  # [1, seq_len-1, vocab], same dtype as logits
     shift_labels = input_ids[:, 1:]  # [1, seq_len-1]
 
     mask = window_mask.to(shift_logits.device)
-    selected_logits = shift_logits[0][mask]  # [n_selected, vocab]
+    selected_logits = shift_logits[0][mask].float()  # [n_selected, vocab] fp32
     selected_labels = shift_labels[0][mask]  # [n_selected]
 
     loss = f.cross_entropy(selected_logits, selected_labels, reduction="mean")
@@ -588,6 +593,11 @@ class NoteAblationResult:
     # Per-feature mean activation of the targeted feature on this note's tokens
     # (sanity check: if a feature never fires on a note, ablation effect ≈ 0).
     per_feature_mean_act: dict[int, float] = field(default_factory=dict)
+    # Per-feature mean activation specifically at token positions whose
+    # predictions are inside the loss window. Compare against per_feature_mean_act
+    # to detect features that fire mostly outside the window (which would
+    # explain a null ablation effect despite high overall activation).
+    per_feature_mean_act_in_window: dict[int, float] = field(default_factory=dict)
 
 
 def run_ablation_for_note(
@@ -647,6 +657,9 @@ def run_ablation_for_note(
     if x16 is None:
         raise RuntimeError("LayerSplice failed to capture residual — hook not firing?")
     loss_clean = cross_entropy_in_window(out.logits, input_ids, window_mask)
+    # Free the 4 GB logits tensor and the rest of the forward's intermediates
+    # before allocating new ones for the next forward.
+    del out
 
     # ---- 2. Compute SAE encode/decode in fp32, then splice ----
     # Slice to real tokens (positions [n_real:] are padding even with attention
@@ -683,10 +696,21 @@ def run_ablation_for_note(
     with torch.no_grad():
         out_recon = model(input_ids=input_ids, attention_mask=attn_mask, use_cache=False)
     loss_recon = cross_entropy_in_window(out_recon.logits, input_ids, window_mask)
+    del out_recon
 
     # ---- 4. Per-feature ablations ----
     per_feature_loss: dict[int, float] = {}
     per_feature_mean_act: dict[int, float] = {}
+    per_feature_mean_act_in_window: dict[int, float] = {}
+
+    # Token-position window: residual positions whose predictions are scored
+    # by the loss. Matches the convention in build_loss_window_mask: prediction
+    # position k uses residual at position k, so the window of token positions
+    # is [floor((1 - frac) * n_real), n_real - 1) — same indices as the mask.
+    window_token_start = max(0, int((1.0 - loss_window_frac) * n_real))
+    # Cap the end at n_real - 1 (last real token's prediction is never scored,
+    # but its activation is included here as a one-position rounding effect).
+    window_token_end = max(window_token_start + 1, n_real)
 
     for j in target_feature_indices:
         x_hat_abl = sae.decode_with_ablation(z, feature_idx=j)
@@ -696,6 +720,12 @@ def run_ablation_for_note(
         loss_abl = cross_entropy_in_window(out_abl.logits, input_ids, window_mask)
         per_feature_loss[j] = loss_abl
         per_feature_mean_act[j] = float(z[0, :, j].mean().item())
+        per_feature_mean_act_in_window[j] = float(
+            z[0, window_token_start:window_token_end, j].mean().item()
+        )
+        # Free per-feature forward intermediates so consecutive features don't
+        # accumulate ~4 GB of fp16 logits each on the active-tensors list.
+        del out_abl, x_hat_abl
 
     splice.mode = "passthrough"  # reset
     splice.splice_tensor = None
@@ -709,6 +739,7 @@ def run_ablation_for_note(
         loss_recon=loss_recon,
         per_feature=per_feature_loss,
         per_feature_mean_act=per_feature_mean_act,
+        per_feature_mean_act_in_window=per_feature_mean_act_in_window,
     )
 
 
@@ -810,6 +841,8 @@ def compute_statistics(
                     "mean_recon_tax": float("nan"),
                     "mean_target_activation_pos": float("nan"),
                     "mean_target_activation_neg": float("nan"),
+                    "mean_target_activation_in_window_pos": float("nan"),
+                    "mean_target_activation_in_window_neg": float("nan"),
                     "note": "code not in ICD matrix",
                 }
             )
@@ -820,6 +853,8 @@ def compute_statistics(
         neg_effects: list[float] = []
         pos_acts: list[float] = []
         neg_acts: list[float] = []
+        pos_acts_in_window: list[float] = []
+        neg_acts_in_window: list[float] = []
         losses_clean: list[float] = []
         losses_recon: list[float] = []
 
@@ -831,14 +866,18 @@ def compute_statistics(
                 continue
             effect = r.per_feature[j] - r.loss_recon
             act = r.per_feature_mean_act.get(j, 0.0)
+            # Backward-compatible: older shard checkpoints don't store this field.
+            act_in_window = r.per_feature_mean_act_in_window.get(j, float("nan"))
             losses_clean.append(r.loss_clean)
             losses_recon.append(r.loss_recon)
             if icd_matrix[row_idx, col] == 1:
                 pos_effects.append(effect)
                 pos_acts.append(act)
+                pos_acts_in_window.append(act_in_window)
             else:
                 neg_effects.append(effect)
                 neg_acts.append(act)
+                neg_acts_in_window.append(act_in_window)
 
         pos = np.asarray(pos_effects, dtype=np.float64)
         neg = np.asarray(neg_effects, dtype=np.float64)
@@ -884,6 +923,16 @@ def compute_statistics(
                 "mean_target_activation_neg": float(np.mean(neg_acts))
                 if neg_acts
                 else float("nan"),
+                "mean_target_activation_in_window_pos": (
+                    float(np.nanmean(pos_acts_in_window))
+                    if pos_acts_in_window and not all(np.isnan(pos_acts_in_window))
+                    else float("nan")
+                ),
+                "mean_target_activation_in_window_neg": (
+                    float(np.nanmean(neg_acts_in_window))
+                    if neg_acts_in_window and not all(np.isnan(neg_acts_in_window))
+                    else float("nan")
+                ),
                 "note": "",
             }
         )
@@ -1095,6 +1144,10 @@ def run_ablation(
         if ck.exists():
             recs = json.loads(ck.read_text())
             for rec in recs:
+                # per_feature_mean_act_in_window was added later; older
+                # checkpoints don't have it. Default to empty dict so the
+                # backward-compatible .get(j, NaN) in compute_statistics handles it.
+                act_in_window_raw = rec.get("per_feature_mean_act_in_window", {})
                 all_results.append(
                     NoteAblationResult(
                         note_idx=int(rec["note_idx"]),
@@ -1106,6 +1159,9 @@ def run_ablation(
                         per_feature={int(k): float(v) for k, v in rec["per_feature"].items()},
                         per_feature_mean_act={
                             int(k): float(v) for k, v in rec["per_feature_mean_act"].items()
+                        },
+                        per_feature_mean_act_in_window={
+                            int(k): float(v) for k, v in act_in_window_raw.items()
                         },
                     )
                 )
@@ -1141,6 +1197,9 @@ def run_ablation(
                 "loss_recon": r.loss_recon,
                 "per_feature": {str(k): v for k, v in r.per_feature.items()},
                 "per_feature_mean_act": {str(k): v for k, v in r.per_feature_mean_act.items()},
+                "per_feature_mean_act_in_window": {
+                    str(k): v for k, v in r.per_feature_mean_act_in_window.items()
+                },
             }
             for r in buffer
         ]

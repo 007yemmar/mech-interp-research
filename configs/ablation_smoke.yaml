@@ -1,7 +1,19 @@
-# Causal ablation SMOKE config — vanilla SAE, 50 held-out notes, 4 target features.
+# Causal ablation SMOKE config — vanilla SAE, 250 held-out notes, 4 target features.
 #
 # Purpose: validate Modal infra, splice hook, mean-centering, stats pipeline
-# end-to-end before the full pilot. Expected runtime: ~10 min on A100-40GB.
+# end-to-end before the full pilot, and exercise the activation-in-window
+# diagnostic at enough scale to start seeing real signal (n_pos ≈ 10–50 per
+# code at this size, vs n_pos = 2–8 at the original 50-note size).
+#
+# Expected runtime: ~40 min on A100-40GB.
+#
+# IMPORTANT — schema changed since v1 smoke:
+# Per-shard JSON now stores per_feature_mean_act_in_window. The resume logic
+# will load old shards without this field (it falls back to NaN), but to
+# actually exercise the diagnostic you want a fresh run. Before launching:
+#   modal volume rm -r sae-artifacts ablation/vanilla_smoke/shard_results
+# (Or accept that the first ~50 notes' rows will have NaN in the in-window
+# columns and the remaining ~200 will have real values.)
 #
 # Run:
 #   modal run modal_app/ablation.py --config-file configs/ablation_smoke.yaml
@@ -64,7 +76,7 @@ max_length: 8192
 loss_window_frac: 0.25
 min_loss_window_tokens: 32
 batch_size: 1
-max_notes: 50  # smoke: keep runtime ≈ 10 min
+max_notes: 250  # smoke: ~40 min on A100-40GB; n_pos ≈ 10–50 per code
 
 # --- Output ----------------------------------------------------------------
 output_dir: /out/ablation/vanilla_smoke
