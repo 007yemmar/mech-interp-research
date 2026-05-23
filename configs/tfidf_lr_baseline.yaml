@@ -15,6 +15,9 @@ output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/tfidf_lr
 # Per-shard encode checkpoints (auto-detected if null)
 checkpoint_dir: null
 
+# Reuse TF-IDF CV checkpoints from a prior run (null = compute fresh)
+tfidf_cv_ckpt_dir: null
+
 # --- TF-IDF settings -----------------------------------------------------
 tfidf_max_features: 10000
 tfidf_ngram_range: [1, 2]

@@ -15,6 +15,9 @@ output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/pos
 # Per-shard encode checkpoints (auto-detected if null)
 checkpoint_dir: null
 
+# Reuse TF-IDF CV checkpoints from vanilla SAE run (same 50k notes, same codes)
+tfidf_cv_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/tfidf_lr_baseline/cv_ckpt_tfidf
+
 # --- TF-IDF settings -----------------------------------------------------
 tfidf_max_features: 10000
 tfidf_ngram_range: [1, 2]
