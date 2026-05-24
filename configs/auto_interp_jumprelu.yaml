@@ -1,0 +1,48 @@
+# Auto-interpretability for JumpReLU SAE features.
+#
+# Run:
+#   modal run modal_app/auto_interp.py --config-file configs/auto_interp_jumprelu.yaml
+
+# --- paths ---
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+
+# --- feature selection ---
+n_strong_grounded: 280       # all r > 0.4
+n_weak_grounded: 100         # random sample from r = 0.1-0.3 (BH-significant)
+n_non_grounded: 1000         # random sample from zero-BH-significant features
+n_dead: 100                  # lowest mean activation (noise floor control)
+random_seed: 42
+
+# --- explanation ---
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20         # activating contexts shown to the explainer
+n_contexts_test: 10          # held out for scoring (5 pos, 5 neg)
+max_tokens_context: 30       # +/- tokens around trigger token
+
+# --- scoring ---
+scorers:
+  - fuzzing       # primary: token-level discrimination
+  - detection     # supplementary: sequence-level classification
+
+# --- post-processing ---
+concordance_model: claude-sonnet-4-6
+concordance_thresholds:
+  - 0.3
+  - 0.4
+  - 0.5
+
+# --- ICD descriptions (for concordance prompts) ---
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+# --- tokenizer ---
+model_name: google/gemma-2-2b
+
+# --- resume ---
+checkpoint_dir: null         # auto-detected from output_dir
+
+logging_level: INFO
