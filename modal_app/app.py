@@ -23,6 +23,7 @@ image = (
         "scikit-learn>=1.4",
         "sae-lens>=0.3",
         "wandb>=0.16",
+        "anthropic>=0.30",
     )
     # Ship our extraction library AND the modal_app package itself — the
     # latter is required because modal_app/extract.py imports from
