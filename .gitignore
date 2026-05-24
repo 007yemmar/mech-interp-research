@@ -32,4 +32,7 @@ outputs/
 .modal/
 
 # Superpowers workspace (specs, plans) — personal working artifacts
-docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/specs/
+docs/superpowers/specs/*
+!docs/superpowers/specs/2026-05-23-clinical-sae-defense-guide.md
