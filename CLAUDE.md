@@ -62,6 +62,9 @@ modal run modal_app/tfidf_lr_baseline.py --config-file configs/tfidf_lr_baseline
 modal run modal_app/feature_inspector.py --config-file configs/feature_inspector.yaml
 modal run modal_app/feature_inspector.py --config-file configs/feature_inspector_jumprelu.yaml
 
+# Modal — auto-interpretability (run after icd_eval + shard_ckpt; requires anthropic-api-key secret)
+modal run modal_app/auto_interp.py --config-file configs/auto_interp_jumprelu.yaml
+
 # Inspect Modal volumes (paths are relative to volume root, no /out/ prefix)
 modal volume ls sae-artifacts activations/
 modal volume ls sae-artifacts saes/
@@ -101,6 +104,8 @@ modal_app/lexical_baseline.py      # keyword co-occurrence control baseline
 modal_app/tfidf_lr_baseline.py     # TF-IDF + LR classification baseline (stratified k-fold CV)
     ↓
 modal_app/feature_inspector.py     # token-level evidence for top SAE-ICD associations
+    ↓
+modal_app/auto_interp.py           # LLM explanations + scoring + ICD concordance validation
 ```
 
 All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sae-artifacts` holds every downstream artifact (activations, centered activations, SAE checkpoints).
@@ -125,6 +130,7 @@ All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sa
 | `lexical_baseline.py` | Keyword co-occurrence baseline: YAML keyword dict → regex indicators → point-biserial correlation → head-to-head vs SAE; keyword-absent recall analysis |
 | `tfidf_lr_baseline.py` | TF-IDF + LR baseline: per-code stratified k-fold CV (AUC-ROC/PR), Wilcoxon signed-rank paired significance, supplementary best-feature correlation comparison |
 | `feature_inspector.py` | Token-level feature inspection: two-pass algorithm scans activation shards for top-k tokens per grounded latent, re-tokenizes matched notes for context extraction, computes firing statistics and diversity metrics |
+| `auto_interp.py` | Auto-interpretability pipeline: LLM explanation generation (Anthropic SDK), Fuzzing + Detection scoring (Paulo et al. 2024), 5-way categorization, ICD-9 concordance validation (YES/PARTIAL/NO), dual-model comparison (Sonnet vs Haiku), tier-level summaries, per-feature checkpointing for resume |
 
 ### `modal_app/` — Modal entrypoints
 
@@ -190,6 +196,15 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
     feature_inspection/                   # latent feature inspection output
         feature_inspection_report.json    # full report: top tokens, firing stats, diversity per latent
         feature_inspection_details.csv    # flat CSV: one row per token hit
+/out/auto_interp/<run_id>/
+    feature_catalog.csv                   # feature_id, explanation, scores, category, tier, model
+    concordance_results.csv               # feature_id, r_pb, icd_code, explanation, YES/PARTIAL/NO
+    categorization_summary.json           # counts per category, by tier
+    concordance_summary.json              # concordance rates at r>0.3, r>0.4, r>0.5
+    scorer_summary.json                   # mean/median/std Fuzzing+Detection, by tier
+    model_comparison.json                 # Sonnet vs Haiku: scores, concordance, explanation length
+    run_summary.json                      # config snapshot, runtime, feature counts, errors
+    per_feature/<model>/                  # per-feature JSON checkpoints (resume support)
 ```
 
 ### Data handling rules (MIMIC-IV / PHI)

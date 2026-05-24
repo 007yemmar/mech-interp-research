@@ -15,6 +15,7 @@ dependencies = [
     "scikit-learn>=1.4",
     "scipy>=1.13",
     "wandb>=0.16",
+    "anthropic>=0.30",
 ]
 
 [dependency-groups]
