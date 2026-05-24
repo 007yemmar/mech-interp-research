@@ -1,0 +1,153 @@
+# Causal ablation EXTENDED pilot — GemmaScope SAE, 20 additional grounded features.
+#
+# Companion to ablation_pilot_gemmascope.yaml. Same SAE, same notes, same
+# methodology. Characterises features at ranks 11–30 by |r_pb|; combined with
+# the original pilot's top-10 gives 30 grounded features characterised.
+#
+# No controls in this config — the original pilot already has 2 (16193 random,
+# 11107 low-r), both correctly null at scale.
+#
+# Code coverage of these 20 features (17 distinct codes vs 8 in ranks 1-10):
+#   icd9_4280 (heart failure)         : 2 features (16233, 12324)
+#   icd9_5856 (acute renal failure)   : 2 features (14799, 9555)
+#   icd9_V5867 (insulin)              : 2 features (2907, 11544)
+#   icd9_2449 (hypothyroidism)        : 2 features (15883, 8886)
+#   icd9_V5861 (anticoag)             : 2 features (5624, 3136)
+#   plus 12 codes with 1 feature each, including 4019 (HTN), 5990 (UTI),
+#   486 (pneumonia), 2724 (lipid), 311 (depression), 41401 (CAD), etc.
+#
+# Many of these codes are new vs the rank-1-10 set — substantially broadens
+# GemmaScope's tested concept coverage.
+#
+# Expected runtime: ~5 h on A100-40GB.
+#
+# Run (detached, resumable):
+#   modal run --detach modal_app/ablation.py --config-file configs/ablation_pilot_gemmascope_extended.yaml --detach
+#
+# Resume: re-run the same command. Per-shard JSONs land in
+# /out/ablation/gemma_scope_pilot_extended/shard_results/.
+
+# --- SAE identity ----------------------------------------------------------
+sae_name: gemma_scope_pilot_extended
+
+sae_checkpoint_dir: null
+sae_hf_repo_id: google/gemma-scope-2b-pt-res
+sae_hf_filename: layer_16/width_16k/average_l0_42/params.npz
+is_centered: false
+
+# --- Activations / model ---------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z
+mean_path: null
+centered_activations_dir: null
+
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (ranks 11–30 by |r_pb|, deduped by latent) --------------------
+targets:
+  - feature_idx: 16233
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.4227
+  - feature_idx: 12184
+    code: icd9_2749
+    kind: grounded
+    r_pb: 0.4118
+  - feature_idx: 4291
+    code: icd9_27800
+    kind: grounded
+    r_pb: 0.4079
+  - feature_idx: 14799
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.3892
+  - feature_idx: 2907
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.3888
+  - feature_idx: 5588
+    code: icd9_4019
+    kind: grounded
+    r_pb: 0.3874
+  - feature_idx: 5093
+    code: icd9_5990
+    kind: grounded
+    r_pb: 0.3801
+  - feature_idx: 9555
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.3777
+  - feature_idx: 9268
+    code: icd9_486
+    kind: grounded
+    r_pb: 0.3755
+  - feature_idx: 8281
+    code: icd9_2724
+    kind: grounded
+    r_pb: 0.369
+  - feature_idx: 11234
+    code: icd9_5849
+    kind: grounded
+    r_pb: 0.3627
+  - feature_idx: 15883
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.3614
+  - feature_idx: 11544
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.3562
+  - feature_idx: 5624
+    code: icd9_V5861
+    kind: grounded
+    r_pb: 0.3558
+  - feature_idx: 3136
+    code: icd9_V5861
+    kind: grounded
+    r_pb: 0.3536
+  - feature_idx: 8886
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.3519
+  - feature_idx: 5935
+    code: icd9_60000
+    kind: grounded
+    r_pb: 0.3506
+  - feature_idx: 12324
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3483
+  - feature_idx: 12120
+    code: icd9_41401
+    kind: grounded
+    r_pb: 0.3441
+  - feature_idx: 2513
+    code: icd9_311
+    kind: grounded
+    r_pb: 0.3434
+
+# --- Forward / measurement -------------------------------------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: null
+
+# --- Output (FRESH dir) ----------------------------------------------------
+output_dir: /out/ablation/gemma_scope_pilot_extended
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

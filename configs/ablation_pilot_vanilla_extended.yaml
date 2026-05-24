@@ -1,0 +1,154 @@
+# Causal ablation EXTENDED pilot — vanilla SAE, 20 additional grounded features.
+#
+# Companion to ablation_pilot_vanilla.yaml. Same SAE, same notes, same methodology.
+# This run characterises features at ranks 11–30 by |r_pb| (the top 10 already
+# tested in the original pilot). Together the two runs give 30 grounded features
+# characterised — much more robust validation rates and broader code coverage.
+#
+# No controls in this config — the original pilot already has 2 controls
+# (feature 3593 random + 16773 low-r), both correctly null at scale. The
+# analysis can pool controls from both runs.
+#
+# Code coverage of these 20 features (12 distinct codes, vs 3 in ranks 1-10):
+#   icd9_2449 (hypothyroidism)        : 4 features (7304, 17588, 4152, 3537)
+#   icd9_42731 (atrial fibrillation)  : 4 features (9809, 1387, 11445, 7116)
+#   icd9_5856 (acute renal failure)   : 3 features (11016, 11387, 17076)
+#   icd9_4280 (heart failure)         : 2 features (16170, 8363)
+#   icd9_53081 (GERD)                 : 2 features (15117, 3764)
+#   icd9_V4581 (cardiac stent)        : 2 features (6433, 3340)
+#   icd9_73300 (osteoporosis)         : 1 feature  (4393)
+#   icd9_2749  (gout)                 : 1 feature  (10188)
+#   icd9_60000 (BPH)                  : 1 feature  (1042)
+#
+# Expected runtime: ~5 h on A100-40GB (22 forwards/note × 4911 notes × 165 ms).
+#
+# Run (detached, resumable):
+#   modal run --detach modal_app/ablation.py --config-file configs/ablation_pilot_vanilla_extended.yaml --detach
+#
+# Resume: re-running the same command picks up from the last completed shard.
+# Per-shard JSONs land in /out/ablation/vanilla_pilot_extended/shard_results/.
+
+# --- SAE identity ----------------------------------------------------------
+sae_name: vanilla_pilot_extended
+
+sae_checkpoint_dir: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+sae_hf_repo_id: null
+sae_hf_filename: null
+is_centered: true
+
+# --- Activations / model ---------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (ranks 11–30 by |r_pb|, deduped by latent) --------------------
+targets:
+  - feature_idx: 7304
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.8188
+  - feature_idx: 4393
+    code: icd9_73300
+    kind: grounded
+    r_pb: 0.8128
+  - feature_idx: 11016
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.807
+  - feature_idx: 9809
+    code: icd9_42731
+    kind: grounded
+    r_pb: 0.7957
+  - feature_idx: 1387
+    code: icd9_42731
+    kind: grounded
+    r_pb: 0.7785
+  - feature_idx: 16170
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.768
+  - feature_idx: 17588
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.766
+  - feature_idx: 15117
+    code: icd9_53081
+    kind: grounded
+    r_pb: 0.7554
+  - feature_idx: 11445
+    code: icd9_42731
+    kind: grounded
+    r_pb: 0.7511
+  - feature_idx: 10188
+    code: icd9_2749
+    kind: grounded
+    r_pb: 0.7416
+  - feature_idx: 3764
+    code: icd9_53081
+    kind: grounded
+    r_pb: 0.7389
+  - feature_idx: 11387
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.7362
+  - feature_idx: 4152
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.7332
+  - feature_idx: 1042
+    code: icd9_60000
+    kind: grounded
+    r_pb: 0.733
+  - feature_idx: 7116
+    code: icd9_42731
+    kind: grounded
+    r_pb: 0.7293
+  - feature_idx: 3537
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.7113
+  - feature_idx: 17076
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.7067
+  - feature_idx: 8363
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.7057
+  - feature_idx: 6433
+    code: icd9_V4581
+    kind: grounded
+    r_pb: 0.7054
+  - feature_idx: 3340
+    code: icd9_V4581
+    kind: grounded
+    r_pb: 0.6998
+
+# --- Forward / measurement -------------------------------------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: null  # full held-out set
+
+# --- Output (FRESH dir; do NOT collide with vanilla_pilot) -----------------
+output_dir: /out/ablation/vanilla_pilot_extended
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO
