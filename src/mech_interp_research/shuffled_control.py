@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd  # noqa: F401
+import pandas as pd
 from scipy.stats import wilcoxon
 
-from mech_interp_research.auto_interp import (  # noqa: F401
+from mech_interp_research.auto_interp import (
     _write_json,
     resolve_token_text,
     score_explanation_against_contexts,
@@ -26,7 +26,7 @@ from mech_interp_research.auto_interp import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-__all__ = [  # noqa: F822
+__all__ = [
     "permute_global",
     "permute_within_tier",
     "load_existing_run",
@@ -194,3 +194,146 @@ def aggregate_control_results(
         "scorers": scorers,
         "results": results,
     }
+
+
+def run_shuffled_control(
+    auto_interp_dir: str | Path,
+    output_dir: str | Path | None = None,
+    model: str = "claude-sonnet-4-6",
+    schemes: list[str] | None = None,
+    scorers: list[str] | None = None,
+    n_contexts_train: int = 20,
+    n_contexts_test: int = 10,
+    context_window: int = 30,
+    seed: int = 42,
+    chance_value: float = 0.51,
+    _client=None,
+    _note_texts: dict[int, str] | None = None,
+    _tokenizer=None,
+    _commit_volume=None,
+) -> dict:
+    """Re-score each eligible feature's contexts with a wrong explanation.
+
+    Reuses ``extracted_contexts.json`` + per-feature explanations under
+    ``auto_interp_dir``. Writes ``shuffled_control/`` with a summary JSON, a
+    per-feature CSV, and resume checkpoints. Returns the summary dict.
+    """
+    if schemes is None:
+        schemes = ["global", "within_tier"]
+    if scorers is None:
+        scorers = ["fuzzing", "detection"]
+
+    auto_interp_dir = Path(auto_interp_dir)
+    output_dir = Path(output_dir) if output_dir else auto_interp_dir / "shuffled_control"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_dir = output_dir / "per_feature" / model.replace("/", "_")
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    contexts_by_fid, feature_rows = load_existing_run(auto_interp_dir, model)
+    eligible = [r for r in feature_rows if _is_eligible(r, contexts_by_fid)]
+    logger.info("Eligible features: %d / %d", len(eligible), len(feature_rows))
+
+    expl_by_fid = {r["feature_idx"]: r["explanation"] for r in eligible}
+    tier_by_fid = {r["feature_idx"]: r["tier"] for r in eligible}
+    real_by_fid = {r["feature_idx"]: r for r in eligible}
+    eligible_ids = [r["feature_idx"] for r in eligible]
+
+    perm_maps: dict[str, dict[int, int]] = {}
+    if "global" in schemes:
+        perm_maps["global"] = permute_global(eligible_ids, seed=seed)
+    if "within_tier" in schemes:
+        perm_maps["within_tier"] = permute_within_tier(tier_by_fid, seed=seed)
+
+    client = _client
+    if client is None:
+        import anthropic
+
+        client = anthropic.Anthropic(max_retries=5)
+    note_texts = _note_texts or {}
+    tokenizer = _tokenizer
+
+    n_pos_test = n_contexts_test // 2
+    per_feature_rows: list[dict] = []
+    for i, fid in enumerate(eligible_ids):
+        ckpt = ckpt_dir / f"feature_{fid}.json"
+        if ckpt.exists():
+            with open(ckpt) as f:
+                per_feature_rows.append(json.load(f))
+            continue
+
+        ctx = contexts_by_fid[fid]
+        pos = list(ctx.get("pos_contexts", []))
+        neg = list(ctx.get("neg_contexts", []))
+        if tokenizer is not None:
+            resolve_token_text(pos + neg, note_texts, tokenizer, context_window=context_window)
+        test_pos = pos[n_contexts_train : n_contexts_train + n_pos_test]
+        test_neg = neg[:n_pos_test]
+
+        row: dict[str, Any] = {
+            "feature_idx": fid,
+            "tier": tier_by_fid[fid],
+            "real_expl_feature": fid,
+        }
+        for scorer in scorers:
+            row[f"{scorer}_real"] = real_by_fid[fid].get(f"{scorer}_score")
+
+        for scheme, pmap in perm_maps.items():
+            wrong_fid = pmap.get(fid)
+            if wrong_fid is None:  # within-tier skipped this feature's tier
+                row[f"shuf_{scheme}_feature"] = None
+                for scorer in scorers:
+                    row[f"{scorer}_shuf_{scheme}"] = None
+                continue
+            fuzz, det, perr = score_explanation_against_contexts(
+                client=client,
+                explanation=expl_by_fid[wrong_fid],
+                test_pos=test_pos,
+                test_neg=test_neg,
+                note_texts=note_texts,
+                tokenizer=tokenizer,
+                model=model,
+                scorers=scorers,
+                context_window=context_window,
+                owner_feature_id=fid,
+            )
+            scores = {"fuzzing": fuzz, "detection": det}
+            row[f"shuf_{scheme}_feature"] = wrong_fid
+            row[f"parsing_errors_{scheme}"] = perr
+            for scorer in scorers:
+                row[f"{scorer}_shuf_{scheme}"] = scores[scorer]
+
+        _write_json(row, ckpt)
+        per_feature_rows.append(row)
+        if _commit_volume is not None and (i + 1) % 50 == 0:
+            _commit_volume()
+
+    if _commit_volume is not None:
+        _commit_volume()
+
+    summary = aggregate_control_results(
+        per_feature_rows, list(perm_maps.keys()), scorers, chance_value
+    )
+    summary["model"] = model
+    summary["n_eligible"] = len(eligible_ids)
+    _write_json(summary, output_dir / "shuffled_control_summary.json")
+    pd.DataFrame(per_feature_rows).to_csv(
+        output_dir / "shuffled_control_per_feature.csv", index=False
+    )
+
+    logger.info("=" * 60)
+    logger.info("SHUFFLED-EXPLANATION CONTROL — %d eligible features", len(eligible_ids))
+    for scorer in scorers:
+        for scheme in perm_maps:
+            blk = summary["results"][scorer][scheme]["overall"]
+            logger.info(
+                "  %s/%s: real=%s shuffled=%s (delta=%s, p=%s, n=%s)",
+                scorer,
+                scheme,
+                blk["mean_real"],
+                blk["mean_shuffled"],
+                blk["delta"],
+                blk["wilcoxon_p"],
+                blk["n"],
+            )
+    logger.info("=" * 60)
+    return summary

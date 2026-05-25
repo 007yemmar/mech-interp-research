@@ -169,3 +169,89 @@ def test_aggregate_handles_too_few_and_missing():
     blk = out["results"]["detection"]["global"]["overall"]
     assert blk["n"] == 1  # the None pair is dropped
     assert blk["wilcoxon_p"] is None  # n < 10 -> no test
+
+
+class _FakeClient:
+    """Returns a fixed YES/NO block for any messages.create call."""
+
+    def __init__(self, text="1. yes\n2. no\n3. yes\n4. no"):
+        self._text = text
+        self.messages = self
+        self.calls = 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        block = type("B", (), {"text": self._text})()
+        return type("R", (), {"content": [block]})()
+
+
+class _RaisingClient:
+    def __init__(self):
+        self.messages = self
+
+    def create(self, **kwargs):
+        raise AssertionError("client must not be called when fully checkpointed")
+
+
+def test_run_shuffled_control_integration(tmp_path):
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)
+    client = _FakeClient()
+
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global", "within_tier"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=client,
+        _note_texts={},
+        _tokenizer=None,  # contexts already carry token_str -> no resolve needed
+    )
+
+    out = run / "shuffled_control"
+    assert (out / "shuffled_control_summary.json").is_file()
+    assert (out / "shuffled_control_per_feature.csv").is_file()
+    assert (out / "per_feature" / "test-model" / "feature_1.json").is_file()
+
+    assert summary["n_eligible"] == 4
+    assert summary["model"] == "test-model"
+    blk = summary["results"]["detection"]["global"]["overall"]
+    assert blk["mean_real"] == 0.96  # from the fake per-feature JSONs
+    assert blk["n"] == 4
+    assert client.calls > 0
+
+
+def test_run_shuffled_control_resumes(tmp_path):
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)
+    run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=_FakeClient(),
+        _note_texts={},
+        _tokenizer=None,
+    )
+    # Second run: all features checkpointed -> client must never be called.
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=_RaisingClient(),
+        _note_texts={},
+        _tokenizer=None,
+    )
+    assert summary["n_eligible"] == 4
