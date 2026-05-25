@@ -255,3 +255,34 @@ def test_run_shuffled_control_resumes(tmp_path):
         _tokenizer=None,
     )
     assert summary["n_eligible"] == 4
+
+
+def test_run_shuffled_control_recovers_from_corrupt_checkpoint(tmp_path):
+    import json as _json
+
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)
+    ckpt_dir = run / "shuffled_control" / "per_feature" / "test-model"
+    ckpt_dir.mkdir(parents=True)
+    # Plant a truncated checkpoint for feature 1 (simulates a preemption mid-write).
+    (ckpt_dir / "feature_1.json").write_text("{ this is not valid json")
+
+    client = _FakeClient()
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=client,
+        _note_texts={},
+        _tokenizer=None,
+    )
+    # The corrupt checkpoint was discarded and the feature re-scored.
+    assert summary["n_eligible"] == 4
+    reloaded = _json.loads((ckpt_dir / "feature_1.json").read_text())
+    assert reloaded["feature_idx"] == 1
+    assert client.calls > 0  # re-scoring happened

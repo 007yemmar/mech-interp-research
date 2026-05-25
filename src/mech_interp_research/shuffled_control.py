@@ -257,9 +257,16 @@ def run_shuffled_control(
     for i, fid in enumerate(eligible_ids):
         ckpt = ckpt_dir / f"feature_{fid}.json"
         if ckpt.exists():
-            with open(ckpt) as f:
-                per_feature_rows.append(json.load(f))
-            continue
+            try:
+                with open(ckpt) as f:
+                    per_feature_rows.append(json.load(f))
+                continue
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Corrupt checkpoint %s (truncated write?); discarding and re-scoring", ckpt
+                )
+                ckpt.unlink()
+        # fall through to re-score
 
         ctx = contexts_by_fid[fid]
         pos = list(ctx.get("pos_contexts", []))

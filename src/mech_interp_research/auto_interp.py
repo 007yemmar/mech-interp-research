@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1217,8 +1218,13 @@ def _cat_stats(results: list[dict]) -> dict:
 
 
 def _write_json(data: dict, path: Path) -> None:
-    with open(path, "w") as f:
+    """Write JSON atomically (temp file in same dir + os.replace) so a crash
+    mid-write never leaves a truncated file that would jam checkpoint resume."""
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2, default=str)
+    os.replace(tmp, path)
     logger.info(f"Wrote {path.name}")
 
 
