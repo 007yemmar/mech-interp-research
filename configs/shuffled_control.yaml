@@ -31,7 +31,7 @@ n_contexts_train: 20
 n_contexts_test: 10
 context_window: 30
 seed: 42
-max_workers: 8     # concurrent scoring threads (bounded to respect API rate limits)
-client_max_retries: 8   # SDK-level retries (exponential backoff) for 429 rate limits / 5xx
+max_workers: 3     # org cap is 50 RPM on sonnet; ~3 concurrent (~36 RPM) stays under it. Raise only if you raise your Anthropic usage tier.
+client_max_retries: 16  # SDK exponential backoff for 429s; high enough to absorb transient limits without dropping a feature
 
 logging_level: INFO
