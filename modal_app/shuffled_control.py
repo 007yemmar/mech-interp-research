@@ -65,6 +65,7 @@ def run_shuffled_control_remote(config: dict[str, Any]) -> dict[str, Any]:
             n_contexts_test=config.get("n_contexts_test", 10),
             context_window=config.get("context_window", 30),
             seed=config.get("seed", 42),
+            max_workers=config.get("max_workers", 8),
             _note_texts=note_texts,
             _tokenizer=tokenizer,
             _commit_volume=artifacts_volume.commit,

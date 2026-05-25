@@ -345,6 +345,61 @@ def test_run_shuffled_control_reports_parsing_errors(tmp_path):
     assert isinstance(summary["parsing_errors"]["global"], int)
 
 
+def test_concurrency_matches_sequential(tmp_path):
+    """max_workers=1 and max_workers=4 must produce identical results."""
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run1 = _write_fake_run(tmp_path / "a")
+    run2 = _write_fake_run(tmp_path / "b")
+    common = dict(
+        model="test-model",
+        schemes=["global", "within_tier"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _note_texts={},
+        _tokenizer=None,
+    )
+    s1 = run_shuffled_control(auto_interp_dir=run1, max_workers=1, _client=_FakeClient(), **common)
+    s4 = run_shuffled_control(auto_interp_dir=run2, max_workers=4, _client=_FakeClient(), **common)
+    assert s1["n_eligible"] == s4["n_eligible"]
+    assert s1["results"] == s4["results"]  # order-invariant
+
+
+class _AlwaysFailClient:
+    """Simulates an API that always errors (e.g. exhausted rate-limit retries)."""
+
+    def __init__(self):
+        self.messages = self
+
+    def create(self, **kwargs):
+        raise RuntimeError("simulated API failure")
+
+
+def test_run_shuffled_control_graceful_on_client_errors(tmp_path):
+    """Every scoring call failing must NOT crash the run; errors are counted."""
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        max_workers=4,
+        _client=_AlwaysFailClient(),
+        _note_texts={},
+        _tokenizer=None,
+    )
+    assert summary["n_eligible"] == 4
+    assert summary["n_errors"] == 4  # all 4 eligible features errored gracefully
+    assert (run / "shuffled_control" / "shuffled_control_summary.json").is_file()
+
+
 def test_compute_real_crosscheck():
     from mech_interp_research.shuffled_control import compute_real_crosscheck
 

@@ -31,5 +31,6 @@ n_contexts_train: 20
 n_contexts_test: 10
 context_window: 30
 seed: 42
+max_workers: 8     # concurrent scoring threads (bounded to respect API rate limits)
 
 logging_level: INFO

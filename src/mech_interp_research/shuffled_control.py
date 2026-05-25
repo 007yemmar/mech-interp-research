@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -250,6 +252,74 @@ def compute_real_crosscheck(
     return out
 
 
+def _score_one_feature(
+    fid: int,
+    *,
+    contexts_by_fid: dict[int, dict],
+    expl_by_fid: dict[int, str],
+    tier_by_fid: dict[int, str],
+    real_by_fid: dict[int, dict],
+    perm_maps: dict[str, dict[int, int]],
+    scorers: list[str],
+    note_texts: dict[int, str],
+    tokenizer,
+    context_window: int,
+    n_contexts_train: int,
+    n_pos_test: int,
+    client,
+    model: str,
+) -> dict:
+    """Score one feature's held-out contexts against its permuted (wrong)
+    explanation(s).
+
+    Reads only this feature's own data from the shared read-only inputs, so it
+    is safe to call concurrently across features. Deterministic: the fuzzing
+    distractor RNG is seeded by ``fid`` and the permutation maps are fixed, so
+    the result is independent of call order.
+    """
+    ctx = contexts_by_fid[fid]
+    pos = list(ctx.get("pos_contexts", []))
+    neg = list(ctx.get("neg_contexts", []))
+    if tokenizer is not None:
+        resolve_token_text(pos + neg, note_texts, tokenizer, context_window=context_window)
+    test_pos = pos[n_contexts_train : n_contexts_train + n_pos_test]
+    test_neg = neg[:n_pos_test]
+
+    row: dict[str, Any] = {
+        "feature_idx": fid,
+        "tier": tier_by_fid[fid],
+        "real_expl_feature": fid,
+    }
+    for scorer in scorers:
+        row[f"{scorer}_real"] = real_by_fid[fid].get(f"{scorer}_score")
+
+    for scheme, pmap in perm_maps.items():
+        wrong_fid = pmap.get(fid)
+        if wrong_fid is None:  # within-tier skipped this feature's tier
+            row[f"shuf_{scheme}_feature"] = None
+            for scorer in scorers:
+                row[f"{scorer}_shuf_{scheme}"] = None
+            continue
+        fuzz, det, perr = score_explanation_against_contexts(
+            client=client,
+            explanation=expl_by_fid[wrong_fid],
+            test_pos=test_pos,
+            test_neg=test_neg,
+            note_texts=note_texts,
+            tokenizer=tokenizer,
+            model=model,
+            scorers=scorers,
+            context_window=context_window,
+            owner_feature_id=fid,
+        )
+        scores = {"fuzzing": fuzz, "detection": det}
+        row[f"shuf_{scheme}_feature"] = wrong_fid
+        row[f"parsing_errors_{scheme}"] = perr
+        for scorer in scorers:
+            row[f"{scorer}_shuf_{scheme}"] = scores[scorer]
+    return row
+
+
 def run_shuffled_control(
     auto_interp_dir: str | Path,
     output_dir: str | Path | None = None,
@@ -261,6 +331,8 @@ def run_shuffled_control(
     context_window: int = 30,
     seed: int = 42,
     chance_value: float = 0.51,
+    max_workers: int = 8,
+    client_max_retries: int = 8,
     _client=None,
     _note_texts: dict[int, str] | None = None,
     _tokenizer=None,
@@ -304,13 +376,19 @@ def run_shuffled_control(
     if client is None:
         import anthropic
 
-        client = anthropic.Anthropic(max_retries=5)
+        # SDK-level retries give exponential backoff for 429 rate limits and
+        # transient 5xx errors — the primary defense under concurrency.
+        client = anthropic.Anthropic(max_retries=client_max_retries)
     note_texts = _note_texts or {}
     tokenizer = _tokenizer
 
     n_pos_test = n_contexts_test // 2
+
+    # Resume: load existing per-feature checkpoints; only re-score the rest.
+    # A corrupt/truncated checkpoint is discarded and re-scored.
     per_feature_rows: list[dict] = []
-    for i, fid in enumerate(eligible_ids):
+    todo: list[int] = []
+    for fid in eligible_ids:
         ckpt = ckpt_dir / f"feature_{fid}.json"
         if ckpt.exists():
             try:
@@ -322,53 +400,56 @@ def run_shuffled_control(
                     "Corrupt checkpoint %s (truncated write?); discarding and re-scoring", ckpt
                 )
                 ckpt.unlink()
-        # fall through to re-score
+        todo.append(fid)
 
-        ctx = contexts_by_fid[fid]
-        pos = list(ctx.get("pos_contexts", []))
-        neg = list(ctx.get("neg_contexts", []))
-        if tokenizer is not None:
-            resolve_token_text(pos + neg, note_texts, tokenizer, context_window=context_window)
-        test_pos = pos[n_contexts_train : n_contexts_train + n_pos_test]
-        test_neg = neg[:n_pos_test]
+    logger.info(
+        "Scoring %d features (%d resumed from checkpoint) with max_workers=%d",
+        len(todo),
+        len(per_feature_rows),
+        max_workers,
+    )
 
-        row: dict[str, Any] = {
-            "feature_idx": fid,
-            "tier": tier_by_fid[fid],
-            "real_expl_feature": fid,
-        }
-        for scorer in scorers:
-            row[f"{scorer}_real"] = real_by_fid[fid].get(f"{scorer}_score")
-
-        for scheme, pmap in perm_maps.items():
-            wrong_fid = pmap.get(fid)
-            if wrong_fid is None:  # within-tier skipped this feature's tier
-                row[f"shuf_{scheme}_feature"] = None
-                for scorer in scorers:
-                    row[f"{scorer}_shuf_{scheme}"] = None
-                continue
-            fuzz, det, perr = score_explanation_against_contexts(
-                client=client,
-                explanation=expl_by_fid[wrong_fid],
-                test_pos=test_pos,
-                test_neg=test_neg,
-                note_texts=note_texts,
-                tokenizer=tokenizer,
-                model=model,
-                scorers=scorers,
-                context_window=context_window,
-                owner_feature_id=fid,
-            )
-            scores = {"fuzzing": fuzz, "detection": det}
-            row[f"shuf_{scheme}_feature"] = wrong_fid
-            row[f"parsing_errors_{scheme}"] = perr
-            for scorer in scorers:
-                row[f"{scorer}_shuf_{scheme}"] = scores[scorer]
-
-        _write_json(row, ckpt)
-        per_feature_rows.append(row)
-        if _commit_volume is not None and (i + 1) % 50 == 0:
-            _commit_volume()
+    # Concurrency note: workers only READ their own feature's data from the
+    # shared inputs and write nothing shared. Checkpoint writes and volume
+    # commits happen only on the main thread (below), so there are no
+    # file-write or commit races. Results are independent of completion order.
+    n_errors = 0
+    if todo:
+        worker = partial(
+            _score_one_feature,
+            contexts_by_fid=contexts_by_fid,
+            expl_by_fid=expl_by_fid,
+            tier_by_fid=tier_by_fid,
+            real_by_fid=real_by_fid,
+            perm_maps=perm_maps,
+            scorers=scorers,
+            note_texts=note_texts,
+            tokenizer=tokenizer,
+            context_window=context_window,
+            n_contexts_train=n_contexts_train,
+            n_pos_test=n_pos_test,
+            client=client,
+            model=model,
+        )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(worker, fid): fid for fid in todo}
+            for done_count, fut in enumerate(as_completed(futures), start=1):
+                fid = futures[fut]
+                try:
+                    row = fut.result()
+                except Exception:
+                    # A feature still failing after the SDK's retries is logged
+                    # and skipped (no checkpoint written), so the run never
+                    # crashes and the feature is retried on the next resume.
+                    logger.exception(
+                        "Feature %s failed after retries; skipping (will retry on resume)", fid
+                    )
+                    n_errors += 1
+                    continue
+                _write_json(row, ckpt_dir / f"feature_{fid}.json")
+                per_feature_rows.append(row)
+                if _commit_volume is not None and done_count % 50 == 0:
+                    _commit_volume()
 
     if _commit_volume is not None:
         _commit_volume()
@@ -378,6 +459,7 @@ def run_shuffled_control(
     )
     summary["model"] = model
     summary["n_eligible"] = len(eligible_ids)
+    summary["n_errors"] = n_errors
     summary["parsing_errors"] = {
         scheme: int(sum(r.get(f"parsing_errors_{scheme}", 0) or 0 for r in per_feature_rows))
         for scheme in perm_maps
