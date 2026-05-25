@@ -565,8 +565,7 @@ def train(config: JumpReLUConfig) -> dict[str, Any]:
                 resume_step_in_epoch = 0
                 break
         print(
-            f"Resumed at step={resume_step}, epoch={resume_epoch}, "
-            f"step_in_epoch={fast_forwarded}"
+            f"Resumed at step={resume_step}, epoch={resume_epoch}, step_in_epoch={fast_forwarded}"
         )
 
     # ------ W&B init (fresh or resumed) ---------------------------------------

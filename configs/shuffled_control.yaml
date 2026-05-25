@@ -1,0 +1,35 @@
+# Shuffled-explanation control for the auto-interp scorers (Paulo et al. 2024).
+#
+# Re-scores each feature's real contexts with a deliberately WRONG explanation
+# (global derangement + within-tier permutation) to establish the Fuzzing/
+# Detection scorer null baseline (~0.51 chance). Reuses extracted_contexts.json
+# + per-feature explanations from a COMPLETED auto_interp run — no re-extraction.
+#
+# Run:
+#   modal run modal_app/shuffled_control.py --config-file configs/shuffled_control.yaml
+
+# --- existing completed auto_interp run to re-score ---
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: null   # null -> <auto_interp_dir>/shuffled_control
+model: claude-sonnet-4-6   # the model whose per_feature/<model>/ explanations to permute
+
+# --- needed to resolve token text for fuzzing distractors ---
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+model_name: google/gemma-2-2b
+join_key: admission_id
+text_col: note_text
+
+# --- control settings (MUST match the original run's context splitting) ---
+schemes:
+  - global        # reproduces Paulo et al.'s ~0.51 baseline (directly citable)
+  - within_tier   # rigor upgrade: controls for explanation specificity
+scorers:
+  - fuzzing
+  - detection
+n_contexts_train: 20
+n_contexts_test: 10
+context_window: 30
+seed: 42
+
+logging_level: INFO

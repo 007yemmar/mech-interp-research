@@ -65,6 +65,9 @@ modal run modal_app/feature_inspector.py --config-file configs/feature_inspector
 # Modal — auto-interpretability (run after icd_eval + shard_ckpt; requires anthropic-api-key secret)
 modal run modal_app/auto_interp.py --config-file configs/auto_interp_jumprelu.yaml
 
+# Modal — shuffled-explanation control (scorer null baseline; run after auto_interp)
+modal run modal_app/shuffled_control.py --config-file configs/shuffled_control.yaml
+
 # Inspect Modal volumes (paths are relative to volume root, no /out/ prefix)
 modal volume ls sae-artifacts activations/
 modal volume ls sae-artifacts saes/
@@ -131,6 +134,7 @@ All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sa
 | `tfidf_lr_baseline.py` | TF-IDF + LR baseline: per-code stratified k-fold CV (AUC-ROC/PR), Wilcoxon signed-rank paired significance, supplementary best-feature correlation comparison |
 | `feature_inspector.py` | Token-level feature inspection: two-pass algorithm scans activation shards for top-k tokens per grounded latent, re-tokenizes matched notes for context extraction, computes firing statistics and diversity metrics |
 | `auto_interp.py` | Auto-interpretability pipeline: LLM explanation generation (Anthropic SDK), Fuzzing + Detection scoring (Paulo et al. 2024), 5-way categorization, ICD-9 concordance validation (YES/PARTIAL/NO), dual-model comparison (Sonnet vs Haiku), tier-level summaries, per-feature checkpointing for resume |
+| `shuffled_control.py` | Shuffled-explanation control: re-scores each feature's contexts against a wrong explanation (global derangement + within-tier permutation), establishes the Fuzzing/Detection null baseline (Paulo et al. 2024 ~0.51), paired Wilcoxon vs real scores |
 
 ### `modal_app/` — Modal entrypoints
 
@@ -205,6 +209,10 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
     model_comparison.json                 # Sonnet vs Haiku: scores, concordance, explanation length
     run_summary.json                      # config snapshot, runtime, feature counts, errors
     per_feature/<model>/                  # per-feature JSON checkpoints (resume support)
+    shuffled_control/
+        shuffled_control_summary.json     # per scorer x scheme x tier: mean_real, mean_shuffled, delta, CI, Wilcoxon p
+        shuffled_control_per_feature.csv  # one row per feature with real + shuffled scores
+        per_feature/<model>/              # resume checkpoints
 ```
 
 ### Data handling rules (MIMIC-IV / PHI)
