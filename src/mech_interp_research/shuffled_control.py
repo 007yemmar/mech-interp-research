@@ -272,8 +272,10 @@ def _score_one_feature(
     """Score one feature's held-out contexts against its permuted (wrong)
     explanation(s).
 
-    Reads only this feature's own data from the shared read-only inputs, so it
-    is safe to call concurrently across features. Deterministic: the fuzzing
+    Operates only on this feature's own (disjoint) context dicts — note
+    ``resolve_token_text`` mutates them in place — and reads only this feature's
+    entries from the shared inputs, so it is safe to call concurrently across
+    features. Deterministic: the fuzzing
     distractor RNG is seeded by ``fid`` and the permutation maps are fixed, so
     the result is independent of call order.
     """
@@ -495,5 +497,11 @@ def run_shuffled_control(
                 blk["wilcoxon_p"],
                 blk["n"],
             )
+    if n_errors:
+        logger.warning(
+            "  %d/%d features FAILED after retries (excluded from results)",
+            n_errors,
+            len(eligible_ids),
+        )
     logger.info("=" * 60)
     return summary

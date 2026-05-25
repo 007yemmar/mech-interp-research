@@ -32,5 +32,6 @@ n_contexts_test: 10
 context_window: 30
 seed: 42
 max_workers: 8     # concurrent scoring threads (bounded to respect API rate limits)
+client_max_retries: 8   # SDK-level retries (exponential backoff) for 429 rate limits / 5xx
 
 logging_level: INFO

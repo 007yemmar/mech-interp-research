@@ -365,6 +365,8 @@ def test_concurrency_matches_sequential(tmp_path):
     s4 = run_shuffled_control(auto_interp_dir=run2, max_workers=4, _client=_FakeClient(), **common)
     assert s1["n_eligible"] == s4["n_eligible"]
     assert s1["results"] == s4["results"]  # order-invariant
+    assert s1["n_errors"] == 0
+    assert s4["n_errors"] == 0
 
 
 class _AlwaysFailClient:
