@@ -1474,7 +1474,7 @@ def run_posthoc_analyses(
         save_results(gr, sub)
         threshold_summaries.append({"threshold": thresh, **gr.summary_dict()})
         logger.info(
-            f"  r>{thresh}: {gr.grounded_latent_count} grounded " f"({gr.grounded_latent_frac:.1%})"
+            f"  r>{thresh}: {gr.grounded_latent_count} grounded ({gr.grounded_latent_frac:.1%})"
         )
 
     # ---- Analysis 2: monospecificity ----
