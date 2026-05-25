@@ -1185,3 +1185,49 @@ class TestRunAutoInterpSmoke:
         assert set(conc["tier"]) <= {"strong_grounded", "weak_grounded"}
 
         assert call_count["n"] > 0
+
+
+# ---------------------------------------------------------------------------
+# test_score_explanation_against_contexts
+# ---------------------------------------------------------------------------
+
+
+class TestScoreExplanationAgainstContexts:
+    """The extracted scoring helper used by both the pipeline and the control."""
+
+    def test_detection_only_returns_score_and_no_parse_errors(self):
+        from mech_interp_research.auto_interp import score_explanation_against_contexts
+
+        class _FakeClient:
+            def __init__(self, text):
+                self._text = text
+                self.messages = self
+
+            def create(self, **kwargs):
+                block = type("B", (), {"text": self._text})()
+                return type("R", (), {"content": [block]})()
+
+        # 2 pos + 2 neg detection items -> response with 4 yes/no lines.
+        client = _FakeClient("1. yes\n2. no\n3. yes\n4. no")
+        pos = [
+            {"context_str": f"p{i}", "token_str": f"t{i}", "is_activating": True} for i in range(2)
+        ]
+        neg = [
+            {"context_str": f"n{i}", "token_str": f"u{i}", "is_activating": False} for i in range(2)
+        ]
+
+        fuzz, det, perr = score_explanation_against_contexts(
+            client=client,
+            explanation="atrial fibrillation terminology",
+            test_pos=pos,
+            test_neg=neg,
+            note_texts={},
+            tokenizer=None,
+            model="test-model",
+            scorers=["detection"],
+            context_window=15,
+            owner_feature_id=7,
+        )
+        assert fuzz is None  # fuzzing not requested
+        assert det is not None and 0.0 <= det <= 1.0
+        assert perr == 0

@@ -873,6 +873,77 @@ def detection_score(
     return correct / len(parsed)
 
 
+def score_explanation_against_contexts(
+    client,
+    explanation: str,
+    test_pos: list[dict],
+    test_neg: list[dict],
+    note_texts: dict[int, str],
+    tokenizer,
+    model: str,
+    scorers: list[str],
+    context_window: int,
+    owner_feature_id: int,
+) -> tuple[float | None, float | None, int]:
+    """Run Fuzzing + Detection scoring of ``explanation`` against test contexts.
+
+    Shared by ``_process_one_feature`` (real explanation) and the
+    shuffled-explanation control (wrong explanation). The fuzzing distractor RNG
+    is seeded by ``owner_feature_id`` so the test set is identical across
+    explanations for the same feature. Contexts must already be resolved
+    (``context_str``/``token_str`` populated via ``resolve_token_text``).
+
+    Returns ``(fuzzing_score, detection_score, parsing_errors)`` with ``None`` for
+    a scorer that was not requested or had no usable contexts.
+    """
+    fuzz_sc: float | None = None
+    det_sc: float | None = None
+    parsing_errors = 0
+
+    if "fuzzing" in scorers and explanation:
+        fuzz_rng = np.random.default_rng(owner_feature_id)
+        test_for_fuzzing: list[dict] = []
+        for c in test_pos:
+            if c.get("token_str") is None:
+                continue
+            test_for_fuzzing.append({**c, "is_activating": True})
+            distractor = _make_distractor_context(
+                c, note_texts, tokenizer, context_window, fuzz_rng
+            )
+            if distractor is not None:
+                test_for_fuzzing.append(distractor)
+
+        if not any(not item["is_activating"] for item in test_for_fuzzing):
+            test_for_fuzzing = [
+                {**c, "is_activating": True} for c in test_pos if c.get("token_str") is not None
+            ] + [{**c, "is_activating": False} for c in test_neg if c.get("token_str") is not None]
+    else:
+        test_for_fuzzing = []
+
+    if "fuzzing" in scorers and explanation and test_for_fuzzing:
+        val = fuzzing_score(client, explanation, test_for_fuzzing, model=model)
+        if np.isnan(val):
+            parsing_errors += 1
+            val = fuzzing_score(
+                client, explanation, test_for_fuzzing, model=model, format_reminder=True
+            )
+        fuzz_sc = None if np.isnan(val) else val
+
+    if "detection" in scorers and explanation and test_pos and test_neg:
+        det_pos = [c for c in test_pos if c.get("token_str") is not None]
+        det_neg = [c for c in test_neg if c.get("token_str") is not None]
+        if det_pos and det_neg:
+            val = detection_score(client, explanation, det_pos, det_neg, model=model)
+            if np.isnan(val):
+                parsing_errors += 1
+                val = detection_score(
+                    client, explanation, det_pos, det_neg, model=model, format_reminder=True
+                )
+            det_sc = None if np.isnan(val) else val
+
+    return fuzz_sc, det_sc, parsing_errors
+
+
 # ---------------------------------------------------------------------------
 # 5. Categorization
 # ---------------------------------------------------------------------------
@@ -1379,57 +1450,18 @@ def _process_one_feature(
         model=model,
     )
 
-    fuzz_sc = None
-    det_sc = None
-    parsing_errors = 0
-
-    # True Fuzzing (Paulo et al. 2024): for each activating test context,
-    # present the real trigger (is_activating=True) and a distractor version
-    # that highlights a different random token from the same window
-    # (is_activating=False).
-    fuzz_rng = np.random.default_rng(feature_idx)
-    test_for_fuzzing: list[dict] = []
-    for c in test_pos:
-        if c.get("token_str") is None:  # token_str="" is valid (whitespace token)
-            continue
-        test_for_fuzzing.append({**c, "is_activating": True})
-        distractor = _make_distractor_context(
-            c,
-            note_texts,
-            tokenizer,
-            context_window,
-            fuzz_rng,
-        )
-        if distractor is not None:
-            test_for_fuzzing.append(distractor)
-
-    # Fallback: if no distractor pairs could be created, use the old
-    # approach (mix of activating and non-activating contexts).
-    if not any(not item["is_activating"] for item in test_for_fuzzing):
-        test_for_fuzzing = [
-            {**c, "is_activating": True} for c in test_pos if c.get("token_str") is not None
-        ] + [{**c, "is_activating": False} for c in test_neg if c.get("token_str") is not None]
-
-    if "fuzzing" in scorers and explanation and test_for_fuzzing:
-        val = fuzzing_score(client, explanation, test_for_fuzzing, model=model)
-        if np.isnan(val):
-            parsing_errors += 1
-            val = fuzzing_score(
-                client, explanation, test_for_fuzzing, model=model, format_reminder=True
-            )
-        fuzz_sc = None if np.isnan(val) else val
-
-    if "detection" in scorers and explanation and test_pos and test_neg:
-        det_pos = [c for c in test_pos if c.get("token_str") is not None]
-        det_neg = [c for c in test_neg if c.get("token_str") is not None]
-        if det_pos and det_neg:
-            val = detection_score(client, explanation, det_pos, det_neg, model=model)
-            if np.isnan(val):
-                parsing_errors += 1
-                val = detection_score(
-                    client, explanation, det_pos, det_neg, model=model, format_reminder=True
-                )
-            det_sc = None if np.isnan(val) else val
+    fuzz_sc, det_sc, parsing_errors = score_explanation_against_contexts(
+        client=client,
+        explanation=explanation,
+        test_pos=test_pos,
+        test_neg=test_neg,
+        note_texts=note_texts,
+        tokenizer=tokenizer,
+        model=model,
+        scorers=scorers,
+        context_window=context_window,
+        owner_feature_id=feature_idx,
+    )
 
     conc_verdict = None
     conc_rationale = None
@@ -1635,8 +1667,7 @@ def run_auto_interp(
         still_needed = features_needing_work - cached_ids
         if still_needed:
             logger.info(
-                f"Cache has {len(cached_ids)} features; "
-                f"extracting {len(still_needed)} additional"
+                f"Cache has {len(cached_ids)} features; extracting {len(still_needed)} additional"
             )
         else:
             still_needed = set()
@@ -1658,7 +1689,7 @@ def run_auto_interp(
         all_contexts.update(new_contexts)
         with open(contexts_cache_path, "w") as f:
             json.dump({str(k): v for k, v in all_contexts.items()}, f)
-        logger.info(f"Saved {len(all_contexts)} feature contexts to " f"{contexts_cache_path.name}")
+        logger.info(f"Saved {len(all_contexts)} feature contexts to {contexts_cache_path.name}")
         if _commit_volume is not None:
             _commit_volume()
     elif not features_needing_work:
