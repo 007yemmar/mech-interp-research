@@ -9,9 +9,9 @@ Reuses ``extracted_contexts.json`` + per-feature explanations from a completed
 
 from __future__ import annotations
 
-import json  # noqa: F401
+import json
 import logging
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 from typing import Any  # noqa: F401
 
 import numpy as np
@@ -73,3 +73,45 @@ def permute_within_tier(feature_to_tier: dict[int, str], seed: int = 42) -> dict
             continue
         mapping.update(permute_global(sorted(ids), seed=seed + tier_idx + 1))
     return mapping
+
+
+def load_existing_run(
+    auto_interp_dir: str | Path, model: str
+) -> tuple[dict[int, dict], list[dict]]:
+    """Load ``extracted_contexts.json`` + per-feature JSONs from a completed run.
+
+    Returns ``(contexts_by_fid, feature_rows)``. Raises ``FileNotFoundError`` if
+    either input is missing.
+    """
+    auto_interp_dir = Path(auto_interp_dir)
+    contexts_path = auto_interp_dir / "extracted_contexts.json"
+    if not contexts_path.is_file():
+        raise FileNotFoundError(f"extracted_contexts.json not found at {contexts_path}")
+    with open(contexts_path) as f:
+        raw = json.load(f)
+    contexts_by_fid = {int(k): v for k, v in raw.items()}
+
+    model_dir = auto_interp_dir / "per_feature" / model.replace("/", "_")
+    if not model_dir.is_dir():
+        raise FileNotFoundError(f"per-feature dir not found at {model_dir}")
+    feature_rows: list[dict] = []
+    for jf in sorted(model_dir.glob("feature_*.json")):
+        with open(jf) as f:
+            feature_rows.append(json.load(f))
+    if not feature_rows:
+        raise FileNotFoundError(f"no feature_*.json under {model_dir}")
+    return contexts_by_fid, feature_rows
+
+
+def _is_eligible(row: dict, contexts_by_fid: dict[int, dict]) -> bool:
+    """A feature is eligible if it has a real explanation and >=1 pos context.
+
+    Fallback explanations produced by ``_dead_result`` start with ``"Feature "``.
+    """
+    expl = row.get("explanation") or ""
+    if not expl or expl.startswith("Feature "):
+        return False
+    ctx = contexts_by_fid.get(row["feature_idx"])
+    if not ctx:
+        return False
+    return len(ctx.get("pos_contexts", [])) > 0
