@@ -31,6 +31,7 @@ __all__ = [
     "permute_within_tier",
     "load_existing_run",
     "aggregate_control_results",
+    "compute_real_crosscheck",
     "run_shuffled_control",
 ]
 
@@ -196,6 +197,59 @@ def aggregate_control_results(
     }
 
 
+def compute_real_crosscheck(
+    per_feature_rows: list[dict],
+    published_summary: dict,
+    scorers: list[str],
+) -> dict:
+    """Cross-check the control's stored real scores against the real run's
+    published means, globally and per tier.
+
+    Closes the denominator caveat: the control's paired comparison reads each
+    feature's real score from the prior run, but its aggregate ``mean_real`` is
+    over the matched subset, which may differ from the real run's published
+    means. This reports both side by side so any skew is visible.
+
+    ``published_summary`` is the real run's ``scorer_summary.json`` of the form
+    ``{"global": {...}, "<tier>": {...}}`` with ``mean_<scorer>`` /
+    ``n_valid_<scorer>`` keys; pass ``{}`` if it is unavailable.
+    """
+    tiers = sorted({r["tier"] for r in per_feature_rows})
+
+    def _block(rows: list[dict], pub: dict, scorer: str) -> dict:
+        vals = [r[f"{scorer}_real"] for r in rows if r.get(f"{scorer}_real") is not None]
+        ctrl_mean = round(float(np.mean(vals)), 4) if vals else None
+        pub_mean = pub.get(f"mean_{scorer}")
+        pub_mean = round(float(pub_mean), 4) if pub_mean is not None else None
+        delta = (
+            round(ctrl_mean - pub_mean, 4)
+            if ctrl_mean is not None and pub_mean is not None
+            else None
+        )
+        return {
+            "control_mean_real": ctrl_mean,
+            "control_n": len(vals),
+            "published_mean": pub_mean,
+            "published_n": pub.get(f"n_valid_{scorer}"),
+            "delta_control_minus_published": delta,
+        }
+
+    out: dict[str, Any] = {}
+    for scorer in scorers:
+        out[scorer] = {
+            "overall": _block(per_feature_rows, published_summary.get("global", {}), scorer),
+            "by_tier": {
+                t: _block(
+                    [r for r in per_feature_rows if r["tier"] == t],
+                    published_summary.get(t, {}),
+                    scorer,
+                )
+                for t in tiers
+            },
+        }
+    return out
+
+
 def run_shuffled_control(
     auto_interp_dir: str | Path,
     output_dir: str | Path | None = None,
@@ -328,6 +382,17 @@ def run_shuffled_control(
         scheme: int(sum(r.get(f"parsing_errors_{scheme}", 0) or 0 for r in per_feature_rows))
         for scheme in perm_maps
     }
+    # Cross-check the matched-subset real baseline against the real run's
+    # published scorer means (scorer_summary.json), so any denominator skew
+    # between this control and the published numbers is visible.
+    pub_path = auto_interp_dir / "scorer_summary.json"
+    published_summary: dict = {}
+    if pub_path.is_file():
+        with open(pub_path) as f:
+            published_summary = json.load(f)
+    summary["real_score_crosscheck"] = compute_real_crosscheck(
+        per_feature_rows, published_summary, scorers
+    )
     _write_json(summary, output_dir / "shuffled_control_summary.json")
     pd.DataFrame(per_feature_rows).to_csv(
         output_dir / "shuffled_control_per_feature.csv", index=False

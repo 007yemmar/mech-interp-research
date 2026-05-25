@@ -343,3 +343,70 @@ def test_run_shuffled_control_reports_parsing_errors(tmp_path):
     assert "parsing_errors" in summary
     assert "global" in summary["parsing_errors"]
     assert isinstance(summary["parsing_errors"]["global"], int)
+
+
+def test_compute_real_crosscheck():
+    from mech_interp_research.shuffled_control import compute_real_crosscheck
+
+    rows = [
+        {"feature_idx": 0, "tier": "strong", "detection_real": 0.9},
+        {"feature_idx": 1, "tier": "strong", "detection_real": 1.0},
+        {"feature_idx": 2, "tier": "dead", "detection_real": 0.8},
+        {"feature_idx": 3, "tier": "dead", "detection_real": None},  # dropped
+    ]
+    published = {
+        "global": {"mean_detection": 0.90, "n_valid_detection": 100},
+        "strong": {"mean_detection": 0.95, "n_valid_detection": 60},
+        "dead": {"mean_detection": 0.80, "n_valid_detection": 40},
+    }
+    out = compute_real_crosscheck(rows, published, scorers=["detection"])
+
+    g = out["detection"]["overall"]
+    assert g["control_mean_real"] == 0.9  # mean(0.9, 1.0, 0.8)
+    assert g["control_n"] == 3  # the None is dropped
+    assert g["published_mean"] == 0.9
+    assert g["published_n"] == 100
+    assert g["delta_control_minus_published"] == 0.0
+
+    strong = out["detection"]["by_tier"]["strong"]
+    assert strong["control_mean_real"] == 0.95  # mean(0.9, 1.0)
+    assert strong["published_mean"] == 0.95
+    assert strong["control_n"] == 2
+
+    # A tier missing from the published summary -> published fields None, no crash.
+    out2 = compute_real_crosscheck(
+        [{"feature_idx": 9, "tier": "weak", "detection_real": 0.7}],
+        published,
+        scorers=["detection"],
+    )
+    w = out2["detection"]["by_tier"]["weak"]
+    assert w["control_mean_real"] == 0.7
+    assert w["published_mean"] is None
+    assert w["delta_control_minus_published"] is None
+
+
+def test_run_shuffled_control_includes_crosscheck(tmp_path):
+    import json as _json
+
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)  # per-feature JSONs set detection_score=0.96
+    with open(run / "scorer_summary.json", "w") as f:
+        _json.dump({"global": {"mean_detection": 0.96, "n_valid_detection": 4}}, f)
+
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=_FakeClient(),
+        _note_texts={},
+        _tokenizer=None,
+    )
+    cc = summary["real_score_crosscheck"]["detection"]["overall"]
+    assert cc["control_mean_real"] == 0.96  # all eligible have detection_real=0.96
+    assert cc["published_mean"] == 0.96
+    assert cc["delta_control_minus_published"] == 0.0
