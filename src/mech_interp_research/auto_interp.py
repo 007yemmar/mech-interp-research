@@ -901,10 +901,14 @@ def score_explanation_against_contexts(
     parsing_errors = 0
 
     if "fuzzing" in scorers and explanation:
+        # True Fuzzing (Paulo et al. 2024): for each activating test context,
+        # present the real trigger (is_activating=True) and a distractor version
+        # that highlights a different random token from the same window
+        # (is_activating=False).
         fuzz_rng = np.random.default_rng(owner_feature_id)
         test_for_fuzzing: list[dict] = []
         for c in test_pos:
-            if c.get("token_str") is None:
+            if c.get("token_str") is None:  # token_str="" is valid (whitespace token)
                 continue
             test_for_fuzzing.append({**c, "is_activating": True})
             distractor = _make_distractor_context(
@@ -913,6 +917,8 @@ def score_explanation_against_contexts(
             if distractor is not None:
                 test_for_fuzzing.append(distractor)
 
+        # Fallback: if no distractor pairs could be created, use a mix of
+        # activating and non-activating contexts instead.
         if not any(not item["is_activating"] for item in test_for_fuzzing):
             test_for_fuzzing = [
                 {**c, "is_activating": True} for c in test_pos if c.get("token_str") is not None
