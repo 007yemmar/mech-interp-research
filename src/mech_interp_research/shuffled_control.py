@@ -240,7 +240,9 @@ def run_shuffled_control(
 
     perm_maps: dict[str, dict[int, int]] = {}
     if "global" in schemes:
-        perm_maps["global"] = permute_global(eligible_ids, seed=seed)
+        # Sort for reproducibility: derangement is order-sensitive, so a stable
+        # numeric order makes the mapping reproducible independent of file-glob order.
+        perm_maps["global"] = permute_global(sorted(eligible_ids), seed=seed)
     if "within_tier" in schemes:
         perm_maps["within_tier"] = permute_within_tier(tier_by_fid, seed=seed)
 
@@ -322,6 +324,10 @@ def run_shuffled_control(
     )
     summary["model"] = model
     summary["n_eligible"] = len(eligible_ids)
+    summary["parsing_errors"] = {
+        scheme: int(sum(r.get(f"parsing_errors_{scheme}", 0) or 0 for r in per_feature_rows))
+        for scheme in perm_maps
+    }
     _write_json(summary, output_dir / "shuffled_control_summary.json")
     pd.DataFrame(per_feature_rows).to_csv(
         output_dir / "shuffled_control_per_feature.csv", index=False

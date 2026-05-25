@@ -286,3 +286,60 @@ def test_run_shuffled_control_recovers_from_corrupt_checkpoint(tmp_path):
     reloaded = _json.loads((ckpt_dir / "feature_1.json").read_text())
     assert reloaded["feature_idx"] == 1
     assert client.calls > 0  # re-scoring happened
+
+
+def test_run_shuffled_control_fuzzing_path_populates(tmp_path):
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)
+    client = _FakeClient()  # returns "1. yes\n2. no\n3. yes\n4. no" for any call
+
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["fuzzing", "detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=client,
+        _note_texts={},  # -> distractors return None -> fuzzing uses pos/neg fallback
+        _tokenizer=None,
+    )
+
+    # Fuzzing scorer ran (not just detection): both real-side absent? No -- real
+    # fuzzing scores come from the fake per-feature JSONs (fuzzing_score=0.95).
+    blk = summary["results"]["fuzzing"]["global"]["overall"]
+    assert blk["mean_real"] == 0.95
+    assert blk["n"] == 4
+    assert blk["mean_shuffled"] is not None  # shuffled fuzzing actually computed
+
+    # And the per-feature CSV/JSON carry a fuzzing_shuf_global value for feature 1.
+    import json as _json
+
+    feat1 = _json.loads(
+        (run / "shuffled_control" / "per_feature" / "test-model" / "feature_1.json").read_text()
+    )
+    assert "fuzzing_shuf_global" in feat1
+    assert feat1["fuzzing_shuf_global"] is not None
+
+
+def test_run_shuffled_control_reports_parsing_errors(tmp_path):
+    from mech_interp_research.shuffled_control import run_shuffled_control
+
+    run = _write_fake_run(tmp_path)
+    summary = run_shuffled_control(
+        auto_interp_dir=run,
+        model="test-model",
+        schemes=["global"],
+        scorers=["detection"],
+        n_contexts_train=0,
+        n_contexts_test=4,
+        context_window=15,
+        _client=_FakeClient(),
+        _note_texts={},
+        _tokenizer=None,
+    )
+    assert "parsing_errors" in summary
+    assert "global" in summary["parsing_errors"]
+    assert isinstance(summary["parsing_errors"]["global"], int)
