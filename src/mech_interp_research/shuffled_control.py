@@ -12,11 +12,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any  # noqa: F401
+from typing import Any
 
 import numpy as np
 import pandas as pd  # noqa: F401
-from scipy.stats import wilcoxon  # noqa: F401
+from scipy.stats import wilcoxon
 
 from mech_interp_research.auto_interp import (  # noqa: F401
     _write_json,
@@ -115,3 +115,82 @@ def _is_eligible(row: dict, contexts_by_fid: dict[int, dict]) -> bool:
     if not ctx:
         return False
     return len(ctx.get("pos_contexts", [])) > 0
+
+
+def _aggregate_block(rows: list[dict], real_key: str, shuf_key: str) -> dict:
+    """Paired summary over rows where both real and shuffled scores are present."""
+    pairs = [
+        (r[real_key], r[shuf_key])
+        for r in rows
+        if r.get(real_key) is not None and r.get(shuf_key) is not None
+    ]
+    n = len(pairs)
+    if n == 0:
+        return {
+            "mean_real": None,
+            "mean_shuffled": None,
+            "delta": None,
+            "n": 0,
+            "ci95_shuffled": None,
+            "wilcoxon_p": None,
+            "median_delta_real_minus_shuffled": None,
+        }
+    real = np.array([p[0] for p in pairs], dtype=float)
+    shuf = np.array([p[1] for p in pairs], dtype=float)
+    deltas = real - shuf
+
+    if n > 1:
+        se = float(shuf.std(ddof=1)) / np.sqrt(n)
+    else:
+        se = 0.0
+    ci = [round(float(shuf.mean() - 1.96 * se), 4), round(float(shuf.mean() + 1.96 * se), 4)]
+
+    if n < 10 or np.all(deltas == 0):
+        p_val: float | None = None
+    else:
+        _, p = wilcoxon(deltas, alternative="two-sided")
+        p_val = round(float(p), 6)
+
+    return {
+        "mean_real": round(float(real.mean()), 4),
+        "mean_shuffled": round(float(shuf.mean()), 4),
+        "delta": round(float(real.mean() - shuf.mean()), 4),
+        "n": n,
+        "ci95_shuffled": ci,
+        "wilcoxon_p": p_val,
+        "median_delta_real_minus_shuffled": round(float(np.median(deltas)), 4),
+    }
+
+
+def aggregate_control_results(
+    per_feature_rows: list[dict],
+    schemes: list[str],
+    scorers: list[str],
+    chance_value: float = 0.51,
+) -> dict:
+    """Build the summary dict (per scorer x scheme x tier(+overall))."""
+    tiers = sorted({r["tier"] for r in per_feature_rows})
+    results: dict[str, Any] = {}
+    for scorer in scorers:
+        results[scorer] = {}
+        real_key = f"{scorer}_real"
+        for scheme in schemes:
+            shuf_key = f"{scorer}_shuf_{scheme}"
+            results[scorer][scheme] = {
+                "overall": _aggregate_block(per_feature_rows, real_key, shuf_key),
+                "by_tier": {
+                    tier: _aggregate_block(
+                        [r for r in per_feature_rows if r["tier"] == tier], real_key, shuf_key
+                    )
+                    for tier in tiers
+                },
+            }
+    return {
+        "chance_reference": {
+            "value": chance_value,
+            "source": "Paulo et al. 2024 (arXiv 2410.13928)",
+        },
+        "schemes": schemes,
+        "scorers": scorers,
+        "results": results,
+    }

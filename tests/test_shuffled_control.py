@@ -130,3 +130,42 @@ def test_load_existing_run_missing_inputs(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="extracted_contexts.json"):
         load_existing_run(tmp_path / "nope", "test-model")
+
+
+def test_aggregate_control_results_schema_and_stats():
+    from mech_interp_research.shuffled_control import aggregate_control_results
+
+    # 12 features: real detection always 0.9, shuffled-global always 0.5.
+    rows = []
+    for i in range(12):
+        rows.append(
+            {
+                "feature_idx": i,
+                "tier": "strong" if i < 6 else "dead",
+                "detection_real": 0.9,
+                "detection_shuf_global": 0.5,
+            }
+        )
+    out = aggregate_control_results(rows, schemes=["global"], scorers=["detection"])
+
+    blk = out["results"]["detection"]["global"]["overall"]
+    assert blk["mean_real"] == 0.9
+    assert blk["mean_shuffled"] == 0.5
+    assert blk["delta"] == 0.4
+    assert blk["n"] == 12
+    assert blk["wilcoxon_p"] is not None and blk["wilcoxon_p"] < 0.05
+    assert out["results"]["detection"]["global"]["by_tier"]["strong"]["n"] == 6
+    assert out["chance_reference"]["value"] == 0.51
+
+
+def test_aggregate_handles_too_few_and_missing():
+    from mech_interp_research.shuffled_control import aggregate_control_results
+
+    rows = [
+        {"feature_idx": 0, "tier": "dead", "detection_real": 0.8, "detection_shuf_global": None},
+        {"feature_idx": 1, "tier": "dead", "detection_real": 0.7, "detection_shuf_global": 0.5},
+    ]
+    out = aggregate_control_results(rows, schemes=["global"], scorers=["detection"])
+    blk = out["results"]["detection"]["global"]["overall"]
+    assert blk["n"] == 1  # the None pair is dropped
+    assert blk["wilcoxon_p"] is None  # n < 10 -> no test
