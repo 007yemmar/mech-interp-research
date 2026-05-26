@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import importlib.util
+import pathlib
+
 import numpy as np
 import pandas as pd
 from safetensors.numpy import save_file
 
 from mech_interp_research.feature_trace import _window, run_feature_trace
+
+_spec = importlib.util.spec_from_file_location(
+    "bfw", pathlib.Path(__file__).parent.parent / "scripts" / "build_feature_walkthrough.py"
+)
+bfw = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(bfw)
 
 
 def test_window_centers_and_clips():
@@ -62,3 +71,8 @@ def test_run_feature_trace_extracts_window(tmp_path):
     assert out["1"]["tokens"] == ["t1", "t2", "t3"]
     assert out["1"]["center_index"] == 1
     assert out["1"]["peak_activation"] == 9.0
+
+
+def test_scan_fragment_flags_identifiers():
+    assert bfw.scan_fragment("Hypothyroidism BPH") == []
+    assert bfw.scan_fragment("DOB 01/02/1990") != []
