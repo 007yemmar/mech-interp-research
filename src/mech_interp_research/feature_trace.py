@@ -8,13 +8,18 @@ feature_inspector.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from safetensors.numpy import load_file as load_safetensors
+
+from mech_interp_research.feature_inspector import load_tokenizer
+from mech_interp_research.icd_eval import JumpReLUSAE, load_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -100,4 +105,45 @@ def run_feature_trace(
                 raise AssertionError(f"HIPAA identifier in latent {latent} window: {hits}")
         out[str(latent)] = win
 
+    return out
+
+
+def load_and_run(
+    activations_dir: str | Path,
+    sae_checkpoint: str | Path,
+    icd_csv_path: str | Path,
+    output_path: str | Path,
+    specs: list[dict[str, Any]],
+    model_name: str = "google/gemma-2-2b",
+    max_length: int = 8192,
+    join_key: str = "admission_id",
+    text_col: str = "note_text",
+    hf_token: str | None = None,
+) -> dict[str, Any]:
+    """Load real artifacts and write the trace JSON to output_path."""
+    sae = JumpReLUSAE.from_checkpoint(sae_checkpoint)
+    metadata = load_metadata(Path(activations_dir))
+    tokenizer = load_tokenizer(model_name, hf_token)
+
+    note_ids = {int(s["note_idx"]) for s in specs}
+    df = pd.read_csv(icd_csv_path, usecols=[join_key, text_col])
+    meta_notes = metadata[metadata["note_idx"].isin(note_ids)][
+        [join_key, "note_idx"]
+    ].drop_duplicates()
+    merged = meta_notes.merge(df, on=join_key, how="inner")
+    note_texts = {int(r["note_idx"]): str(r[text_col]) for _, r in merged.iterrows()}
+
+    traces = run_feature_trace(
+        specs,
+        sae=sae,
+        metadata=metadata,
+        tokenizer=tokenizer,
+        note_texts=note_texts,
+        activations_dir=activations_dir,
+        max_length=max_length,
+    )
+    out = {"specs": specs, "traces": traces}
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(output_path).write_text(json.dumps(out, indent=2))
+    logger.info("wrote %s (%d traces)", output_path, len(traces))
     return out
