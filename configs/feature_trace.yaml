@@ -1,0 +1,15 @@
+# Per-token feature traces for the concordance dashboard.
+# Run: modal run modal_app/feature_trace.py --config-file configs/feature_trace.yaml
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+icd_csv_path: /data/sample_50k.csv
+output_path: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/feature_trace/feature_trace.json
+model_name: google/gemma-2-2b
+max_length: 8192
+join_key: admission_id
+text_col: note_text
+logging_level: INFO
+# Top-firing contexts from extracted_contexts.json (shard derived from metadata via note_idx):
+specs:
+  - {latent: 2265, note_idx: 331,  position_in_note: 726,  window_radius: 8}   # hypothyroidism
+  - {latent: 6701, note_idx: 7180, position_in_note: 2727, window_radius: 8}   # atrial fibrillation
