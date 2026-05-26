@@ -133,6 +133,13 @@ def load_and_run(
     merged = meta_notes.merge(df, on=join_key, how="inner")
     note_texts = {int(r["note_idx"]): str(r[text_col]) for _, r in merged.iterrows()}
 
+    missing = note_ids - set(note_texts)
+    if missing:
+        raise ValueError(
+            f"note_idx {sorted(missing)} not found in ICD CSV after join on {join_key!r}; "
+            f"check that icd_csv_path matches the extraction population."
+        )
+
     traces = run_feature_trace(
         specs,
         sae=sae,

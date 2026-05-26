@@ -39,3 +39,4 @@ docs/superpowers/specs/*
 
 # Feature figures: contain de-identified MIMIC-IV note fragments (do not commit)
 figures/*.pdf
+figures/*.png
