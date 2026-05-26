@@ -36,3 +36,6 @@ docs/superpowers/*
 !docs/superpowers/specs/
 docs/superpowers/specs/*
 !docs/superpowers/specs/2026-05-23-clinical-sae-defense-guide.md
+
+# Feature figures: contain de-identified MIMIC-IV note fragments (do not commit)
+figures/*.pdf
