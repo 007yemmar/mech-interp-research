@@ -325,56 +325,115 @@ def render_trace(trace_path: Path, src: Path, out: Path) -> None:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib import cm
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import LinearSegmentedColormap, Normalize
+    from matplotlib.patches import FancyBboxPatch
+
+    INK, MUTE, FAINT = "#1a1a2e", "#5a6472", "#9aa3af"
+    cmap = LinearSegmentedColormap.from_list("act", ["#fff7ec", "#fdae6b", "#d7301f", "#7f0000"])
 
     data = json.loads(Path(trace_path).read_text())
-    conc = load_concordance(src)
-    cat = load_catalog(src)
+    conc, cat, abl = load_concordance(src), load_catalog(src), load_vanilla_ablation(src)
+    van_by_lat = {c["jr_ground"]: c for c in CONCEPTS}  # JumpReLU latent -> concept
     traces = data["traces"]
+    n = len(traces)
 
-    fig, axes = plt.subplots(len(traces), 1, figsize=(7.2, 1.7 * len(traces)))
-    axes = [axes] if len(traces) == 1 else list(axes)
-    for ax, (lat, tr) in zip(axes, traces.items(), strict=False):
+    fig = plt.figure(figsize=(7.6, 1.95 * n + 0.9))
+    gs = fig.add_gridspec(n, 1, hspace=0.95, top=0.9, bottom=0.16, left=0.02, right=0.98)
+
+    for idx, (lat, tr) in enumerate(traces.items()):
+        ax = fig.add_subplot(gs[idx])
         toks, acts = tr["tokens"], tr["activations"]
         if scan_fragment(" ".join(toks)):
             raise AssertionError(f"HIPAA identifier in latent {lat} window")
         amax = max(acts) or 1.0
+        ax.set_xlim(-0.3, len(toks) + 0.3)
+        ax.set_ylim(0, 1)
         ax.axis("off")
+
         for i, (tok, a) in enumerate(zip(toks, acts, strict=False)):
-            shade = a / amax
+            shade = max(a, 0.0) / amax
+            empty = not tok.strip()
+            facecolor = "#f0f1f3" if (empty or shade < 1e-6) else cmap(shade)
             ax.add_patch(
-                plt.Rectangle(
-                    (i, 0), 1, 1, facecolor=cm.Reds(0.15 + 0.85 * shade), edgecolor="0.7", lw=0.5
+                FancyBboxPatch(
+                    (i + 0.08, 0.34),
+                    0.84,
+                    0.40,
+                    boxstyle="round,pad=0,rounding_size=0.12",
+                    linewidth=0,
+                    facecolor=facecolor,
                 )
             )
-            ax.text(
-                i + 0.5,
-                0.5,
-                tok.strip() or "·",
-                ha="center",
-                va="center",
-                fontsize=7,
-                color="black" if shade < 0.6 else "white",
-            )
-        ax.set_xlim(0, max(len(toks), 1))
-        ax.set_ylim(-0.7, 1.3)
-        c = conc.get(lat, {})
-        k = cat.get(lat, {})
-        concept = (k.get("explanation", "")[:70] + "…") if k else ""
-        ax.text(0, -0.45, f"#{lat} — {concept}", fontsize=7.5, style="italic", va="center")
+            if not empty:
+                label = tok.strip()
+                ax.text(
+                    i + 0.5,
+                    0.54,
+                    label,
+                    ha="center",
+                    va="center",
+                    fontsize=8.5 if len(label) <= 7 else 6.8,  # shrink long tokens to fit the chip
+                    color="white" if shade > 0.55 else INK,
+                    fontweight="bold" if shade > 0.55 else "normal",
+                )
+
+        c, k, cc = conc.get(lat, {}), cat.get(lat, {}), van_by_lat.get(lat)
+        title = cc["title"] if cc else f"Feature #{lat}"
+        ax.text(-0.3, 0.94, title, fontsize=10.5, fontweight="bold", color=INK, va="center")
+
+        arms = [
+            f"grounding $r$={float(c.get('concordance_r_pb', 0)):.3f}",
+            f"concordance {c.get('concordance_verdict', '')}",
+        ]
+        if cc and cc["van"] in abl:
+            arms.append(rf"causal $\delta$={float(abl[cc['van']]['cliffs_delta']):.2f}$^\dagger$")
         ax.text(
-            len(toks),
-            1.05,
-            f"{c.get('concordance_icd_description','')} | "
-            f"r={float(c.get('concordance_r_pb',0)):.3f} | {c.get('concordance_verdict','')}",
-            fontsize=7.5,
+            len(toks) + 0.3,
+            0.94,
+            "      ".join(arms),
+            fontsize=8,
+            color=MUTE,
             ha="right",
             va="center",
         )
+        concept = (k.get("explanation", "")[:84] + "…") if k else ""
+        ax.text(
+            -0.3,
+            0.10,
+            f"JumpReLU #{lat}  ·  {concept}",
+            fontsize=7.5,
+            style="italic",
+            color=MUTE,
+            va="center",
+        )
+
+    sm = ScalarMappable(norm=Normalize(0, 1), cmap=cmap)
+    sm.set_array([])
+    cax = fig.add_axes([0.40, 0.085, 0.20, 0.018])
+    cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
+    cb.set_ticks([0, 1])
+    cb.set_ticklabels(["inactive", "peak"])
+    cb.ax.tick_params(length=0, labelsize=6.5, colors=MUTE)
+    cb.outline.set_visible(False)
+
     fig.suptitle(
-        "Per-token feature activation (shaded) over a de-identified note window", fontsize=9
+        "Per-token SAE feature activation over a de-identified clinical note window",
+        fontsize=11,
+        fontweight="bold",
+        color=INK,
+        y=0.975,
     )
-    fig.savefig(out, bbox_inches="tight")
+    fig.text(
+        0.5,
+        0.025,
+        r"$\dagger$ causal arm from the analogous Vanilla feature; JumpReLU ablation was not run.",
+        ha="center",
+        fontsize=6.5,
+        style="italic",
+        color=FAINT,
+    )
+    fig.savefig(out, dpi=200)
     print(f"[ok] wrote {out}")
 
 
