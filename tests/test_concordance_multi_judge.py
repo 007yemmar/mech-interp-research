@@ -705,3 +705,13 @@ def test_config_has_required_keys():
         assert key in cfg
     assert any(j["backend"] == "reuse" for j in cfg["judges"])  # Sonnet reused
     assert any(j.get("model") == "openai/gpt-4o" for j in cfg["judges"])  # reviewer-named
+
+
+def test_arm0_config_has_required_keys():
+    import yaml
+
+    cfg = yaml.safe_load(Path("configs/arm0_4omini.yaml").read_text())
+    for key in ("auto_interp_dir", "judges", "thresholds"):
+        assert key in cfg
+    assert cfg["judges"][0]["backend"] == "openrouter"
+    assert cfg["judges"][0]["model"] == "openai/gpt-4o-mini"

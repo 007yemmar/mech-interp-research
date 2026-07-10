@@ -1,0 +1,21 @@
+# Arm 0 ONLY — verbatim original-prompt concordance with gpt-4o-mini.
+#
+# Reproduces the published concordance judging (the exact original prompt, with
+# the r-anchor) but with a different judge model, so the per-judge rates are
+# directly comparable to the paper's Sonnet numbers. Reads only
+# concordance_results.csv from the completed run; no note text, no GPU.
+#
+# Run:
+#   uv run modal run modal_app/arm0_eval.py --config-file configs/arm0_4omini.yaml
+#   uv run modal run --detach modal_app/arm0_eval.py --config-file configs/arm0_4omini.yaml --detach
+
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: null   # null -> <auto_interp_dir>/arm0_eval
+
+judges:
+  - {slug: gpt-4o-mini, backend: openrouter, model: openai/gpt-4o-mini}
+
+thresholds: [0.3, 0.4, 0.5]
+max_workers: 6
+client_max_retries: 6
+logging_level: INFO
