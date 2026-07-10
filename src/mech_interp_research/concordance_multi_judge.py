@@ -16,7 +16,7 @@ from itertools import combinations
 import numpy as np
 from sklearn.metrics import cohen_kappa_score
 
-from mech_interp_research.auto_interp import parse_concordance_response
+from mech_interp_research.auto_interp import CONCORDANCE_PROMPT, parse_concordance_response
 from mech_interp_research.shuffled_control import permute_global
 
 logger = logging.getLogger(__name__)
@@ -167,6 +167,16 @@ def judge_deanchored(judge, explanation, code, description) -> dict:
         explanation=explanation, code=code, description=description
     )
     return parse_deanchored_response(judge.complete(prompt))
+
+
+def judge_original(judge, explanation, icd_code, icd_description, r_pb) -> dict:
+    """Arm 0: the VERBATIM original CONCORDANCE_PROMPT (r-anchor included), via any
+    judge — the apples-to-apples multi-model replication of the published table."""
+    prompt = CONCORDANCE_PROMPT.format(
+        explanation=explanation, r_pb=r_pb, icd_code=icd_code, icd_description=icd_description
+    )
+    verdict, rationale = parse_concordance_response(judge.complete(prompt))
+    return {"verdict": verdict, "rationale": rationale}
 
 
 RETRIEVAL_PROMPT_HEADER = """\

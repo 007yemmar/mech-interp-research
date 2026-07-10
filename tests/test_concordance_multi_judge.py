@@ -367,3 +367,21 @@ def test_aggregate_fleiss_binarized_value_and_unknown_excluded():
     rows = [r2(1, "YES", "YES"), r2(2, "NO", "NO"), r2(3, "YES", "YES"), r2(4, "UNKNOWN", "YES")]
     out = aggregate_multi_judge(rows, ["a", "b"], [0.3])
     assert abs(out["agreement"]["fleiss_binarized"] - 1.0) < 1e-9
+
+
+def test_judge_original_uses_anchored_prompt():
+    from mech_interp_research.concordance_multi_judge import judge_original
+
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "PARTIAL | warfarin treats it"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    out = judge_original(j, "anticoagulation therapy", "42731", "atrial fibrillation", 0.28)
+    assert out["verdict"] == "PARTIAL"
+    # Arm 0 is the ORIGINAL prompt: the r-anchor MUST be present (contrast Arm 1).
+    assert "correlation" in captured["prompt"].lower()
+    assert "0.28" in captured["prompt"]
