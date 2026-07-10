@@ -226,3 +226,14 @@ def test_judge_retrieval_sends_prompt_and_parses(monkeypatch):
     out = judge_retrieval(j, "heart failure text", _SLATE)
     assert out["picked_code"] == "4280"
     assert "rank" not in captured["prompt"].lower()
+
+
+def test_derange_no_feature_keeps_own_code():
+    from mech_interp_research.concordance_multi_judge import derange_feature_codes
+
+    f2c = {10: "4280", 11: "42731", 12: "25000", 13: "5849"}
+    wrong = derange_feature_codes(f2c, seed=3)
+    assert set(wrong) == set(f2c)
+    for fid, code in wrong.items():
+        assert code != f2c[fid]  # every feature gets a wrong code
+        assert code in f2c.values()

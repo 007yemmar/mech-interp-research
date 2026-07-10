@@ -14,6 +14,7 @@ import string
 import numpy as np
 
 from mech_interp_research.auto_interp import parse_concordance_response
+from mech_interp_research.shuffled_control import permute_global
 
 logger = logging.getLogger(__name__)
 
@@ -222,3 +223,10 @@ def judge_retrieval(judge, explanation, slate) -> dict:
     return parse_retrieval_response(
         judge.complete(build_retrieval_prompt(explanation, slate)), slate
     )
+
+
+def derange_feature_codes(feature_to_code, seed=42) -> dict:
+    """Assign each feature a *wrong* code by deranging feature ids first."""
+    fids = sorted(feature_to_code)
+    perm = permute_global(fids, seed=seed)  # fid -> other fid (no fixed point)
+    return {fid: feature_to_code[perm[fid]] for fid in fids}
