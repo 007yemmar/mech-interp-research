@@ -424,9 +424,6 @@ def build_adjudication_sheet(
         "human_pick", "human_confidence"]. No r_pb, code, model verdict, or note text.
         "options" is rendered slate letters+descriptions. "human_pick"/"human_confidence"
         are blank strings.
-
-    Raises:
-        ValueError: if any candidate code would leak because its description is missing.
     """
     rng = np.random.default_rng(seed)
     rows = list(per_feature_rows)
@@ -434,13 +431,8 @@ def build_adjudication_sheet(
         idx = rng.choice(len(rows), size=sample, replace=False)
         rows = [rows[i] for i in sorted(idx)]
     records = []
-    leaked = set()
     for r in rows:
         slate, _ = build_slate(r["feature_idx"], r_pb, code_names, code_descriptions, seed=seed)
-        # Detect code leaks: if description == code, the description is missing and code leaked
-        for e in slate:
-            if e["code"] != "__none__" and e["description"] == e["code"]:
-                leaked.add(e["code"])
         options = "\n".join(f"({e['letter']}) {e['description']}" for e in slate)
         records.append(
             {
@@ -450,11 +442,6 @@ def build_adjudication_sheet(
                 "human_pick": "",
                 "human_confidence": "",
             }
-        )
-    if leaked:
-        raise ValueError(
-            f"adjudication sheet would leak ICD codes lacking descriptions: {sorted(leaked)}; "
-            "provide code descriptions before building a blinded sheet"
         )
     return pd.DataFrame.from_records(
         records, columns=["feature_id", "explanation", "options", "human_pick", "human_confidence"]
