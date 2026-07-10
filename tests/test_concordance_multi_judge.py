@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from mech_interp_research.auto_interp import parse_concordance_response
+from mech_interp_research.auto_interp import CONCORDANCE_PROMPT, parse_concordance_response
 from mech_interp_research.concordance_multi_judge import (
     Judge,
     aggregate_multi_judge,
@@ -11,6 +11,7 @@ from mech_interp_research.concordance_multi_judge import (
     build_retrieval_prompt,
     build_slate,
     judge_deanchored,
+    judge_original,
     judge_retrieval,
     parse_deanchored_response,
     parse_retrieval_response,
@@ -625,6 +626,77 @@ def test_orchestrator_shuffled_null(tmp_path):
     )
     assert "shuffled_null" in summary
     assert summary["shuffled_null"]["gpt"]["yes_partial_rate"] == 0.0  # both NO on wrong code
+
+
+def test_judge_original_renders_prompt_verbatim():
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "YES | ok"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    judge_original(j, "expl text", "42731", "atrial fibrillation", 0.284)
+    # byte-identical to what the original check_concordance would format
+    assert captured["prompt"] == CONCORDANCE_PROMPT.format(
+        explanation="expl text", r_pb=0.284, icd_code="42731", icd_description="atrial fibrillation"
+    )
+
+
+class _CapJudge(Judge):
+    def __init__(self, slug, replies):
+        super().__init__(slug, "anthropic", model="m", client=None)
+        self._replies = list(replies)
+        self.prompts = []
+
+    def complete(self, prompt, max_tokens=256):
+        self.prompts.append(prompt)
+        return self._replies.pop(0)
+
+
+def test_orchestrator_arm0_uses_stored_original_values(tmp_path):
+    import pandas as pd
+
+    codes = ["icd9_4280", "icd9_42731", "icd9_25000", "icd9_5849"]
+    descs = {"4280": "heart failure", "42731": "afib", "25000": "diabetes", "5849": "aki"}
+    r_pb = np.array([[0.7, 0.2, 0.1, 0.05]], dtype=np.float32)  # argmax = 4280
+    ai = tmp_path / "auto_interp"
+    ai.mkdir()
+    # Stored ORIGINAL target is 42731 with a bespoke description + r — deliberately
+    # DIFFERENT from the argmax (4280) so we can tell which one Arm 0 uses.
+    pd.DataFrame(
+        [
+            {
+                "feature_idx": 0,
+                "tier": "strong_grounded",
+                "explanation": "hf text",
+                "concordance_icd_code": "icd9_42731",
+                "concordance_icd_description": "ORIGINAL DESC afib",
+                "concordance_r_pb": 0.284,
+            }
+        ]
+    ).to_csv(ai / "concordance_results.csv", index=False)
+    out = tmp_path / "out"
+    # 1 feature, run_shuffled=False → 3 calls: Arm0, Arm1, Arm2.
+    judge = _CapJudge("gpt", ["YES | ok", "YES | ok", "a | pick"])
+    run_concordance_multi_judge(
+        auto_interp_dir=str(ai),
+        icd_eval_dir="unused",
+        output_dir=str(out),
+        judges=[{"slug": "gpt", "backend": "anthropic", "model": "m"}],
+        thresholds=[0.4],
+        run_shuffled=False,
+        arm6=None,
+        _judges=[judge],
+        _corr={"r_pb": r_pb, "code_names": codes},
+        _code_descriptions=descs,
+    )
+    arm0 = judge.prompts[0]  # first call per feature is Arm 0
+    assert "42731" in arm0  # STORED code (not argmax 4280)
+    assert "ORIGINAL DESC afib" in arm0  # STORED description
+    assert "0.284" in arm0  # STORED r (rendered :.3f)
+    assert "4280" not in arm0  # NOT the recomputed argmax
 
 
 def test_config_has_required_keys():

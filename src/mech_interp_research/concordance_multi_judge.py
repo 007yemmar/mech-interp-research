@@ -543,8 +543,17 @@ def run_concordance_multi_judge(
             "explanation": expl,
             "argmax_code": argmax_code,
         }
+        # Arm 0 must render byte-identically to the ORIGINAL run: use the target
+        # code / description / r_pb the published judge actually saw, stored in
+        # concordance_results.csv — not values recomputed here.
+        if "concordance_icd_code" in rec and pd.notna(rec.get("concordance_icd_code")):
+            a0_code = str(rec["concordance_icd_code"]).replace("icd9_", "")
+            a0_desc = str(rec["concordance_icd_description"])
+            a0_r = float(rec["concordance_r_pb"])
+        else:
+            a0_code, a0_desc, a0_r = argmax_code, desc, row["r_pb"]
         for j in judge_objs:
-            orig = judge_original(j, expl, argmax_code, desc, row["r_pb"])  # Arm 0
+            orig = judge_original(j, expl, a0_code, a0_desc, a0_r)  # Arm 0
             d = judge_deanchored(j, expl, argmax_code, desc)  # Arm 1
             ret = judge_retrieval(j, expl, slate)  # Arm 2
             row[f"{j.slug}_orig_verdict"] = orig["verdict"]
