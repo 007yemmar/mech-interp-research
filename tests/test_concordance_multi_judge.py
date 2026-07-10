@@ -3,6 +3,7 @@ import numpy as np
 from mech_interp_research.auto_interp import parse_concordance_response
 from mech_interp_research.concordance_multi_judge import (
     Judge,
+    aggregate_multi_judge,
     build_judges,
     build_retrieval_prompt,
     build_slate,
@@ -286,3 +287,60 @@ def test_pairwise_cohen_excludes_unknown():
     labels = {"a": ["YES", "UNKNOWN", "NO"], "b": ["YES", "YES", "NO"]}
     out = pairwise_cohen(labels)  # only items 0 and 2 counted
     assert abs(out["a__b"] - 1.0) < 1e-9
+
+
+def _row(fid, tier, r, **kw):
+    base = {"feature_idx": fid, "tier": tier, "r_pb": r}
+    base.update(kw)
+    return base
+
+
+def test_aggregate_yes_only_and_hits():
+    rows = [
+        _row(
+            1,
+            "strong_grounded",
+            0.6,
+            gpt_verdict="YES",
+            gpt_subtype=None,
+            gpt_pick_rank=1,
+            gpt_is_none=False,
+        ),
+        _row(
+            2,
+            "strong_grounded",
+            0.45,
+            gpt_verdict="PARTIAL",
+            gpt_subtype="treatment",
+            gpt_pick_rank=3,
+            gpt_is_none=False,
+        ),
+    ]
+    out = aggregate_multi_judge(rows, ["gpt"], [0.4])
+    g = out["per_judge"]["gpt"]["r>0.4"]
+    assert g["yes_only_rate"] == 0.5
+    assert g["yes_partial_rate"] == 1.0
+    assert g["hit1_rate"] == 0.5  # only feature 1 picked rank 1
+    assert g["hit3_rate"] == 1.0  # both within rank 3
+
+
+def test_aggregate_majority_and_kappa_keys():
+    rows = [
+        _row(
+            1,
+            "strong_grounded",
+            0.6,
+            a_verdict="YES",
+            a_subtype=None,
+            a_pick_rank=1,
+            a_is_none=False,
+            b_verdict="YES",
+            b_subtype=None,
+            b_pick_rank=1,
+            b_is_none=False,
+        ),
+    ]
+    out = aggregate_multi_judge(rows, ["a", "b"], [0.3])
+    assert "fleiss_binarized" in out["agreement"]
+    assert "a__b" in out["agreement"]["pairwise_cohen_binarized"]
+    assert out["agreement"]["majority_counts"]["YES"] == 1

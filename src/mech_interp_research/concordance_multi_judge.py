@@ -298,6 +298,81 @@ def fleiss_kappa(rating_counts) -> float:
     return float((P_bar - P_e) / (1 - P_e))
 
 
+def _binarize(v: str) -> str | None:
+    if v in ("YES", "PARTIAL"):
+        return "concordant"
+    if v == "NO":
+        return "discordant"
+    return None  # UNKNOWN excluded
+
+
+def aggregate_multi_judge(per_feature_rows, judge_slugs, thresholds) -> dict:
+    """Aggregate per-feature multi-judge rows into rate summaries + agreement stats.
+
+    Args:
+        per_feature_rows: list of dicts, each with ``feature_idx``, ``tier``,
+            ``r_pb`` (float) plus, for each judge slug ``S``:
+            ``f"{S}_verdict"``, ``f"{S}_subtype"``, ``f"{S}_pick_rank"``
+            (int|None), ``f"{S}_is_none"`` (bool).
+        judge_slugs: list of judge slug strings.
+        thresholds: list of |r_pb| thresholds to filter rows on.
+
+    Returns:
+        dict with ``per_judge`` (rate summaries per judge/threshold),
+        ``agreement`` (fleiss/cohen kappa + majority counts over all rows),
+        ``judge_slugs``, and ``thresholds``.
+    """
+    per_judge = {}
+    for s in judge_slugs:
+        per_judge[s] = {}
+        for thr in thresholds:
+            rows = [r for r in per_feature_rows if abs(r["r_pb"]) > thr]
+            n = len(rows)
+            verdicts = [r[f"{s}_verdict"] for r in rows]
+            ranks = [r[f"{s}_pick_rank"] for r in rows]
+            yes = sum(1 for v in verdicts if v == "YES")
+            yp = sum(1 for v in verdicts if v in ("YES", "PARTIAL"))
+
+            def hit(k, ranks=ranks):
+                return sum(1 for rk in ranks if rk is not None and rk <= k)
+
+            per_judge[s][f"r>{thr}"] = {
+                "n": n,
+                "yes_only_rate": (yes / n) if n else None,
+                "yes_partial_rate": (yp / n) if n else None,
+                "hit1_rate": (hit(1) / n) if n else None,
+                "hit3_rate": (hit(3) / n) if n else None,
+                "hit5_rate": (hit(5) / n) if n else None,
+            }
+
+    # Agreement over all rows, binarized (YES∪PARTIAL vs NO; UNKNOWN excluded).
+    labels_by_judge = {s: [r[f"{s}_verdict"] for r in per_feature_rows] for s in judge_slugs}
+    counts = []
+    majority = Counter()
+    for r in per_feature_rows:
+        vs = [r[f"{s}_verdict"] for s in judge_slugs]
+        cats = ["YES", "PARTIAL", "NO", "UNKNOWN"]
+        counts.append([sum(1 for v in vs if v == c) for c in cats])
+        top = Counter(vs).most_common()
+        if len(top) > 1 and top[0][1] == top[1][1]:
+            majority["NO_CONSENSUS"] += 1
+        else:
+            majority[top[0][0]] += 1
+
+    bin_labels = {s: [_binarize(v) or "UNKNOWN" for v in labels_by_judge[s]] for s in judge_slugs}
+    agreement = {
+        "fleiss_binarized": fleiss_kappa(np.array(counts, dtype=float)),
+        "pairwise_cohen_binarized": pairwise_cohen(bin_labels),
+        "majority_counts": dict(majority),
+    }
+    return {
+        "per_judge": per_judge,
+        "agreement": agreement,
+        "judge_slugs": judge_slugs,
+        "thresholds": thresholds,
+    }
+
+
 def pairwise_cohen(labels_by_judge) -> dict:
     """Compute pairwise Cohen's kappa across judge pairs.
 
