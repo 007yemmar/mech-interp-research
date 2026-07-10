@@ -163,3 +163,57 @@ def judge_deanchored(judge, explanation, code, description) -> dict:
         explanation=explanation, code=code, description=description
     )
     return parse_deanchored_response(judge.complete(prompt))
+
+
+RETRIEVAL_PROMPT_HEADER = """\
+A sparse autoencoder feature has been auto-interpreted as:
+"{explanation}"
+
+Which ONE of these ICD-9 codes does the explanation best describe? If none
+fit, choose the 'none' option. Answer with one letter, then a rationale.
+
+{options}
+
+Format: <letter> | <one-sentence rationale>"""
+
+
+def build_retrieval_prompt(explanation, slate) -> str:
+    """Build a retrieval-ranking prompt from explanation and slate."""
+    options = "\n".join(f"({e['letter']}) {e['code']}  {e['description']}" for e in slate)
+    return RETRIEVAL_PROMPT_HEADER.format(explanation=explanation, options=options)
+
+
+def parse_retrieval_response(raw, slate) -> dict:
+    """Parse a retrieval response into {picked_letter, picked_code, picked_rank, is_none}.
+
+    Returns:
+        dict with keys:
+        - picked_letter: the matched letter or None if unparseable
+        - picked_code: the matched code, or "__unparse__" if unparseable
+        - picked_rank: the rank_by_rpb value or None
+        - is_none: True if the picked code is "__none__"
+    """
+    by_letter = {e["letter"]: e for e in slate}
+    m = re.match(r"\s*\(?([a-z])\)?\s*[|.:) ]", raw.strip(), re.IGNORECASE)
+    letter = m.group(1).lower() if m else None
+    if letter is None or letter not in by_letter:
+        return {
+            "picked_letter": None,
+            "picked_code": "__unparse__",
+            "picked_rank": None,
+            "is_none": False,
+        }
+    e = by_letter[letter]
+    return {
+        "picked_letter": letter,
+        "picked_code": e["code"],
+        "picked_rank": e["rank_by_rpb"],
+        "is_none": e["code"] == "__none__",
+    }
+
+
+def judge_retrieval(judge, explanation, slate) -> dict:
+    """Arm 2: ask a judge to rank codes in a slate by relevance to the explanation."""
+    return parse_retrieval_response(
+        judge.complete(build_retrieval_prompt(explanation, slate)), slate
+    )

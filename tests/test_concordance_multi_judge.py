@@ -4,9 +4,11 @@ from mech_interp_research.auto_interp import parse_concordance_response
 from mech_interp_research.concordance_multi_judge import (
     Judge,
     build_judges,
+    build_retrieval_prompt,
     build_slate,
     judge_deanchored,
     parse_deanchored_response,
+    parse_retrieval_response,
 )
 
 
@@ -158,3 +160,36 @@ def test_judge_deanchored_uses_prompt_without_rpb():
     out = judge_deanchored(j, "anticoagulation", "42731", "atrial fibrillation")
     assert out["verdict"] == "NO"
     assert "r =" not in captured["prompt"] and "correlation" not in captured["prompt"].lower()
+
+
+_SLATE = [
+    {"code": "42731", "description": "atrial fibrillation", "rank_by_rpb": 2, "letter": "a"},
+    {"code": "4280", "description": "heart failure", "rank_by_rpb": 1, "letter": "b"},
+    {"code": "25000", "description": "diabetes", "rank_by_rpb": None, "letter": "c"},
+    {"code": "__none__", "description": "none of these", "rank_by_rpb": None, "letter": "d"},
+]
+
+
+def test_parse_retrieval_picks_rank():
+    out = parse_retrieval_response("b | best match", _SLATE)
+    assert out["picked_code"] == "4280"
+    assert out["picked_rank"] == 1
+    assert out["is_none"] is False
+
+
+def test_parse_retrieval_none():
+    out = parse_retrieval_response("d | nothing fits", _SLATE)
+    assert out["is_none"] is True
+    assert out["picked_rank"] is None
+
+
+def test_parse_retrieval_garbage():
+    out = parse_retrieval_response("???", _SLATE)
+    assert out["picked_code"] == "__unparse__"
+
+
+def test_retrieval_prompt_lists_all_letters():
+    p = build_retrieval_prompt("heart failure text", _SLATE)
+    for letter in ("a", "b", "c", "d"):
+        assert f"({letter})" in p
+    assert "rank" not in p.lower()  # ranks/r_pb never leak into the prompt
