@@ -143,6 +143,7 @@ Format for PARTIAL:  PARTIAL | <subtype> | <one-sentence rationale>"""
 
 
 def parse_deanchored_response(raw: str) -> dict:
+    """Parse a de-anchored reply into {verdict, subtype, rationale}; unknown subtype → related-other."""
     raw = raw.strip()
     m = re.match(r"PARTIAL\s*[|]\s*([a-z\-]+)\s*[|]\s*(.*)", raw, re.IGNORECASE | re.DOTALL)
     if m:
@@ -157,6 +158,7 @@ def parse_deanchored_response(raw: str) -> dict:
 
 
 def judge_deanchored(judge, explanation, code, description) -> dict:
+    """Arm 1: ask a judge whether the explanation matches the code, no r_pb anchor."""
     prompt = DEANCHORED_CONCORDANCE_PROMPT.format(
         explanation=explanation, code=code, description=description
     )

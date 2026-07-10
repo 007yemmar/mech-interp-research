@@ -140,6 +140,12 @@ def test_parse_deanchored_yes_no_subtype():
     assert out["subtype"] is None
 
 
+def test_parse_deanchored_unrecognized_subtype_maps_to_related_other():
+    out = parse_deanchored_response("PARTIAL | causal-link | some rationale")
+    assert out["verdict"] == "PARTIAL"
+    assert out["subtype"] == "related-other"  # unrecognized subtype normalized
+
+
 def test_judge_deanchored_uses_prompt_without_rpb():
     captured = {}
 
