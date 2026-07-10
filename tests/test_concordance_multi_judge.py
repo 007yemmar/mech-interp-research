@@ -55,9 +55,14 @@ class _StubOpenAI:
 
 def test_judge_anthropic_complete():
     j = Judge(
-        "sonnet-4-6", "anthropic", model="claude-sonnet-4-6", client=_StubAnthropic("YES | ok")
+        "sonnet-4-6", "anthropic", model="claude-sonnet-4-6", client=_StubAnthropic("  YES | ok  ")
     )
     assert j.complete("hi") == "YES | ok"
+
+
+def test_judge_openrouter_complete():
+    j = Judge("gpt-4o", "openrouter", model="openai/gpt-4o", client=_StubOpenAI("  NO | nope  "))
+    assert j.complete("hi") == "NO | nope"
 
 
 def test_build_judges_skips_reuse():
