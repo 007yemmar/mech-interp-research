@@ -194,7 +194,12 @@ def parse_retrieval_response(raw, slate) -> dict:
         - is_none: True if the picked code is "__none__"
     """
     by_letter = {e["letter"]: e for e in slate}
-    m = re.match(r"\s*\(?([a-z])\)?\s*[|.:) ]", raw.strip(), re.IGNORECASE)
+    s = raw.strip()
+    # Accept the documented "<letter> | rationale" form, or a bare/parenthesized
+    # letter alone. A letter followed by prose (no pipe) is NOT a pick — this
+    # prevents rationales like "A more specific code..." from being read as
+    # letter 'a'. Mirrors parse_concordance_response's whole-token discipline.
+    m = re.match(r"\(?([a-z])\)?\s*(?:[|]|$)", s, re.IGNORECASE)
     letter = m.group(1).lower() if m else None
     if letter is None or letter not in by_letter:
         return {

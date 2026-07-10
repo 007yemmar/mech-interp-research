@@ -7,6 +7,7 @@ from mech_interp_research.concordance_multi_judge import (
     build_retrieval_prompt,
     build_slate,
     judge_deanchored,
+    judge_retrieval,
     parse_deanchored_response,
     parse_retrieval_response,
 )
@@ -193,3 +194,35 @@ def test_retrieval_prompt_lists_all_letters():
     for letter in ("a", "b", "c", "d"):
         assert f"({letter})" in p
     assert "rank" not in p.lower()  # ranks/r_pb never leak into the prompt
+
+
+def test_parse_retrieval_prose_not_mistaken_for_letter():
+    # A rationale starting with the word "A" must NOT be read as picking letter 'a'.
+    out = parse_retrieval_response("A more specific code would be better here", _SLATE)
+    assert out["picked_code"] == "__unparse__"
+
+
+def test_parse_retrieval_valid_letter_absent_from_slate():
+    out = parse_retrieval_response("e | not in slate", _SLATE)  # _SLATE has a-d only
+    assert out["picked_code"] == "__unparse__"
+
+
+def test_parse_retrieval_bare_and_parenthesized_letter():
+    assert parse_retrieval_response("b", _SLATE)["picked_code"] == "4280"
+    assert parse_retrieval_response("(b)", _SLATE)["picked_code"] == "4280"
+
+
+def test_judge_retrieval_sends_prompt_and_parses(monkeypatch):
+    from mech_interp_research.concordance_multi_judge import Judge
+
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "b | best match"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    out = judge_retrieval(j, "heart failure text", _SLATE)
+    assert out["picked_code"] == "4280"
+    assert "rank" not in captured["prompt"].lower()
