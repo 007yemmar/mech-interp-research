@@ -108,6 +108,7 @@ def test_slate_has_candidates_hardneg_and_none():
     assert len(cand) == 5  # top-5
     hard = [e for e in slate if e["rank_by_rpb"] is None and e["code"] != "__none__"]
     assert len(hard) == 2  # two hard negatives, low |r|
+    assert {e["code"] for e in hard} == {"V4986", "2449"}  # pin the lowest-|r| codes
     letters = [e["letter"] for e in slate]
     assert letters == sorted(set(letters))  # unique, ordered letters
 

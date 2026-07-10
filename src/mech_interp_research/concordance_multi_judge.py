@@ -78,13 +78,14 @@ def build_slate(
     feature_idx, r_pb, code_names, code_descriptions, n_candidates=5, n_hard_neg=3, seed=42
 ):
     """Build a shuffled slate: top-|r_pb| candidates + hard negatives + none."""
-    row = np.abs(r_pb[feature_idx])
-    order = np.argsort(row)[::-1]  # descending |r_pb|
+    row = np.nan_to_num(np.abs(r_pb[feature_idx]), nan=-1.0)
+    asc = np.argsort(row)  # ascending |r_pb|
+    order = asc[::-1]  # descending |r_pb|
     cand_idx = list(order[:n_candidates])
     argmax_code = _bare(code_names[int(cand_idx[0])])
 
     # Hard negatives: lowest |r_pb| codes not already candidates.
-    low = [int(i) for i in order[::-1] if int(i) not in {int(c) for c in cand_idx}]
+    low = [int(i) for i in asc if int(i) not in {int(c) for c in cand_idx}]
     hard_idx = low[:n_hard_neg]
 
     entries = []
