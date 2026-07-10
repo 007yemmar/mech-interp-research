@@ -546,8 +546,14 @@ def run_concordance_multi_judge(
         # Arm 0 must render byte-identically to the ORIGINAL run: use the target
         # code / description / r_pb the published judge actually saw, stored in
         # concordance_results.csv — not values recomputed here.
-        if "concordance_icd_code" in rec and pd.notna(rec.get("concordance_icd_code")):
-            a0_code = str(rec["concordance_icd_code"]).replace("icd9_", "")
+        _has_orig = (
+            "concordance_icd_code" in rec
+            and pd.notna(rec.get("concordance_icd_code"))
+            and pd.notna(rec.get("concordance_icd_description"))
+            and pd.notna(rec.get("concordance_r_pb"))
+        )
+        if _has_orig:
+            a0_code = str(rec["concordance_icd_code"]).removeprefix("icd9_")
             a0_desc = str(rec["concordance_icd_description"])
             a0_r = float(rec["concordance_r_pb"])
         else:
