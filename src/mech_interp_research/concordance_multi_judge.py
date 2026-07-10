@@ -14,6 +14,7 @@ from collections import Counter
 from itertools import combinations
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import cohen_kappa_score
 
 from mech_interp_research.auto_interp import parse_concordance_response
@@ -403,3 +404,45 @@ def pairwise_cohen(labels_by_judge) -> dict:
             continue
         out[f"{a}__{b}"] = float(cohen_kappa_score([p[0] for p in pairs], [p[1] for p in pairs]))
     return out
+
+
+def build_adjudication_sheet(
+    per_feature_rows, r_pb, code_names, code_descriptions, sample=60, seed=42
+) -> pd.DataFrame:
+    """Build a blinded human-adjudication sheet with no r_pb, code, or verdict.
+
+    Args:
+        per_feature_rows: list of dicts, each with ``feature_idx``, ``explanation``, etc.
+        r_pb: numpy array of shape [n_features, n_codes] with point-biserial correlations.
+        code_names: list of code names.
+        code_descriptions: dict mapping code to description.
+        sample: max number of features to include (default 60).
+        seed: RNG seed for sampling and slate generation (default 42).
+
+    Returns:
+        pandas DataFrame with columns exactly ["feature_id", "explanation", "options",
+        "human_pick", "human_confidence"]. No r_pb, code, model verdict, or note text.
+        "options" is rendered slate letters+descriptions. "human_pick"/"human_confidence"
+        are blank strings.
+    """
+    rng = np.random.default_rng(seed)
+    rows = list(per_feature_rows)
+    if len(rows) > sample:
+        idx = rng.choice(len(rows), size=sample, replace=False)
+        rows = [rows[i] for i in sorted(idx)]
+    records = []
+    for r in rows:
+        slate, _ = build_slate(r["feature_idx"], r_pb, code_names, code_descriptions, seed=seed)
+        options = "\n".join(f"({e['letter']}) {e['description']}" for e in slate)
+        records.append(
+            {
+                "feature_id": r["feature_idx"],
+                "explanation": r["explanation"],
+                "options": options,
+                "human_pick": "",
+                "human_confidence": "",
+            }
+        )
+    return pd.DataFrame.from_records(
+        records, columns=["feature_id", "explanation", "options", "human_pick", "human_confidence"]
+    )
