@@ -347,21 +347,32 @@ def aggregate_multi_judge(per_feature_rows, judge_slugs, thresholds) -> dict:
 
     # Agreement over all rows, binarized (YES∪PARTIAL vs NO; UNKNOWN excluded).
     labels_by_judge = {s: [r[f"{s}_verdict"] for r in per_feature_rows] for s in judge_slugs}
-    counts = []
     majority = Counter()
     for r in per_feature_rows:
         vs = [r[f"{s}_verdict"] for s in judge_slugs]
-        cats = ["YES", "PARTIAL", "NO", "UNKNOWN"]
-        counts.append([sum(1 for v in vs if v == c) for c in cats])
         top = Counter(vs).most_common()
         if len(top) > 1 and top[0][1] == top[1][1]:
             majority["NO_CONSENSUS"] += 1
         else:
             majority[top[0][0]] += 1
 
+    # Binarized Fleiss over complete cases (every judge non-UNKNOWN → equal
+    # raters per item = n_judges). Each vote maps to concordant (YES/PARTIAL)
+    # or discordant (NO); rows with any UNKNOWN vote are dropped so the two
+    # "binarized" agreement metrics share one basis.
+    bin_counts = []
+    for r in per_feature_rows:
+        vs = [r[f"{s}_verdict"] for s in judge_slugs]
+        if any(v == "UNKNOWN" for v in vs):
+            continue
+        concordant = sum(1 for v in vs if v in ("YES", "PARTIAL"))
+        discordant = sum(1 for v in vs if v == "NO")
+        bin_counts.append([concordant, discordant])
+    fleiss_bin = fleiss_kappa(np.array(bin_counts, dtype=float)) if bin_counts else float("nan")
+
     bin_labels = {s: [_binarize(v) or "UNKNOWN" for v in labels_by_judge[s]] for s in judge_slugs}
     agreement = {
-        "fleiss_binarized": fleiss_kappa(np.array(counts, dtype=float)),
+        "fleiss_binarized": fleiss_bin,
         "pairwise_cohen_binarized": pairwise_cohen(bin_labels),
         "majority_counts": dict(majority),
     }

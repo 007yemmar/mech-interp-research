@@ -344,3 +344,26 @@ def test_aggregate_majority_and_kappa_keys():
     assert "fleiss_binarized" in out["agreement"]
     assert "a__b" in out["agreement"]["pairwise_cohen_binarized"]
     assert out["agreement"]["majority_counts"]["YES"] == 1
+
+
+def test_aggregate_fleiss_binarized_value_and_unknown_excluded():
+    # 2 judges. Rows 1-3: perfect agreement across concordant/discordant → kappa 1.0.
+    # Row 4 has an UNKNOWN vote and must be EXCLUDED (complete-case), leaving kappa 1.0.
+    def r2(fid, a, b):
+        return {
+            "feature_idx": fid,
+            "tier": "strong_grounded",
+            "r_pb": 0.6,
+            "a_verdict": a,
+            "a_subtype": None,
+            "a_pick_rank": 1,
+            "a_is_none": False,
+            "b_verdict": b,
+            "b_subtype": None,
+            "b_pick_rank": 1,
+            "b_is_none": False,
+        }
+
+    rows = [r2(1, "YES", "YES"), r2(2, "NO", "NO"), r2(3, "YES", "YES"), r2(4, "UNKNOWN", "YES")]
+    out = aggregate_multi_judge(rows, ["a", "b"], [0.3])
+    assert abs(out["agreement"]["fleiss_binarized"] - 1.0) < 1e-9
