@@ -36,7 +36,10 @@ DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
     timeout=7200,
     secrets=[
         modal.Secret.from_name("anthropic-api-key"),
-        modal.Secret.from_name("openrouter-api-key"),
+        # NOTE: references the secret name as it currently exists on the workspace
+        # ("openroouter", a typo). Recreate it as "openrouter-api-key" and flip this
+        # back to match the main entrypoint. The secret must expose OPENROUTER_API_KEY.
+        modal.Secret.from_name("openroouter-api-key"),
         hf_secret,
     ],
     volumes={"/out": artifacts_volume},
@@ -62,9 +65,21 @@ def run_arm0_remote(config: dict[str, Any]) -> dict[str, Any]:
     )
     log = logging.getLogger("arm0_eval")
 
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        # Be tolerant of a slightly-misspelled env-var key inside the secret.
+        cand = {k: v for k, v in os.environ.items() if "OPENRO" in k.upper() and "KEY" in k.upper()}
+        if len(cand) == 1:
+            api_key = next(iter(cand.values()))
+        else:
+            seen = [k for k in os.environ if "OPENRO" in k.upper()]
+            raise RuntimeError(
+                "OpenRouter API key not found in the mounted secret. Expected env var "
+                f"OPENROUTER_API_KEY; env keys matching 'OPENRO': {seen or 'none'}."
+            )
     openrouter = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
+        api_key=api_key,
         max_retries=config.get("client_max_retries", 6),
     )
     judges = build_judges(config["judges"], openrouter_client=openrouter)
