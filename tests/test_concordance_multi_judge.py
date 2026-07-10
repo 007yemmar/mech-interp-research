@@ -391,3 +391,24 @@ def test_adjudication_sheet_is_blinded():
     assert df["human_pick"].isna().all() or (df["human_pick"] == "").all()
     # no forbidden columns leak
     assert not any(c in df.columns for c in ("r_pb", "code", "verdict", "note_text"))
+
+
+def test_adjudication_sheet_refuses_to_leak_codes():
+    import pytest
+
+    from mech_interp_research.concordance_multi_judge import build_adjudication_sheet
+
+    # Feature 0: top candidate is 4280 (index 1, r=0.60)
+    r = np.zeros((1, len(CODES)))
+    r[0] = [0.05, 0.60, 0.50, 0.40, 0.30, 0.20, 0.01, 0.02]
+    rows = [{"feature_idx": 0, "tier": "strong_grounded", "r_pb": 0.6, "explanation": "x"}]
+
+    # Drop 4280's description so it leaks
+    missing_descs = {k: v for k, v in DESCS.items() if k != "4280"}
+    with pytest.raises(ValueError, match="leak ICD codes"):
+        build_adjudication_sheet(rows, r, CODES, missing_descs, sample=1, seed=1)
+
+    # Normal path with all descriptions should work
+    df = build_adjudication_sheet(rows, r, CODES, DESCS, sample=1, seed=1)
+    assert len(df) == 1
+    assert "4280" not in df["options"].iloc[0]  # bare code should not appear
