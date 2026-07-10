@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import numpy as np
+import yaml
 
 from mech_interp_research.auto_interp import parse_concordance_response
 from mech_interp_research.concordance_multi_judge import (
@@ -622,3 +625,11 @@ def test_orchestrator_shuffled_null(tmp_path):
     )
     assert "shuffled_null" in summary
     assert summary["shuffled_null"]["gpt"]["yes_partial_rate"] == 0.0  # both NO on wrong code
+
+
+def test_config_has_required_keys():
+    cfg = yaml.safe_load(Path("configs/concordance_multi_judge.yaml").read_text())
+    for key in ("auto_interp_dir", "icd_eval_dir", "judges", "thresholds"):
+        assert key in cfg
+    assert any(j["backend"] == "reuse" for j in cfg["judges"])  # Sonnet reused
+    assert any(j.get("model") == "openai/gpt-4o" for j in cfg["judges"])  # reviewer-named
