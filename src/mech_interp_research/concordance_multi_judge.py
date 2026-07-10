@@ -567,7 +567,7 @@ def run_concordance_multi_judge(
     _write_json(summary, output_dir / "multi_judge_summary.json")
     pd.DataFrame(per_feature_rows).to_csv(output_dir / "verdict_matrix.csv", index=False)
 
-    if run_shuffled and per_feature_rows:
+    if run_shuffled and len(per_feature_rows) >= 2:
         feature_to_code = {r["feature_idx"]: r["argmax_code"] for r in per_feature_rows}
         wrong = derange_feature_codes(feature_to_code, seed=seed)
         shuffled_null = {}
@@ -580,11 +580,16 @@ def run_concordance_multi_judge(
             n = len(per_feature_rows)
             shuffled_null[j.slug] = {"yes_partial_rate": yp / n if n else None, "n": n}
         summary["shuffled_null"] = shuffled_null
+    elif run_shuffled:
+        logger.warning(
+            "shuffled null skipped: need >=2 grounded features, got %d", len(per_feature_rows)
+        )
 
     if arm6 and _explainer_client is not None and _contexts_by_fid is not None:
-        sub = [r["feature_idx"] for r in per_feature_rows][
-            : arm6.get("sample") or len(per_feature_rows)
-        ]
+        sample_n = arm6.get("sample")
+        if sample_n is None:
+            sample_n = len(per_feature_rows)
+        sub = [r["feature_idx"] for r in per_feature_rows][:sample_n]
         alt = regenerate_explanations(
             _explainer_client, sub, _contexts_by_fid, _note_texts or {}, _tokenizer, arm6["model"]
         )
@@ -592,16 +597,8 @@ def run_concordance_multi_judge(
         for r in per_feature_rows:
             if r["feature_idx"] not in alt:
                 continue
-            slate, argmax_code = build_slate(
-                r["feature_idx"],
-                r_pb,
-                code_names,
-                code_descriptions,
-                n_candidates,
-                n_hard_neg,
-                seed,
-            )
-            desc = next((e["description"] for e in slate if e["code"] == argmax_code), argmax_code)
+            argmax_code = r["argmax_code"]
+            desc = _describe(argmax_code, code_descriptions)
             per_judge = {}
             for j in judge_objs:
                 per_judge[j.slug] = judge_deanchored(j, alt[r["feature_idx"]], argmax_code, desc)[

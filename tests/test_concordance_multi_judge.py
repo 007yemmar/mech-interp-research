@@ -622,3 +622,49 @@ def test_orchestrator_shuffled_null(tmp_path):
     )
     assert "shuffled_null" in summary
     assert summary["shuffled_null"]["gpt"]["yes_partial_rate"] == 0.0  # both NO on wrong code
+
+
+def test_orchestrator_arm6_success_path(tmp_path, monkeypatch):
+    import pandas as pd
+
+    import mech_interp_research.concordance_multi_judge as mod
+
+    codes = ["icd9_4280", "icd9_42731", "icd9_25000", "icd9_5849"]
+    descs = {"4280": "heart failure", "42731": "afib", "25000": "diabetes", "5849": "aki"}
+    r_pb = np.array([[0.7, 0.2, 0.1, 0.05]], dtype=np.float32)
+    ai = tmp_path / "auto_interp"
+    ai.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "feature_idx": 0,
+                "tier": "strong_grounded",
+                "explanation": "hf",
+                "concordance_r_pb": 0.7,
+            }
+        ]
+    ).to_csv(ai / "concordance_results.csv", index=False)
+    out = tmp_path / "out"
+    # main loop: 1 feature × (orig, deanch, retrieval) = 3 replies;
+    # arm6 re-judge: 1 feature × judge_deanchored = 1 reply. Total 4.
+    judge = _ScriptedJudge("gpt", ["YES | orig", "YES | deanch", "a | pick", "NO | alt-verdict"])
+    monkeypatch.setattr(
+        mod, "regenerate_explanations", lambda *a, **k: {0: "alternate explanation"}
+    )
+    summary = run_concordance_multi_judge(
+        auto_interp_dir=str(ai),
+        icd_eval_dir="unused",
+        output_dir=str(out),
+        judges=[{"slug": "gpt", "backend": "anthropic", "model": "m"}],
+        thresholds=[0.4],
+        run_shuffled=False,
+        arm6={"model": "openai/gpt-4o", "sample": None},
+        _judges=[judge],
+        _corr={"r_pb": r_pb, "code_names": codes},
+        _code_descriptions=descs,
+        _explainer_client=object(),
+        _contexts_by_fid={0: {"pos_contexts": [{}]}},
+    )
+    assert (out / "explainer_comparison.csv").exists()
+    assert summary["arm6"]["n_reexplained"] == 1
+    assert summary["arm6"]["model"] == "openai/gpt-4o"
