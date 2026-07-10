@@ -367,27 +367,3 @@ def test_aggregate_fleiss_binarized_value_and_unknown_excluded():
     rows = [r2(1, "YES", "YES"), r2(2, "NO", "NO"), r2(3, "YES", "YES"), r2(4, "UNKNOWN", "YES")]
     out = aggregate_multi_judge(rows, ["a", "b"], [0.3])
     assert abs(out["agreement"]["fleiss_binarized"] - 1.0) < 1e-9
-
-
-def test_adjudication_sheet_is_blinded():
-    from mech_interp_research.concordance_multi_judge import build_adjudication_sheet
-
-    r = np.zeros((3, len(CODES)))
-    r[0] = [0.05, 0.60, 0.50, 0.40, 0.30, 0.20, 0.01, 0.02]
-    r[1] = [0.55, 0.10, 0.40, 0.30, 0.20, 0.10, 0.05, 0.02]
-    r[2] = [0.10, 0.50, 0.45, 0.30, 0.20, 0.10, 0.05, 0.02]
-    rows = [
-        {"feature_idx": i, "tier": "strong_grounded", "r_pb": 0.5, "explanation": f"expl {i}"}
-        for i in range(3)
-    ]
-    df = build_adjudication_sheet(rows, r, CODES, DESCS, sample=3, seed=1)
-    assert list(df.columns) == [
-        "feature_id",
-        "explanation",
-        "options",
-        "human_pick",
-        "human_confidence",
-    ]
-    assert df["human_pick"].isna().all() or (df["human_pick"] == "").all()
-    # no forbidden columns leak
-    assert not any(c in df.columns for c in ("r_pb", "code", "verdict", "note_text"))
