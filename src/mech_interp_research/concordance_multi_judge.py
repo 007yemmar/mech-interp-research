@@ -1,8 +1,9 @@
 """Multi-judge discriminative concordance for the JumpReLU auto-interp run.
 
-Re-validates ICD concordance with a cross-provider judge panel, a top-5
-retrieval arm, a shuffled null, a human-adjudication sheet, and an independent
-second explainer. Reuses a completed auto_interp run; no GPU.
+Re-validates ICD concordance with a cross-provider judge panel: Arm 0 (verbatim
+original prompt), Arm 1 (de-anchored), Arm 2 (top-5 retrieval), Arm 3 (shuffled
+null), and Arm 6 (independent second explainer). Reuses a completed auto_interp
+run; no GPU.
 """
 
 from __future__ import annotations
