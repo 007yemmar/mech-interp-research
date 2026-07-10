@@ -8,9 +8,12 @@ second explainer. Reuses a completed auto_interp run; no GPU.
 from __future__ import annotations
 
 import logging
+import re
 import string
 
 import numpy as np
+
+from mech_interp_research.auto_interp import parse_concordance_response
 
 logger = logging.getLogger(__name__)
 
@@ -113,3 +116,48 @@ def build_slate(
     for e, letter in zip(entries, string.ascii_lowercase, strict=False):
         e["letter"] = letter
     return entries, argmax_code
+
+
+_PARTIAL_SUBTYPES = {
+    "treatment",
+    "symptom",
+    "broader-category",
+    "narrower-concept",
+    "related-other",
+}
+
+DEANCHORED_CONCORDANCE_PROMPT = """\
+A sparse autoencoder feature has been auto-interpreted as:
+"{explanation}"
+
+Consider the ICD-9 diagnosis code {code} ({description}).
+
+Does the explanation describe the same clinical concept as the code?
+- YES  — the explanation clearly describes the code's concept
+- PARTIAL — related but not identical; also name the subtype: one of
+  treatment, symptom, broader-category, narrower-concept, related-other
+- NO   — unrelated
+
+Format for YES/NO:   <verdict> | <one-sentence rationale>
+Format for PARTIAL:  PARTIAL | <subtype> | <one-sentence rationale>"""
+
+
+def parse_deanchored_response(raw: str) -> dict:
+    raw = raw.strip()
+    m = re.match(r"PARTIAL\s*[|]\s*([a-z\-]+)\s*[|]\s*(.*)", raw, re.IGNORECASE | re.DOTALL)
+    if m:
+        subtype = m.group(1).strip().lower()
+        return {
+            "verdict": "PARTIAL",
+            "subtype": subtype if subtype in _PARTIAL_SUBTYPES else "related-other",
+            "rationale": m.group(2).strip(),
+        }
+    verdict, rationale = parse_concordance_response(raw)
+    return {"verdict": verdict, "subtype": None, "rationale": rationale}
+
+
+def judge_deanchored(judge, explanation, code, description) -> dict:
+    prompt = DEANCHORED_CONCORDANCE_PROMPT.format(
+        explanation=explanation, code=code, description=description
+    )
+    return parse_deanchored_response(judge.complete(prompt))

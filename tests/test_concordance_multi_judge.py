@@ -1,7 +1,13 @@
 import numpy as np
 
 from mech_interp_research.auto_interp import parse_concordance_response
-from mech_interp_research.concordance_multi_judge import Judge, build_judges, build_slate
+from mech_interp_research.concordance_multi_judge import (
+    Judge,
+    build_judges,
+    build_slate,
+    judge_deanchored,
+    parse_deanchored_response,
+)
 
 
 def test_parse_wellformed_verdict():
@@ -119,3 +125,30 @@ def test_slate_v4986_description_fallback():
     slate, _ = build_slate(0, r, CODES, DESCS, n_candidates=2, n_hard_neg=0, seed=1)
     v = next(e for e in slate if e["code"] == "V4986")
     assert v["description"] == "Do not resuscitate status"
+
+
+def test_parse_deanchored_partial_subtype():
+    out = parse_deanchored_response("PARTIAL | treatment | warfarin treats it")
+    assert out["verdict"] == "PARTIAL"
+    assert out["subtype"] == "treatment"
+    assert "warfarin" in out["rationale"]
+
+
+def test_parse_deanchored_yes_no_subtype():
+    out = parse_deanchored_response("YES | names the condition")
+    assert out["verdict"] == "YES"
+    assert out["subtype"] is None
+
+
+def test_judge_deanchored_uses_prompt_without_rpb():
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "NO | unrelated"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    out = judge_deanchored(j, "anticoagulation", "42731", "atrial fibrillation")
+    assert out["verdict"] == "NO"
+    assert "r =" not in captured["prompt"] and "correlation" not in captured["prompt"].lower()
