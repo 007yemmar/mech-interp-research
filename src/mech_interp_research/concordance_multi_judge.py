@@ -12,16 +12,21 @@ import re
 import string
 from collections import Counter
 from itertools import combinations
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import cohen_kappa_score
 
 from mech_interp_research.auto_interp import (
     CONCORDANCE_PROMPT,
+    _load_code_descriptions,
+    _write_json,
     explain_and_categorize_feature,
     parse_concordance_response,
     resolve_token_text,
 )
+from mech_interp_research.icd_eval import load_saved_correlations
 from mech_interp_research.shuffled_control import permute_global
 
 logger = logging.getLogger(__name__)
@@ -321,16 +326,25 @@ def _binarize(v: str) -> str | None:
     return None  # UNKNOWN excluded
 
 
-def aggregate_multi_judge(per_feature_rows, judge_slugs, thresholds) -> dict:
+def aggregate_multi_judge(
+    per_feature_rows, judge_slugs, thresholds, verdict_key="verdict", rank_key="pick_rank"
+) -> dict:
     """Aggregate per-feature multi-judge rows into rate summaries + agreement stats.
 
     Args:
         per_feature_rows: list of dicts, each with ``feature_idx``, ``tier``,
             ``r_pb`` (float) plus, for each judge slug ``S``:
-            ``f"{S}_verdict"``, ``f"{S}_subtype"``, ``f"{S}_pick_rank"``
-            (int|None), ``f"{S}_is_none"`` (bool).
+            ``f"{S}_{verdict_key}"``, ``f"{S}_subtype"``, and (when
+            ``rank_key`` is not None) ``f"{S}_{rank_key}"`` (int|None),
+            ``f"{S}_is_none"`` (bool).
         judge_slugs: list of judge slug strings.
         thresholds: list of |r_pb| thresholds to filter rows on.
+        verdict_key: suffix (after ``f"{slug}_"``) to read verdicts from.
+            Defaults to ``"verdict"`` (Arm 1, de-anchored). Pass
+            ``"orig_verdict"`` for Arm 0 (original, anchored prompt).
+        rank_key: suffix (after ``f"{slug}_"``) to read retrieval ranks
+            from, or ``None`` to omit hit@k entirely (Arm 0 has no
+            retrieval ranks). Defaults to ``"pick_rank"``.
 
     Returns:
         dict with ``per_judge`` (rate summaries per judge/threshold),
@@ -343,28 +357,30 @@ def aggregate_multi_judge(per_feature_rows, judge_slugs, thresholds) -> dict:
         for thr in thresholds:
             rows = [r for r in per_feature_rows if abs(r["r_pb"]) > thr]
             n = len(rows)
-            verdicts = [r[f"{s}_verdict"] for r in rows]
-            ranks = [r[f"{s}_pick_rank"] for r in rows]
+            verdicts = [r[f"{s}_{verdict_key}"] for r in rows]
+            ranks = [r[f"{s}_{rank_key}"] for r in rows] if rank_key is not None else None
             yes = sum(1 for v in verdicts if v == "YES")
             yp = sum(1 for v in verdicts if v in ("YES", "PARTIAL"))
 
             def hit(k, ranks=ranks):
                 return sum(1 for rk in ranks if rk is not None and rk <= k)
 
-            per_judge[s][f"r>{thr}"] = {
+            entry = {
                 "n": n,
                 "yes_only_rate": (yes / n) if n else None,
                 "yes_partial_rate": (yp / n) if n else None,
-                "hit1_rate": (hit(1) / n) if n else None,
-                "hit3_rate": (hit(3) / n) if n else None,
-                "hit5_rate": (hit(5) / n) if n else None,
             }
+            if ranks is not None:
+                entry["hit1_rate"] = (hit(1) / n) if n else None
+                entry["hit3_rate"] = (hit(3) / n) if n else None
+                entry["hit5_rate"] = (hit(5) / n) if n else None
+            per_judge[s][f"r>{thr}"] = entry
 
     # Agreement over all rows, binarized (YES∪PARTIAL vs NO; UNKNOWN excluded).
-    labels_by_judge = {s: [r[f"{s}_verdict"] for r in per_feature_rows] for s in judge_slugs}
+    labels_by_judge = {s: [r[f"{s}_{verdict_key}"] for r in per_feature_rows] for s in judge_slugs}
     majority = Counter()
     for r in per_feature_rows:
-        vs = [r[f"{s}_verdict"] for s in judge_slugs]
+        vs = [r[f"{s}_{verdict_key}"] for s in judge_slugs]
         top = Counter(vs).most_common()
         if len(top) > 1 and top[0][1] == top[1][1]:
             majority["NO_CONSENSUS"] += 1
@@ -377,7 +393,7 @@ def aggregate_multi_judge(per_feature_rows, judge_slugs, thresholds) -> dict:
     # "binarized" agreement metrics share one basis.
     bin_counts = []
     for r in per_feature_rows:
-        vs = [r[f"{s}_verdict"] for s in judge_slugs]
+        vs = [r[f"{s}_{verdict_key}"] for s in judge_slugs]
         if any(v == "UNKNOWN" for v in vs):
             continue
         concordant = sum(1 for v in vs if v in ("YES", "PARTIAL"))
@@ -418,6 +434,135 @@ def pairwise_cohen(labels_by_judge) -> dict:
             continue
         out[f"{a}__{b}"] = float(cohen_kappa_score([p[0] for p in pairs], [p[1] for p in pairs]))
     return out
+
+
+def run_concordance_multi_judge(
+    auto_interp_dir,
+    icd_eval_dir,
+    output_dir=None,
+    judges=None,
+    thresholds=None,
+    n_candidates=5,
+    n_hard_neg=3,
+    seed=42,
+    icd_keywords_yaml_path=None,
+    run_shuffled=True,
+    arm6=None,
+    max_workers=6,
+    _judges=None,
+    _corr=None,
+    _code_descriptions=None,
+    _explainer_client=None,
+    _contexts_by_fid=None,
+    _note_texts=None,
+    _tokenizer=None,
+    _commit_volume=None,
+) -> dict:
+    """Orchestrate the multi-judge concordance re-validation over a completed auto-interp run.
+
+    Per feature, per judge, runs Arm 0 (``judge_original``, the verbatim
+    anchored prompt — apples-to-apples with the paper's table), Arm 1
+    (``judge_deanchored``, no r_pb anchor), then Arm 2 (``judge_retrieval``,
+    top-k slate ranking), in that order. Aggregates Arm 0 and Arm 1 into two
+    separate summary blocks and writes both a JSON summary and a flat
+    per-feature/per-judge verdict-matrix CSV.
+
+    Args:
+        auto_interp_dir: directory containing a completed auto-interp run's
+            ``concordance_results.csv`` (feature_idx, tier, explanation,
+            concordance_r_pb).
+        icd_eval_dir: directory containing a completed ICD eval run (used to
+            load saved correlations) unless ``_corr`` is injected.
+        output_dir: where to write ``multi_judge_summary.json`` and
+            ``verdict_matrix.csv``. Defaults to ``auto_interp_dir / "multi_judge"``.
+        judges: list of judge config dicts (``slug``, ``backend``, ``model``),
+            passed to ``build_judges`` unless ``_judges`` is injected.
+        thresholds: list of |r_pb| thresholds for aggregation. Defaults to
+            ``[0.3, 0.4, 0.5]``.
+        n_candidates, n_hard_neg, seed: passed through to ``build_slate``.
+        icd_keywords_yaml_path: fallback YAML path for code descriptions,
+            used when ``_code_descriptions`` is not injected.
+        run_shuffled: reserved for the Arm 3 shuffled-null wiring (Task 12);
+            unused in this orchestrator core.
+        arm6: reserved for the second-explainer arm wiring (Task 12); unused
+            in this orchestrator core.
+        max_workers: reserved for parallelizing judge calls (Task 12); unused
+            in this orchestrator core.
+        _judges, _corr, _code_descriptions, _explainer_client,
+            _contexts_by_fid, _note_texts, _tokenizer, _commit_volume:
+            test-injection hooks mirroring ``run_shuffled_control`` — when
+            unset, production values are built/loaded from disk or the
+            configured backends.
+
+    Returns:
+        dict with ``"arm0_original"`` and ``"arm1_deanchored"`` aggregation
+        blocks (see ``aggregate_multi_judge``).
+    """
+    if judges is None:
+        judges = []
+    if thresholds is None:
+        thresholds = [0.3, 0.4, 0.5]
+
+    auto_interp_dir = Path(auto_interp_dir)
+    output_dir = Path(output_dir) if output_dir else auto_interp_dir / "multi_judge"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    corr = _corr or load_saved_correlations(icd_eval_dir)
+    r_pb, code_names = corr["r_pb"], corr["code_names"]
+    code_descriptions = (
+        _code_descriptions
+        if _code_descriptions is not None
+        else _load_code_descriptions(None, icd_keywords_yaml_path)
+    )
+
+    df = pd.read_csv(auto_interp_dir / "concordance_results.csv")
+    feats = df.to_dict("records")
+
+    judge_objs = _judges if _judges is not None else build_judges(judges)
+    judge_slugs = [j.slug for j in judge_objs]
+
+    per_feature_rows = []
+    for rec in feats:
+        fid = int(rec["feature_idx"])
+        expl = rec["explanation"]
+        slate, argmax_code = build_slate(
+            fid, r_pb, code_names, code_descriptions, n_candidates, n_hard_neg, seed
+        )
+        desc = next((e["description"] for e in slate if e["code"] == argmax_code), argmax_code)
+        row = {
+            "feature_idx": fid,
+            "tier": rec["tier"],
+            "r_pb": float(rec.get("concordance_r_pb", 0.0)),
+            "explanation": expl,
+            "argmax_code": argmax_code,
+        }
+        for j in judge_objs:
+            orig = judge_original(j, expl, argmax_code, desc, row["r_pb"])  # Arm 0
+            d = judge_deanchored(j, expl, argmax_code, desc)  # Arm 1
+            ret = judge_retrieval(j, expl, slate)  # Arm 2
+            row[f"{j.slug}_orig_verdict"] = orig["verdict"]
+            row[f"{j.slug}_orig_rationale"] = orig["rationale"]
+            row[f"{j.slug}_verdict"] = d["verdict"]
+            row[f"{j.slug}_subtype"] = d["subtype"]
+            row[f"{j.slug}_rationale"] = d["rationale"]
+            row[f"{j.slug}_pick_rank"] = ret["picked_rank"]
+            row[f"{j.slug}_is_none"] = ret["is_none"]
+        per_feature_rows.append(row)
+
+    summary = {
+        "arm0_original": aggregate_multi_judge(
+            per_feature_rows, judge_slugs, thresholds, verdict_key="orig_verdict", rank_key=None
+        ),
+        "arm1_deanchored": aggregate_multi_judge(
+            per_feature_rows, judge_slugs, thresholds
+        ),  # verdict/pick_rank defaults
+    }
+    _write_json(summary, output_dir / "multi_judge_summary.json")
+    pd.DataFrame(per_feature_rows).to_csv(output_dir / "verdict_matrix.csv", index=False)
+
+    if _commit_volume is not None:
+        _commit_volume()
+    return summary
 
 
 def regenerate_explanations(

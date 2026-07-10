@@ -11,6 +11,7 @@ from mech_interp_research.concordance_multi_judge import (
     judge_retrieval,
     parse_deanchored_response,
     parse_retrieval_response,
+    run_concordance_multi_judge,
 )
 
 
@@ -324,6 +325,30 @@ def test_aggregate_yes_only_and_hits():
     assert g["hit3_rate"] == 1.0  # both within rank 3
 
 
+def test_aggregate_no_rank_key_omits_hits():
+    rows = [
+        _row(
+            1,
+            "strong_grounded",
+            0.6,
+            gpt_orig_verdict="YES",
+        ),
+        _row(
+            2,
+            "strong_grounded",
+            0.45,
+            gpt_orig_verdict="PARTIAL",
+        ),
+    ]
+    out = aggregate_multi_judge(rows, ["gpt"], [0.4], verdict_key="orig_verdict", rank_key=None)
+    g = out["per_judge"]["gpt"]["r>0.4"]
+    assert g["yes_only_rate"] == 0.5
+    assert g["yes_partial_rate"] == 1.0
+    assert "hit1_rate" not in g
+    assert "hit3_rate" not in g
+    assert "hit5_rate" not in g
+
+
 def test_aggregate_majority_and_kappa_keys():
     rows = [
         _row(
@@ -460,3 +485,84 @@ def test_regenerate_explanations_truncates_to_n_contexts_train(monkeypatch):
     }
     regenerate_explanations(object(), [5], ctx, {}, None, "m", n_contexts_train=2)
     assert calls["n"] == 2
+
+
+class _ScriptedJudge(Judge):
+    """Returns queued replies in order; ignores prompt."""
+
+    def __init__(self, slug, replies):
+        super().__init__(slug, "anthropic", model="m", client=None)
+        self._replies = list(replies)
+
+    def complete(self, prompt, max_tokens=256):
+        return self._replies.pop(0)
+
+
+def test_orchestrator_writes_summary(tmp_path):
+    # Minimal grounded set: 2 features, 4 codes.
+    codes = ["icd9_4280", "icd9_42731", "icd9_25000", "icd9_5849"]
+    descs = {"4280": "heart failure", "42731": "afib", "25000": "diabetes", "5849": "aki"}
+    r_pb = np.array([[0.7, 0.2, 0.1, 0.05], [0.1, 0.6, 0.2, 0.05]], dtype=np.float32)
+
+    # concordance_results.csv provides feature_idx/tier/explanation.
+    ai = tmp_path / "auto_interp"
+    ai.mkdir()
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "feature_idx": 0,
+                "tier": "strong_grounded",
+                "explanation": "heart failure text",
+                "concordance_r_pb": 0.7,
+            },
+            {
+                "feature_idx": 1,
+                "tier": "strong_grounded",
+                "explanation": "afib text",
+                "concordance_r_pb": 0.6,
+            },
+        ]
+    ).to_csv(ai / "concordance_results.csv", index=False)
+
+    out = tmp_path / "out"
+    # Each judge per feature: Arm0 (original) → Arm1 (deanchored) → Arm2 (retrieval)
+    # = 3 replies/feature × 2 features = 6 replies, in loop order.
+    judge = _ScriptedJudge(
+        "gpt",
+        [
+            "YES | orig",
+            "YES | deanch",
+            "a | pick",  # feature 0
+            "PARTIAL | orig",
+            "YES | deanch",
+            "a | pick",  # feature 1
+        ],
+    )
+
+    summary = run_concordance_multi_judge(
+        auto_interp_dir=str(ai),
+        icd_eval_dir="unused",
+        output_dir=str(out),
+        judges=[{"slug": "gpt", "backend": "anthropic", "model": "m"}],
+        thresholds=[0.4],
+        run_shuffled=False,
+        arm6=None,
+        _judges=[judge],
+        _corr={"r_pb": r_pb, "code_names": codes},
+        _code_descriptions=descs,
+    )
+    assert (out / "multi_judge_summary.json").exists()
+    assert (out / "verdict_matrix.csv").exists()
+    # Arm 0 (original prompt) block — apples-to-apples with the paper's table.
+    a0 = summary["arm0_original"]["per_judge"]["gpt"]["r>0.4"]
+    assert a0["n"] == 2
+    assert a0["yes_only_rate"] == 0.5  # 1 YES + 1 PARTIAL over 2
+    assert a0["yes_partial_rate"] == 1.0
+    assert "hit1_rate" not in a0  # rank_key=None → no hit@k for Arm 0
+    # Arm 1 (de-anchored) block — has hit@k (exact value depends on slate shuffle,
+    # so assert structure, not a specific rate).
+    a1 = summary["arm1_deanchored"]["per_judge"]["gpt"]["r>0.4"]
+    assert a1["n"] == 2
+    assert "hit1_rate" in a1 and a1["hit1_rate"] is not None
