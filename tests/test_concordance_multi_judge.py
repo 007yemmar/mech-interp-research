@@ -392,13 +392,71 @@ def test_regenerate_explanations_uses_client(monkeypatch):
     from mech_interp_research.concordance_multi_judge import regenerate_explanations
 
     calls = {}
+    sentinel = object()
 
     def fake_explain(client, pos_contexts, model="m"):
-        calls["n"] = calls.get("n", 0) + 1
+        calls["client"] = client
+        calls["n_contexts"] = len(pos_contexts)
         return (f"regenerated {model}", "clinical_concept")
 
     monkeypatch.setattr(mod, "explain_and_categorize_feature", fake_explain)
     ctx = {7: {"pos_contexts": [{"context_str": "x"}], "neg_contexts": []}}
-    out = regenerate_explanations(object(), [7], ctx, {}, None, "openai/gpt-4o")
+    out = regenerate_explanations(sentinel, [7], ctx, {}, None, "openai/gpt-4o")
     assert out[7] == "regenerated openai/gpt-4o"
-    assert calls["n"] == 1
+    assert calls["client"] is sentinel  # the caller's client actually reaches the explainer
+
+
+def test_regenerate_explanations_resolves_tokens_when_tokenizer_given(monkeypatch):
+    import mech_interp_research.concordance_multi_judge as mod
+    from mech_interp_research.concordance_multi_judge import regenerate_explanations
+
+    resolved = {}
+    monkeypatch.setattr(
+        mod,
+        "explain_and_categorize_feature",
+        lambda client, pos, model="m": ("expl", "category"),
+    )
+    monkeypatch.setattr(
+        mod,
+        "resolve_token_text",
+        lambda contexts, note_texts, tokenizer, context_window=30: resolved.setdefault(
+            "called", True
+        ),
+    )
+    ctx = {3: {"pos_contexts": [{"context_str": "x"}], "neg_contexts": []}}
+    out = regenerate_explanations(
+        object(),
+        [3],
+        ctx,
+        {1: "note"},
+        tokenizer=object(),
+        model="m",
+        context_window=15,
+    )
+    assert out[3] == "expl"
+    assert resolved.get("called") is True  # tokenizer branch ran
+
+
+def test_regenerate_explanations_truncates_to_n_contexts_train(monkeypatch):
+    import mech_interp_research.concordance_multi_judge as mod
+    from mech_interp_research.concordance_multi_judge import regenerate_explanations
+
+    calls = {}
+
+    def fake_explain(client, pos_contexts, model="m"):
+        calls["n"] = len(pos_contexts)
+        return ("e", "cat")
+
+    monkeypatch.setattr(mod, "explain_and_categorize_feature", fake_explain)
+    ctx = {
+        5: {
+            "pos_contexts": [
+                {"context_str": "a"},
+                {"context_str": "b"},
+                {"context_str": "c"},
+            ],
+            "neg_contexts": [],
+        }
+    }
+    regenerate_explanations(object(), [5], ctx, {}, None, "m", n_contexts_train=2)
+    assert calls["n"] == 2
