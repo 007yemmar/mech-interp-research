@@ -768,3 +768,18 @@ def test_discriminative_slate_structure():
     assert abs(chance - 1.0 / len(slate)) < 1e-12  # floor = 1/(K+correct+none)
     letters = [e["letter"] for e in slate]
     assert letters == sorted(set(letters))  # unique ordered letters
+
+
+def test_parse_retrieval_angle_bracket_letter():
+    # Judges often echo the "Format: <letter>" hint literally as "<i> | ...".
+    slate = [
+        {"code": "4280", "description": "hf", "rank_by_rpb": 1, "letter": "a"},
+        {"code": "__none__", "description": "none", "rank_by_rpb": None, "letter": "i"},
+    ]
+    assert parse_retrieval_response("<a> | direct match", slate)["picked_code"] == "4280"
+    out = parse_retrieval_response("<i> | none of these fit", slate)
+    assert out["picked_code"] == "__none__" and out["is_none"] is True
+    # prose starting with a capital letter must still NOT be read as a pick
+    assert (
+        parse_retrieval_response("A more specific code fits", slate)["picked_code"] == "__unparse__"
+    )
