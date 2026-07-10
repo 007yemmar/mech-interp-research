@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import string
+from collections import Counter
 
 import numpy as np
 
@@ -225,8 +226,45 @@ def judge_retrieval(judge, explanation, slate) -> dict:
     )
 
 
-def derange_feature_codes(feature_to_code, seed=42) -> dict:
-    """Assign each feature a *wrong* code by deranging feature ids first."""
+def derange_feature_codes(feature_to_code, seed=42, max_tries=64) -> dict:
+    """Assign each feature a *wrong* ICD code (different from its own).
+
+    Deranges feature ids, but the guarantee is on the code: a feature paired
+    with its own true code would make the judge answer the real question and
+    contaminate the Arm-3 null. Random derangements are rejection-sampled until
+    every assigned code differs from the feature's own; if a single code
+    dominates (>n/2 features) that is impossible, so a sorted-rotation fallback
+    minimises residual collisions and logs how many remain.
+    """
     fids = sorted(feature_to_code)
-    perm = permute_global(fids, seed=seed)  # fid -> other fid (no fixed point)
-    return {fid: feature_to_code[perm[fid]] for fid in fids}
+    n = len(fids)
+    if n < 2:
+        raise ValueError(f"need at least 2 features, got {n}")
+
+    for attempt in range(max_tries):
+        perm = permute_global(fids, seed=seed + attempt)
+        assigned = {fid: feature_to_code[perm[fid]] for fid in fids}
+        if all(assigned[fid] != feature_to_code[fid] for fid in fids):
+            return assigned
+
+    # Fallback for dominant-code cases: sort by code (same-code features become
+    # contiguous blocks) and rotate assignment by the largest block size, which
+    # pushes each feature's source out of its own code block whenever feasible.
+    order = sorted(fids, key=lambda f: (str(feature_to_code[f]), f))
+    max_group = max(Counter(feature_to_code.values()).values())
+    assigned = {}
+    collisions = 0
+    for i, fid in enumerate(order):
+        src = order[(i + max_group) % n]
+        code = feature_to_code[src]
+        assigned[fid] = code
+        if code == feature_to_code[fid]:
+            collisions += 1
+    if collisions:
+        logger.warning(
+            "derange_feature_codes: %d/%d features kept their own code "
+            "(a dominant ICD code exceeds half the features)",
+            collisions,
+            n,
+        )
+    return assigned

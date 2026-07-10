@@ -237,3 +237,28 @@ def test_derange_no_feature_keeps_own_code():
     for fid, code in wrong.items():
         assert code != f2c[fid]  # every feature gets a wrong code
         assert code in f2c.values()
+
+
+def test_derange_wrong_code_with_duplicate_codes():
+    from mech_interp_research.concordance_multi_judge import derange_feature_codes
+
+    # Two features share code "4280"; a valid id-derangement could swap them and
+    # hand each its own code back. The code-level guarantee must prevent that.
+    f2c = {10: "4280", 11: "4280", 12: "25000", 13: "5849"}
+    wrong = derange_feature_codes(f2c, seed=7)
+    for fid, code in wrong.items():
+        assert code != f2c[fid]
+        assert code in f2c.values()
+
+
+def test_derange_dominant_code_warns_and_terminates(caplog):
+    import logging
+
+    from mech_interp_research.concordance_multi_judge import derange_feature_codes
+
+    # Code "X" dominates (3 of 4) → some collision unavoidable; must still return.
+    f2c = {1: "X", 2: "X", 3: "X", 4: "Y"}
+    with caplog.at_level(logging.WARNING):
+        wrong = derange_feature_codes(f2c, seed=1)
+    assert set(wrong) == set(f2c)  # terminates, all features assigned
+    assert any("kept their own code" in r.message for r in caplog.records)
