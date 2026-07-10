@@ -482,10 +482,16 @@ def run_concordance_multi_judge(
         n_candidates, n_hard_neg, seed: passed through to ``build_slate``.
         icd_keywords_yaml_path: fallback YAML path for code descriptions,
             used when ``_code_descriptions`` is not injected.
-        run_shuffled: reserved for the Arm 3 shuffled-null wiring (Task 12);
-            unused in this orchestrator core.
-        arm6: reserved for the second-explainer arm wiring (Task 12); unused
-            in this orchestrator core.
+        run_shuffled: when True, runs Arm 3 (shuffled null) — deranges each
+            feature's argmax code via ``derange_feature_codes`` and re-judges
+            each explanation against the wrong code with ``judge_deanchored``,
+            adding ``summary["shuffled_null"]``.
+        arm6: when a config dict (with ``model`` and optional ``sample``) is
+            provided alongside ``_explainer_client`` and ``_contexts_by_fid``,
+            runs Arm 6 (independent explainer) — regenerates explanations via
+            ``regenerate_explanations``, re-judges them with
+            ``judge_deanchored``, writes ``explainer_comparison.csv``, and
+            sets ``summary["arm6"]``.
         max_workers: reserved for parallelizing judge calls (Task 12); unused
             in this orchestrator core.
         _judges, _corr, _code_descriptions, _explainer_client,
@@ -496,7 +502,8 @@ def run_concordance_multi_judge(
 
     Returns:
         dict with ``"arm0_original"`` and ``"arm1_deanchored"`` aggregation
-        blocks (see ``aggregate_multi_judge``).
+        blocks (see ``aggregate_multi_judge``), plus ``"shuffled_null"`` when
+        ``run_shuffled`` and ``"arm6"`` when the Arm 6 hooks are provided.
     """
     if judges is None:
         judges = []
@@ -559,6 +566,57 @@ def run_concordance_multi_judge(
     }
     _write_json(summary, output_dir / "multi_judge_summary.json")
     pd.DataFrame(per_feature_rows).to_csv(output_dir / "verdict_matrix.csv", index=False)
+
+    if run_shuffled and per_feature_rows:
+        feature_to_code = {r["feature_idx"]: r["argmax_code"] for r in per_feature_rows}
+        wrong = derange_feature_codes(feature_to_code, seed=seed)
+        shuffled_null = {}
+        for j in judge_objs:
+            yp = 0
+            for r in per_feature_rows:
+                wc = wrong[r["feature_idx"]]  # a different feature's code
+                d = judge_deanchored(j, r["explanation"], wc, _describe(wc, code_descriptions))
+                yp += 1 if d["verdict"] in ("YES", "PARTIAL") else 0
+            n = len(per_feature_rows)
+            shuffled_null[j.slug] = {"yes_partial_rate": yp / n if n else None, "n": n}
+        summary["shuffled_null"] = shuffled_null
+
+    if arm6 and _explainer_client is not None and _contexts_by_fid is not None:
+        sub = [r["feature_idx"] for r in per_feature_rows][
+            : arm6.get("sample") or len(per_feature_rows)
+        ]
+        alt = regenerate_explanations(
+            _explainer_client, sub, _contexts_by_fid, _note_texts or {}, _tokenizer, arm6["model"]
+        )
+        comp = []
+        for r in per_feature_rows:
+            if r["feature_idx"] not in alt:
+                continue
+            slate, argmax_code = build_slate(
+                r["feature_idx"],
+                r_pb,
+                code_names,
+                code_descriptions,
+                n_candidates,
+                n_hard_neg,
+                seed,
+            )
+            desc = next((e["description"] for e in slate if e["code"] == argmax_code), argmax_code)
+            per_judge = {}
+            for j in judge_objs:
+                per_judge[j.slug] = judge_deanchored(j, alt[r["feature_idx"]], argmax_code, desc)[
+                    "verdict"
+                ]
+            comp.append(
+                {
+                    "feature_idx": r["feature_idx"],
+                    "sonnet_explanation": r["explanation"],
+                    "alt_explanation": alt[r["feature_idx"]],
+                    **{f"{k}_verdict": v for k, v in per_judge.items()},
+                }
+            )
+        pd.DataFrame(comp).to_csv(output_dir / "explainer_comparison.csv", index=False)
+        summary["arm6"] = {"n_reexplained": len(comp), "model": arm6["model"]}
 
     if _commit_volume is not None:
         _commit_volume()
