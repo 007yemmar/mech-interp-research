@@ -715,3 +715,56 @@ def test_arm0_config_has_required_keys():
         assert key in cfg
     assert cfg["judges"][0]["backend"] == "openrouter"
     assert cfg["judges"][0]["model"] == "openai/gpt-4o-mini"
+
+
+def test_icd9_chapter_mapping():
+    from mech_interp_research.concordance_multi_judge import icd9_chapter
+
+    assert icd9_chapter("4280") == "circulatory"
+    assert icd9_chapter("icd9_25000") == "endocrine"
+    assert icd9_chapter("311") == "mental"
+    assert icd9_chapter("V1582") == "V_supplementary"
+    assert icd9_chapter("49390") == "respiratory"
+
+
+def test_discriminative_slate_structure():
+    from mech_interp_research.concordance_multi_judge import build_discriminative_slate
+
+    # 8 codes across systems; correct = 4280 (circulatory).
+    codes = [
+        "icd9_4280",
+        "icd9_42731",
+        "icd9_25000",
+        "icd9_311",
+        "icd9_49390",
+        "icd9_2851",
+        "icd9_56400",
+        "icd9_73300",
+    ]
+    descs = {
+        "4280": "chf",
+        "42731": "afib",
+        "25000": "diabetes",
+        "311": "depression",
+        "49390": "asthma",
+        "2851": "anemia",
+        "56400": "constipation",
+        "73300": "osteoporosis",
+    }
+    r = np.zeros(len(codes))
+    r[0] = 0.25  # 4280 correct/strongest
+    r[1] = 0.20  # 42731 also circulatory (must NOT appear as a distractor)
+    slate, chance = build_discriminative_slate("4280", r, codes, descs, n_distractors=4, seed=1)
+
+    correct = [e for e in slate if e["is_correct"]]
+    assert len(correct) == 1 and correct[0]["code"] == "4280"
+    assert slate[-1]["code"] == "__none__"  # none is last
+    distractors = [e for e in slate if not e["is_correct"] and e["code"] != "__none__"]
+    # every distractor is a DIFFERENT chapter than the correct code (circulatory)
+    from mech_interp_research.concordance_multi_judge import icd9_chapter
+
+    assert all(icd9_chapter(e["code"]) != "circulatory" for e in distractors)
+    assert "42731" not in {e["code"] for e in distractors}  # same-chapter code excluded
+    assert abs(chance - 1.0 / len(slate)) < 1e-12  # floor = 1/(K+correct+none)
+    letters = [e["letter"] for e in slate]
+    assert letters == sorted(set(letters))  # unique ordered letters

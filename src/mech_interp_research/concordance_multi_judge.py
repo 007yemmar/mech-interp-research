@@ -677,3 +677,126 @@ def regenerate_explanations(
         )
         out[fid] = explanation
     return out
+
+
+# ---------------------------------------------------------------------------
+# Discriminative retrieval slate: 1 correct code + K unrelated cross-chapter
+# distractors + "none". Distractors are statistically unrelated to the feature,
+# in a DIFFERENT ICD-9 chapter than the correct code, and prevalence-matched.
+# ---------------------------------------------------------------------------
+
+_ICD9_CHAPTERS = [
+    (1, 139, "infectious"),
+    (140, 239, "neoplasm"),
+    (240, 279, "endocrine"),
+    (280, 289, "blood"),
+    (290, 319, "mental"),
+    (320, 389, "nervous"),
+    (390, 459, "circulatory"),
+    (460, 519, "respiratory"),
+    (520, 579, "digestive"),
+    (580, 629, "genitourinary"),
+    (630, 679, "pregnancy"),
+    (680, 709, "skin"),
+    (710, 739, "musculoskeletal"),
+    (740, 759, "congenital"),
+    (760, 779, "perinatal"),
+    (780, 799, "symptoms"),
+    (800, 999, "injury"),
+]
+
+
+def icd9_chapter(code) -> str:
+    """Map an ICD-9 code to its chapter (organ system). V/E codes are own groups."""
+    c = str(code).replace("icd9_", "").strip().upper()
+    if c.startswith("V"):
+        return "V_supplementary"
+    if c.startswith("E"):
+        return "E_external"
+    try:
+        num = int(c[:3])
+    except ValueError:
+        return "unknown"
+    for lo, hi, name in _ICD9_CHAPTERS:
+        if lo <= num <= hi:
+            return name
+    return "unknown"
+
+
+def build_discriminative_slate(
+    correct_code,
+    r_row,
+    code_names,
+    code_descriptions,
+    prevalence=None,
+    n_distractors=7,
+    r_unrelated=0.05,
+    seed=0,
+):
+    """Slate = 1 correct code + K unrelated cross-chapter distractors + 'none'.
+
+    Distractors satisfy: (1) statistically unrelated to this feature
+    (|r_pb| < r_unrelated), (2) a DIFFERENT ICD-9 chapter than the correct code,
+    (3) when ``prevalence`` is given, closest corpus base-rate to the correct
+    code, drawn round-robin across chapters so the slate spans several systems.
+    Deterministic for a fixed ``seed``.
+
+    Returns ``(slate, chance_floor)``; each entry has
+    ``{code, description, is_correct, letter, rank_by_rpb}`` (rank_by_rpb=1 for
+    the correct code so ``parse_retrieval_response`` marks a hit).
+    """
+    bare = [str(c).replace("icd9_", "") for c in code_names]
+    cstar = str(correct_code).replace("icd9_", "")
+    cstar_ch = icd9_chapter(cstar)
+    prevalence = prevalence or {}
+    cstar_prev = prevalence.get(cstar, 0.0)
+    absr = np.abs(np.asarray(r_row, dtype=float))
+
+    pool = [
+        c
+        for i, c in enumerate(bare)
+        if c != cstar and icd9_chapter(c) != cstar_ch and absr[i] < r_unrelated
+    ]
+    if len(pool) < n_distractors:  # relax the |r| filter if the pool is too small
+        pool = [c for c in bare if c != cstar and icd9_chapter(c) != cstar_ch]
+
+    by_ch: dict[str, list[str]] = {}
+    for c in pool:
+        by_ch.setdefault(icd9_chapter(c), []).append(c)
+    for ch in by_ch:
+        by_ch[ch].sort(key=lambda c: abs(prevalence.get(c, 0.0) - cstar_prev))
+    chapters = sorted(by_ch)
+
+    picked: list[str] = []
+    i = 0
+    while len(picked) < n_distractors and any(by_ch.values()):
+        ch = chapters[i % len(chapters)]
+        if by_ch[ch]:
+            picked.append(by_ch[ch].pop(0))
+        i += 1
+        if i > 10000:
+            break
+
+    entries = [
+        {
+            "code": cstar,
+            "description": _describe("icd9_" + cstar, code_descriptions),
+            "is_correct": True,
+        }
+    ]
+    for c in picked:
+        entries.append(
+            {
+                "code": c,
+                "description": _describe("icd9_" + c, code_descriptions),
+                "is_correct": False,
+            }
+        )
+    rng = np.random.default_rng(seed)
+    rng.shuffle(entries)
+    entries.append({"code": "__none__", "description": "none of these", "is_correct": False})
+    for e, letter in zip(entries, string.ascii_lowercase, strict=False):
+        e["letter"] = letter
+        e["rank_by_rpb"] = 1 if e.get("is_correct") else None
+    chance = 1.0 / len(entries)
+    return entries, chance

@@ -1,0 +1,22 @@
+# Discriminative retrieval eval (Arm 2, clean design) with GPT-4o.
+#
+# 1 correct code + 7 unrelated cross-chapter prevalence-matched distractors + none.
+# hit@1 (judge recovers the grounded code, blind to the statistics) vs 1/9 floor.
+#
+# Run:
+#   uv run modal run modal_app/retrieval_eval.py --config-file configs/retrieval_gpt4o.yaml
+
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_eval_dir:    /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_csv_path:    /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: null   # null -> <auto_interp_dir>/retrieval_eval/<model_slug>/
+
+judges:
+  - {slug: gpt-4o, backend: openrouter, model: openai/gpt-4o}
+
+n_distractors: 7        # slate = 7 distractors + 1 correct + none = 9 options -> 1/9 floor
+r_unrelated: 0.05       # distractors must have |r_pb| below this for the feature
+thresholds: [0.3, 0.5]
+max_workers: 6
+logging_level: INFO
