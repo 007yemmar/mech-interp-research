@@ -71,9 +71,29 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
         if not api_key:
             raise RuntimeError("OPENROUTER_API_KEY not found in the mounted secret.")
     openrouter = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key, max_retries=6)
-    judges = build_judges(config["judges"], openrouter_client=openrouter)
+    anthropic_client = None
+    if any(j.get("backend") == "anthropic" for j in config["judges"]):
+        import anthropic
+
+        anthropic_client = anthropic.Anthropic(max_retries=8)
+    judges = build_judges(
+        config["judges"], anthropic_client=anthropic_client, openrouter_client=openrouter
+    )
     if not judges:
         raise ValueError("no live judges configured")
+
+    # Preflight: drop any judge whose model id is unreachable rather than crash.
+    live = []
+    for j in judges:
+        try:
+            j.complete("Reply with exactly: ok", max_tokens=5)
+            live.append(j)
+            log.info("judge preflight OK: %s (%s)", j.slug, j.model)
+        except Exception as e:  # noqa: BLE001
+            log.warning("dropping judge %s (%s): preflight failed: %s", j.slug, j.model, e)
+    if not live:
+        raise RuntimeError("no judges passed preflight")
+    judges = live
 
     ai_dir = Path(config["auto_interp_dir"])
     df = pd.read_csv(ai_dir / "concordance_results.csv")
@@ -124,9 +144,15 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
             seed=fid,
         )
         prompt = build_retrieval_prompt(rec["explanation"], slate)
-        raw = judge.complete(prompt)
-        ret = parse_retrieval_response(raw, slate)
-        picked = ret["picked_code"]
+        try:
+            raw = judge.complete(prompt)
+            ret = parse_retrieval_response(raw, slate)
+            picked = ret["picked_code"]
+            is_none = int(ret["is_none"])
+        except Exception as e:  # noqa: BLE001 — one judge's failure must not kill the run
+            raw = f"__error__: {e}"
+            picked = "__error__"
+            is_none = 0
         correct_desc = next((e["description"] for e in slate if e["is_correct"]), cstar)
         picked_desc = next((e["description"] for e in slate if e["code"] == picked), "")
         return {
@@ -139,7 +165,7 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
             "picked_code": picked,
             "picked_description": picked_desc,
             "hit1": int(picked == cstar),
-            "is_none": int(ret["is_none"]),
+            "is_none": is_none,
             "chance": chance,
             "prompt": prompt,
             "judge_raw_output": raw,
