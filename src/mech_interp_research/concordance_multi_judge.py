@@ -11,8 +11,10 @@ import logging
 import re
 import string
 from collections import Counter
+from itertools import combinations
 
 import numpy as np
+from sklearn.metrics import cohen_kappa_score
 
 from mech_interp_research.auto_interp import parse_concordance_response
 from mech_interp_research.shuffled_control import permute_global
@@ -268,3 +270,50 @@ def derange_feature_codes(feature_to_code, seed=42, max_tries=64) -> dict:
             n,
         )
     return assigned
+
+
+def fleiss_kappa(rating_counts) -> float:
+    """Compute Fleiss' kappa from per-item category counts.
+
+    Args:
+        rating_counts: numpy array of shape [n_items, n_categories] containing
+            per-item category tallies.
+
+    Returns:
+        Fleiss' kappa (float), or nan if undefined (≤1 rater, zero variance,
+        unequal raters per item, or no items).
+    """
+    counts = np.asarray(rating_counts, dtype=float)
+    n_items, _ = counts.shape
+    n_raters = counts.sum(axis=1)
+    if n_items == 0 or np.any(n_raters < 2) or len(set(n_raters.tolist())) != 1:
+        return float("nan")
+    n = n_raters[0]
+    p_j = counts.sum(axis=0) / (n_items * n)
+    P_i = (np.square(counts).sum(axis=1) - n) / (n * (n - 1))
+    P_bar = P_i.mean()
+    P_e = float(np.square(p_j).sum())
+    if abs(1 - P_e) < 1e-12:
+        return float("nan")
+    return float((P_bar - P_e) / (1 - P_e))
+
+
+def pairwise_cohen(labels_by_judge) -> dict:
+    """Compute pairwise Cohen's kappa across judge pairs.
+
+    Args:
+        labels_by_judge: dict mapping judge names to lists of labels (str).
+
+    Returns:
+        dict mapping "judgeA__judgeB" to Cohen's kappa score, or nan if fewer
+        than 2 usable (non-UNKNOWN) label pairs.
+    """
+    out = {}
+    for a, b in combinations(sorted(labels_by_judge), 2):
+        la, lb = labels_by_judge[a], labels_by_judge[b]
+        pairs = [(x, y) for x, y in zip(la, lb, strict=True) if x != "UNKNOWN" and y != "UNKNOWN"]
+        if len(pairs) < 2:
+            out[f"{a}__{b}"] = float("nan")
+            continue
+        out[f"{a}__{b}"] = float(cohen_kappa_score([p[0] for p in pairs], [p[1] for p in pairs]))
+    return out

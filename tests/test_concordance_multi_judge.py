@@ -262,3 +262,27 @@ def test_derange_dominant_code_warns_and_terminates(caplog):
         wrong = derange_feature_codes(f2c, seed=1)
     assert set(wrong) == set(f2c)  # terminates, all features assigned
     assert any("kept their own code" in r.message for r in caplog.records)
+
+
+def test_fleiss_perfect_agreement():
+    from mech_interp_research.concordance_multi_judge import fleiss_kappa
+
+    # 3 items, 3 raters, all agree → kappa 1.0
+    counts = np.array([[3, 0], [0, 3], [3, 0]], dtype=float)
+    assert abs(fleiss_kappa(counts) - 1.0) < 1e-9
+
+
+def test_pairwise_cohen_perfect():
+    from mech_interp_research.concordance_multi_judge import pairwise_cohen
+
+    labels = {"a": ["YES", "NO", "YES"], "b": ["YES", "NO", "YES"]}
+    out = pairwise_cohen(labels)
+    assert abs(out["a__b"] - 1.0) < 1e-9
+
+
+def test_pairwise_cohen_excludes_unknown():
+    from mech_interp_research.concordance_multi_judge import pairwise_cohen
+
+    labels = {"a": ["YES", "UNKNOWN", "NO"], "b": ["YES", "YES", "NO"]}
+    out = pairwise_cohen(labels)  # only items 0 and 2 counted
+    assert abs(out["a__b"] - 1.0) < 1e-9
