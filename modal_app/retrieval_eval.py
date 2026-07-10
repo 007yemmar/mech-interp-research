@@ -123,19 +123,26 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
             r_unrelated=r_unrelated,
             seed=fid,
         )
-        ret = parse_retrieval_response(
-            judge.complete(build_retrieval_prompt(rec["explanation"], slate)), slate
-        )
+        prompt = build_retrieval_prompt(rec["explanation"], slate)
+        raw = judge.complete(prompt)
+        ret = parse_retrieval_response(raw, slate)
         picked = ret["picked_code"]
+        correct_desc = next((e["description"] for e in slate if e["is_correct"]), cstar)
+        picked_desc = next((e["description"] for e in slate if e["code"] == picked), "")
         return {
             "slug": judge.slug,
             "feature_idx": fid,
             "r_pb": float(rec["concordance_r_pb"]),
+            "abs_r_pb": abs(float(rec["concordance_r_pb"])),
             "correct_code": cstar,
+            "correct_description": correct_desc,
             "picked_code": picked,
+            "picked_description": picked_desc,
             "hit1": int(picked == cstar),
             "is_none": int(ret["is_none"]),
             "chance": chance,
+            "prompt": prompt,
+            "judge_raw_output": raw,
             "explanation": rec["explanation"],
         }
 
