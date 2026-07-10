@@ -1039,6 +1039,26 @@ treatment for the correlated ICD code (atrial fibrillation), not the \
 condition itself."""
 
 
+def parse_concordance_response(raw: str) -> tuple[str, str]:
+    """Parse a judge concordance reply into (verdict, rationale).
+
+    verdict ∈ {"YES","PARTIAL","NO","UNKNOWN"}. Falls back to UNKNOWN with the
+    raw text as rationale when no verdict token is found.
+    """
+    raw = raw.strip()
+    match = re.match(r"(YES|PARTIAL|NO)\s*[|—–\-]\s*(.*)", raw, re.IGNORECASE | re.DOTALL)
+    if match:
+        return match.group(1).upper(), match.group(2).strip()
+
+    upper = raw.upper()
+    for v in ("YES", "PARTIAL", "NO"):
+        if upper.startswith(v):
+            return v, raw[len(v) :].strip().lstrip("|—–- ").strip()
+
+    logger.warning(f"Unparseable concordance response: {raw!r}")
+    return "UNKNOWN", raw
+
+
 def check_concordance(
     client,
     explanation: str,
@@ -1067,20 +1087,7 @@ def check_concordance(
     )
 
     raw = response.content[0].text.strip()
-
-    match = re.match(r"(YES|PARTIAL|NO)\s*[|—–\-]\s*(.*)", raw, re.IGNORECASE | re.DOTALL)
-    if match:
-        verdict = match.group(1).upper()
-        rationale = match.group(2).strip()
-        return verdict, rationale
-
-    upper = raw.upper()
-    for v in ("YES", "PARTIAL", "NO"):
-        if upper.startswith(v):
-            return v, raw[len(v) :].strip().lstrip("|—–- ").strip()
-
-    logger.warning(f"Unparseable concordance response: {raw!r}")
-    return "UNKNOWN", raw
+    return parse_concordance_response(raw)
 
 
 # ---------------------------------------------------------------------------
