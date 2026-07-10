@@ -385,3 +385,20 @@ def test_judge_original_uses_anchored_prompt():
     # Arm 0 is the ORIGINAL prompt: the r-anchor MUST be present (contrast Arm 1).
     assert "correlation" in captured["prompt"].lower()
     assert "0.28" in captured["prompt"]
+
+
+def test_regenerate_explanations_uses_client(monkeypatch):
+    import mech_interp_research.concordance_multi_judge as mod
+    from mech_interp_research.concordance_multi_judge import regenerate_explanations
+
+    calls = {}
+
+    def fake_explain(client, pos_contexts, model="m"):
+        calls["n"] = calls.get("n", 0) + 1
+        return (f"regenerated {model}", "clinical_concept")
+
+    monkeypatch.setattr(mod, "explain_and_categorize_feature", fake_explain)
+    ctx = {7: {"pos_contexts": [{"context_str": "x"}], "neg_contexts": []}}
+    out = regenerate_explanations(object(), [7], ctx, {}, None, "openai/gpt-4o")
+    assert out[7] == "regenerated openai/gpt-4o"
+    assert calls["n"] == 1

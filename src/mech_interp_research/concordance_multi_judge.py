@@ -16,7 +16,12 @@ from itertools import combinations
 import numpy as np
 from sklearn.metrics import cohen_kappa_score
 
-from mech_interp_research.auto_interp import CONCORDANCE_PROMPT, parse_concordance_response
+from mech_interp_research.auto_interp import (
+    CONCORDANCE_PROMPT,
+    explain_and_categorize_feature,
+    parse_concordance_response,
+    resolve_token_text,
+)
 from mech_interp_research.shuffled_control import permute_global
 
 logger = logging.getLogger(__name__)
@@ -412,4 +417,47 @@ def pairwise_cohen(labels_by_judge) -> dict:
             out[f"{a}__{b}"] = float("nan")
             continue
         out[f"{a}__{b}"] = float(cohen_kappa_score([p[0] for p in pairs], [p[1] for p in pairs]))
+    return out
+
+
+def regenerate_explanations(
+    explainer_client,
+    feature_ids,
+    contexts_by_fid,
+    note_texts,
+    tokenizer,
+    model,
+    n_contexts_train=20,
+    context_window=30,
+) -> dict:
+    """Regenerate explanations with an alternate explainer over cached contexts.
+
+    This is the ONLY function that reads note text; run it on the route the
+    operator has configured for the corpus.
+
+    Args:
+        explainer_client: Anthropic or OpenAI-shaped client (the ._client from a Judge).
+        feature_ids: list of feature indices to regenerate explanations for.
+        contexts_by_fid: dict mapping feature_id to context dict with pos_contexts/neg_contexts.
+        note_texts: dict mapping note_id to note text (used by resolve_token_text).
+        tokenizer: tokenizer for resolve_token_text (or None to skip text resolution).
+        model: model string to pass to explain_and_categorize_feature.
+        n_contexts_train: number of top contexts to use for explanation.
+        context_window: context window for resolve_token_text.
+
+    Returns:
+        dict mapping feature_idx to explanation string.
+    """
+    out = {}
+    for fid in feature_ids:
+        ctx = contexts_by_fid.get(fid)
+        if not ctx or not ctx.get("pos_contexts"):
+            continue
+        pos = list(ctx["pos_contexts"])
+        if tokenizer is not None:
+            resolve_token_text(pos, note_texts, tokenizer, context_window=context_window)
+        explanation, _ = explain_and_categorize_feature(
+            explainer_client, pos[:n_contexts_train], model=model
+        )
+        out[fid] = explanation
     return out
