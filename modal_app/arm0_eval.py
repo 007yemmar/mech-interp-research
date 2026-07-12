@@ -52,8 +52,13 @@ def run_arm0_remote(config: dict[str, Any]) -> dict[str, Any]:
     import pandas as pd
     from openai import OpenAI
 
-    from mech_interp_research.auto_interp import _concordance_stats, _write_json
-    from mech_interp_research.concordance_multi_judge import build_judges, judge_original
+    from mech_interp_research.auto_interp import (
+        CONCORDANCE_PROMPT,
+        _concordance_stats,
+        _write_json,
+        parse_concordance_response,
+    )
+    from mech_interp_research.concordance_multi_judge import build_judges
 
     logging.basicConfig(
         level=getattr(logging, config.pop("logging_level", "INFO")),
@@ -80,6 +85,18 @@ def run_arm0_remote(config: dict[str, Any]) -> dict[str, Any]:
     judges = build_judges(config["judges"], openrouter_client=openrouter)
     if not judges:
         raise ValueError("no live judges — every entry is 'reuse'; add an openrouter judge")
+
+    live = []
+    for j in judges:
+        try:
+            j.complete("Reply with exactly: ok", max_tokens=5)
+            live.append(j)
+            log.info("judge preflight OK: %s (%s)", j.slug, j.model)
+        except Exception as e:  # noqa: BLE001
+            log.warning("dropping judge %s (%s): preflight failed: %s", j.slug, j.model, e)
+    if not live:
+        raise RuntimeError("no judges passed preflight")
+    judges = live
 
     ai_dir = Path(config["auto_interp_dir"])
     df = pd.read_csv(ai_dir / "concordance_results.csv")
@@ -108,14 +125,23 @@ def run_arm0_remote(config: dict[str, Any]) -> dict[str, Any]:
         code = code_prefixed.removeprefix("icd9_")
         desc = str(rec["concordance_icd_description"])
         r_pb = float(rec["concordance_r_pb"])
-        v = judge_original(judge, rec["explanation"], code, desc, r_pb)
+        prompt = CONCORDANCE_PROMPT.format(
+            explanation=rec["explanation"], r_pb=r_pb, icd_code=code, icd_description=desc
+        )
+        try:
+            raw = judge.complete(prompt)
+            verdict, rationale = parse_concordance_response(raw)
+        except Exception as e:  # noqa: BLE001 — one judge's failure must not kill the run
+            raw = f"__error__: {e}"
+            verdict, rationale = "ERROR", raw
         return {
             "slug": judge.slug,
             "feature_idx": int(rec["feature_idx"]),
             "tier": rec.get("tier", "grounded"),
             "explanation": rec["explanation"],
-            "concordance_verdict": v["verdict"],
-            "concordance_rationale": v["rationale"],
+            "concordance_verdict": verdict,
+            "concordance_rationale": rationale,
+            "judge_raw_output": raw,
             "concordance_icd_code": code_prefixed,  # keep prefixed to match original CSV
             "concordance_icd_description": desc,
             "concordance_r_pb": r_pb,

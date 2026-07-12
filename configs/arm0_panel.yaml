@@ -1,0 +1,13 @@
+# Arm 0 (verbatim original YES/PARTIAL concordance prompt) — 3-judge panel via OpenRouter.
+# Same prompt as the published Table 2; only the judge model changes.
+# Run: uv run modal run --detach modal_app/arm0_eval.py --config-file configs/arm0_panel.yaml --detach
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: null
+judges:
+  - {slug: gpt-4o,      backend: openrouter, model: openai/gpt-4o}
+  - {slug: sonnet-4-6,  backend: openrouter, model: anthropic/claude-sonnet-4.6}
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+thresholds: [0.3, 0.5]
+max_workers: 6
+client_max_retries: 6
+logging_level: INFO
