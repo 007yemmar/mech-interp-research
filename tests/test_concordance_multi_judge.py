@@ -1,0 +1,785 @@
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+from mech_interp_research.auto_interp import CONCORDANCE_PROMPT, parse_concordance_response
+from mech_interp_research.concordance_multi_judge import (
+    Judge,
+    aggregate_multi_judge,
+    build_judges,
+    build_retrieval_prompt,
+    build_slate,
+    judge_deanchored,
+    judge_original,
+    judge_retrieval,
+    parse_deanchored_response,
+    parse_retrieval_response,
+    run_concordance_multi_judge,
+)
+
+
+def test_parse_wellformed_verdict():
+    assert parse_concordance_response("PARTIAL | warfarin treats the code") == (
+        "PARTIAL",
+        "warfarin treats the code",
+    )
+
+
+def test_parse_prefix_only():
+    v, r = parse_concordance_response("YES the explanation names the condition")
+    assert v == "YES"
+    assert "explanation names" in r
+
+
+def test_parse_garbage_is_unknown():
+    v, r = parse_concordance_response("mumble mumble no verdict here")
+    assert v == "UNKNOWN"
+    assert r == "mumble mumble no verdict here"
+
+
+class _StubMessages:
+    def __init__(self, text):
+        self._text = text
+
+    def create(self, **kwargs):
+        text = self._text
+
+        class _Resp:
+            content = [type("C", (), {"text": text})()]
+
+        return _Resp()
+
+
+class _StubAnthropic:
+    def __init__(self, text="YES | ok"):
+        self.messages = _StubMessages(text)
+
+
+class _StubOpenAI:
+    def __init__(self, text="NO | nope"):
+        outer = self
+
+        class _Completions:
+            def create(self, **kwargs):
+                msg = type("M", (), {"content": outer._text})()
+                choice = type("Ch", (), {"message": msg})()
+                return type("R", (), {"choices": [choice]})()
+
+        self._text = text
+        self.chat = type("Chat", (), {"completions": _Completions()})()
+
+
+def test_judge_anthropic_complete():
+    j = Judge(
+        "sonnet-4-6", "anthropic", model="claude-sonnet-4-6", client=_StubAnthropic("  YES | ok  ")
+    )
+    assert j.complete("hi") == "YES | ok"
+
+
+def test_judge_openrouter_complete():
+    j = Judge("gpt-4o", "openrouter", model="openai/gpt-4o", client=_StubOpenAI("  NO | nope  "))
+    assert j.complete("hi") == "NO | nope"
+
+
+def test_build_judges_skips_reuse():
+    cfgs = [
+        {"slug": "sonnet-4-6", "backend": "reuse"},
+        {"slug": "gpt-4o", "backend": "openrouter", "model": "openai/gpt-4o"},
+    ]
+    judges = build_judges(cfgs, openrouter_client=_StubOpenAI("NO | nope"))
+    assert [j.slug for j in judges] == ["gpt-4o"]
+
+
+CODES = [
+    "icd9_4019",
+    "icd9_4280",
+    "icd9_42731",
+    "icd9_25000",
+    "icd9_5849",
+    "icd9_311",
+    "icd9_V4986",
+    "icd9_2449",
+]
+DESCS = {
+    "4019": "hypertension",
+    "4280": "heart failure",
+    "42731": "atrial fibrillation",
+    "25000": "diabetes",
+    "5849": "acute kidney failure",
+    "311": "depression",
+    "2449": "hypothyroidism",
+}  # V4986 intentionally absent → fallback
+
+
+def test_slate_has_candidates_hardneg_and_none():
+    r = np.zeros((1, len(CODES)))
+    r[0] = [0.05, 0.60, 0.50, 0.40, 0.30, 0.20, 0.01, 0.02]  # ranks by |r|
+    slate, argmax = build_slate(0, r, CODES, DESCS, n_candidates=5, n_hard_neg=2, seed=1)
+    codes = [e["code"] for e in slate]
+    assert argmax == "4280"  # highest |r|
+    assert codes[-1] == "__none__"  # none option last after shuffle-then-append
+    cand = [e for e in slate if e["rank_by_rpb"] is not None]
+    assert len(cand) == 5  # top-5
+    hard = [e for e in slate if e["rank_by_rpb"] is None and e["code"] != "__none__"]
+    assert len(hard) == 2  # two hard negatives, low |r|
+    assert {e["code"] for e in hard} == {"V4986", "2449"}  # pin the lowest-|r| codes
+    letters = [e["letter"] for e in slate]
+    assert letters == sorted(set(letters))  # unique, ordered letters
+
+
+def test_slate_v4986_description_fallback():
+    r = np.zeros((1, len(CODES)))
+    r[0] = [0.9, 0.1, 0.1, 0.1, 0.1, 0.1, 0.8, 0.1]  # V4986 becomes a top candidate
+    slate, _ = build_slate(0, r, CODES, DESCS, n_candidates=2, n_hard_neg=0, seed=1)
+    v = next(e for e in slate if e["code"] == "V4986")
+    assert v["description"] == "Do not resuscitate status"
+
+
+def test_parse_deanchored_partial_subtype():
+    out = parse_deanchored_response("PARTIAL | treatment | warfarin treats it")
+    assert out["verdict"] == "PARTIAL"
+    assert out["subtype"] == "treatment"
+    assert "warfarin" in out["rationale"]
+
+
+def test_parse_deanchored_yes_no_subtype():
+    out = parse_deanchored_response("YES | names the condition")
+    assert out["verdict"] == "YES"
+    assert out["subtype"] is None
+
+
+def test_parse_deanchored_unrecognized_subtype_maps_to_related_other():
+    out = parse_deanchored_response("PARTIAL | causal-link | some rationale")
+    assert out["verdict"] == "PARTIAL"
+    assert out["subtype"] == "related-other"  # unrecognized subtype normalized
+
+
+def test_judge_deanchored_uses_prompt_without_rpb():
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "NO | unrelated"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    out = judge_deanchored(j, "anticoagulation", "42731", "atrial fibrillation")
+    assert out["verdict"] == "NO"
+    assert "r =" not in captured["prompt"] and "correlation" not in captured["prompt"].lower()
+
+
+_SLATE = [
+    {"code": "42731", "description": "atrial fibrillation", "rank_by_rpb": 2, "letter": "a"},
+    {"code": "4280", "description": "heart failure", "rank_by_rpb": 1, "letter": "b"},
+    {"code": "25000", "description": "diabetes", "rank_by_rpb": None, "letter": "c"},
+    {"code": "__none__", "description": "none of these", "rank_by_rpb": None, "letter": "d"},
+]
+
+
+def test_parse_retrieval_picks_rank():
+    out = parse_retrieval_response("b | best match", _SLATE)
+    assert out["picked_code"] == "4280"
+    assert out["picked_rank"] == 1
+    assert out["is_none"] is False
+
+
+def test_parse_retrieval_none():
+    out = parse_retrieval_response("d | nothing fits", _SLATE)
+    assert out["is_none"] is True
+    assert out["picked_rank"] is None
+
+
+def test_parse_retrieval_garbage():
+    out = parse_retrieval_response("???", _SLATE)
+    assert out["picked_code"] == "__unparse__"
+
+
+def test_retrieval_prompt_lists_all_letters():
+    p = build_retrieval_prompt("heart failure text", _SLATE)
+    for letter in ("a", "b", "c", "d"):
+        assert f"({letter})" in p
+    assert "rank" not in p.lower()  # ranks/r_pb never leak into the prompt
+
+
+def test_parse_retrieval_prose_not_mistaken_for_letter():
+    # A rationale starting with the word "A" must NOT be read as picking letter 'a'.
+    out = parse_retrieval_response("A more specific code would be better here", _SLATE)
+    assert out["picked_code"] == "__unparse__"
+
+
+def test_parse_retrieval_valid_letter_absent_from_slate():
+    out = parse_retrieval_response("e | not in slate", _SLATE)  # _SLATE has a-d only
+    assert out["picked_code"] == "__unparse__"
+
+
+def test_parse_retrieval_bare_and_parenthesized_letter():
+    assert parse_retrieval_response("b", _SLATE)["picked_code"] == "4280"
+    assert parse_retrieval_response("(b)", _SLATE)["picked_code"] == "4280"
+
+
+def test_judge_retrieval_sends_prompt_and_parses(monkeypatch):
+    from mech_interp_research.concordance_multi_judge import Judge
+
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "b | best match"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    out = judge_retrieval(j, "heart failure text", _SLATE)
+    assert out["picked_code"] == "4280"
+    assert "rank" not in captured["prompt"].lower()
+
+
+def test_derange_no_feature_keeps_own_code():
+    from mech_interp_research.concordance_multi_judge import derange_feature_codes
+
+    f2c = {10: "4280", 11: "42731", 12: "25000", 13: "5849"}
+    wrong = derange_feature_codes(f2c, seed=3)
+    assert set(wrong) == set(f2c)
+    for fid, code in wrong.items():
+        assert code != f2c[fid]  # every feature gets a wrong code
+        assert code in f2c.values()
+
+
+def test_derange_wrong_code_with_duplicate_codes():
+    from mech_interp_research.concordance_multi_judge import derange_feature_codes
+
+    # Two features share code "4280"; a valid id-derangement could swap them and
+    # hand each its own code back. The code-level guarantee must prevent that.
+    f2c = {10: "4280", 11: "4280", 12: "25000", 13: "5849"}
+    wrong = derange_feature_codes(f2c, seed=7)
+    for fid, code in wrong.items():
+        assert code != f2c[fid]
+        assert code in f2c.values()
+
+
+def test_derange_dominant_code_warns_and_terminates(caplog):
+    import logging
+
+    from mech_interp_research.concordance_multi_judge import derange_feature_codes
+
+    # Code "X" dominates (3 of 4) → some collision unavoidable; must still return.
+    f2c = {1: "X", 2: "X", 3: "X", 4: "Y"}
+    with caplog.at_level(logging.WARNING):
+        wrong = derange_feature_codes(f2c, seed=1)
+    assert set(wrong) == set(f2c)  # terminates, all features assigned
+    assert any("kept their own code" in r.message for r in caplog.records)
+
+
+def test_fleiss_perfect_agreement():
+    from mech_interp_research.concordance_multi_judge import fleiss_kappa
+
+    # 3 items, 3 raters, all agree → kappa 1.0
+    counts = np.array([[3, 0], [0, 3], [3, 0]], dtype=float)
+    assert abs(fleiss_kappa(counts) - 1.0) < 1e-9
+
+
+def test_pairwise_cohen_perfect():
+    from mech_interp_research.concordance_multi_judge import pairwise_cohen
+
+    labels = {"a": ["YES", "NO", "YES"], "b": ["YES", "NO", "YES"]}
+    out = pairwise_cohen(labels)
+    assert abs(out["a__b"] - 1.0) < 1e-9
+
+
+def test_pairwise_cohen_excludes_unknown():
+    from mech_interp_research.concordance_multi_judge import pairwise_cohen
+
+    labels = {"a": ["YES", "UNKNOWN", "NO"], "b": ["YES", "YES", "NO"]}
+    out = pairwise_cohen(labels)  # only items 0 and 2 counted
+    assert abs(out["a__b"] - 1.0) < 1e-9
+
+
+def _row(fid, tier, r, **kw):
+    base = {"feature_idx": fid, "tier": tier, "r_pb": r}
+    base.update(kw)
+    return base
+
+
+def test_aggregate_yes_only_and_hits():
+    rows = [
+        _row(
+            1,
+            "strong_grounded",
+            0.6,
+            gpt_verdict="YES",
+            gpt_subtype=None,
+            gpt_pick_rank=1,
+            gpt_is_none=False,
+        ),
+        _row(
+            2,
+            "strong_grounded",
+            0.45,
+            gpt_verdict="PARTIAL",
+            gpt_subtype="treatment",
+            gpt_pick_rank=3,
+            gpt_is_none=False,
+        ),
+    ]
+    out = aggregate_multi_judge(rows, ["gpt"], [0.4])
+    g = out["per_judge"]["gpt"]["r>0.4"]
+    assert g["yes_only_rate"] == 0.5
+    assert g["yes_partial_rate"] == 1.0
+    assert g["hit1_rate"] == 0.5  # only feature 1 picked rank 1
+    assert g["hit3_rate"] == 1.0  # both within rank 3
+
+
+def test_aggregate_no_rank_key_omits_hits():
+    rows = [
+        _row(
+            1,
+            "strong_grounded",
+            0.6,
+            gpt_orig_verdict="YES",
+        ),
+        _row(
+            2,
+            "strong_grounded",
+            0.45,
+            gpt_orig_verdict="PARTIAL",
+        ),
+    ]
+    out = aggregate_multi_judge(rows, ["gpt"], [0.4], verdict_key="orig_verdict", rank_key=None)
+    g = out["per_judge"]["gpt"]["r>0.4"]
+    assert g["yes_only_rate"] == 0.5
+    assert g["yes_partial_rate"] == 1.0
+    assert "hit1_rate" not in g
+    assert "hit3_rate" not in g
+    assert "hit5_rate" not in g
+
+
+def test_aggregate_majority_and_kappa_keys():
+    rows = [
+        _row(
+            1,
+            "strong_grounded",
+            0.6,
+            a_verdict="YES",
+            a_subtype=None,
+            a_pick_rank=1,
+            a_is_none=False,
+            b_verdict="YES",
+            b_subtype=None,
+            b_pick_rank=1,
+            b_is_none=False,
+        ),
+    ]
+    out = aggregate_multi_judge(rows, ["a", "b"], [0.3])
+    assert "fleiss_binarized" in out["agreement"]
+    assert "a__b" in out["agreement"]["pairwise_cohen_binarized"]
+    assert out["agreement"]["majority_counts"]["YES"] == 1
+
+
+def test_aggregate_fleiss_binarized_value_and_unknown_excluded():
+    # 2 judges. Rows 1-3: perfect agreement across concordant/discordant → kappa 1.0.
+    # Row 4 has an UNKNOWN vote and must be EXCLUDED (complete-case), leaving kappa 1.0.
+    def r2(fid, a, b):
+        return {
+            "feature_idx": fid,
+            "tier": "strong_grounded",
+            "r_pb": 0.6,
+            "a_verdict": a,
+            "a_subtype": None,
+            "a_pick_rank": 1,
+            "a_is_none": False,
+            "b_verdict": b,
+            "b_subtype": None,
+            "b_pick_rank": 1,
+            "b_is_none": False,
+        }
+
+    rows = [r2(1, "YES", "YES"), r2(2, "NO", "NO"), r2(3, "YES", "YES"), r2(4, "UNKNOWN", "YES")]
+    out = aggregate_multi_judge(rows, ["a", "b"], [0.3])
+    assert abs(out["agreement"]["fleiss_binarized"] - 1.0) < 1e-9
+
+
+def test_judge_original_uses_anchored_prompt():
+    from mech_interp_research.concordance_multi_judge import judge_original
+
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "PARTIAL | warfarin treats it"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    out = judge_original(j, "anticoagulation therapy", "42731", "atrial fibrillation", 0.28)
+    assert out["verdict"] == "PARTIAL"
+    # Arm 0 is the ORIGINAL prompt: the r-anchor MUST be present (contrast Arm 1).
+    assert "correlation" in captured["prompt"].lower()
+    assert "0.28" in captured["prompt"]
+
+
+def test_regenerate_explanations_uses_client(monkeypatch):
+    import mech_interp_research.concordance_multi_judge as mod
+    from mech_interp_research.concordance_multi_judge import regenerate_explanations
+
+    calls = {}
+    sentinel = object()
+
+    def fake_explain(client, pos_contexts, model="m"):
+        calls["client"] = client
+        calls["n_contexts"] = len(pos_contexts)
+        return (f"regenerated {model}", "clinical_concept")
+
+    monkeypatch.setattr(mod, "explain_and_categorize_feature", fake_explain)
+    ctx = {7: {"pos_contexts": [{"context_str": "x"}], "neg_contexts": []}}
+    out = regenerate_explanations(sentinel, [7], ctx, {}, None, "openai/gpt-4o")
+    assert out[7] == "regenerated openai/gpt-4o"
+    assert calls["client"] is sentinel  # the caller's client actually reaches the explainer
+
+
+def test_regenerate_explanations_resolves_tokens_when_tokenizer_given(monkeypatch):
+    import mech_interp_research.concordance_multi_judge as mod
+    from mech_interp_research.concordance_multi_judge import regenerate_explanations
+
+    resolved = {}
+    monkeypatch.setattr(
+        mod,
+        "explain_and_categorize_feature",
+        lambda client, pos, model="m": ("expl", "category"),
+    )
+    monkeypatch.setattr(
+        mod,
+        "resolve_token_text",
+        lambda contexts, note_texts, tokenizer, context_window=30: resolved.setdefault(
+            "called", True
+        ),
+    )
+    ctx = {3: {"pos_contexts": [{"context_str": "x"}], "neg_contexts": []}}
+    out = regenerate_explanations(
+        object(),
+        [3],
+        ctx,
+        {1: "note"},
+        tokenizer=object(),
+        model="m",
+        context_window=15,
+    )
+    assert out[3] == "expl"
+    assert resolved.get("called") is True  # tokenizer branch ran
+
+
+def test_regenerate_explanations_truncates_to_n_contexts_train(monkeypatch):
+    import mech_interp_research.concordance_multi_judge as mod
+    from mech_interp_research.concordance_multi_judge import regenerate_explanations
+
+    calls = {}
+
+    def fake_explain(client, pos_contexts, model="m"):
+        calls["n"] = len(pos_contexts)
+        return ("e", "cat")
+
+    monkeypatch.setattr(mod, "explain_and_categorize_feature", fake_explain)
+    ctx = {
+        5: {
+            "pos_contexts": [
+                {"context_str": "a"},
+                {"context_str": "b"},
+                {"context_str": "c"},
+            ],
+            "neg_contexts": [],
+        }
+    }
+    regenerate_explanations(object(), [5], ctx, {}, None, "m", n_contexts_train=2)
+    assert calls["n"] == 2
+
+
+class _ScriptedJudge(Judge):
+    """Returns queued replies in order; ignores prompt."""
+
+    def __init__(self, slug, replies):
+        super().__init__(slug, "anthropic", model="m", client=None)
+        self._replies = list(replies)
+
+    def complete(self, prompt, max_tokens=256):
+        return self._replies.pop(0)
+
+
+def test_orchestrator_writes_summary(tmp_path):
+    # Minimal grounded set: 2 features, 4 codes.
+    codes = ["icd9_4280", "icd9_42731", "icd9_25000", "icd9_5849"]
+    descs = {"4280": "heart failure", "42731": "afib", "25000": "diabetes", "5849": "aki"}
+    r_pb = np.array([[0.7, 0.2, 0.1, 0.05], [0.1, 0.6, 0.2, 0.05]], dtype=np.float32)
+
+    # concordance_results.csv provides feature_idx/tier/explanation.
+    ai = tmp_path / "auto_interp"
+    ai.mkdir()
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "feature_idx": 0,
+                "tier": "strong_grounded",
+                "explanation": "heart failure text",
+                "concordance_r_pb": 0.7,
+            },
+            {
+                "feature_idx": 1,
+                "tier": "strong_grounded",
+                "explanation": "afib text",
+                "concordance_r_pb": 0.6,
+            },
+        ]
+    ).to_csv(ai / "concordance_results.csv", index=False)
+
+    out = tmp_path / "out"
+    # Each judge per feature: Arm0 (original) → Arm1 (deanchored) → Arm2 (retrieval)
+    # = 3 replies/feature × 2 features = 6 replies, in loop order.
+    judge = _ScriptedJudge(
+        "gpt",
+        [
+            "YES | orig",
+            "YES | deanch",
+            "a | pick",  # feature 0
+            "PARTIAL | orig",
+            "YES | deanch",
+            "a | pick",  # feature 1
+        ],
+    )
+
+    summary = run_concordance_multi_judge(
+        auto_interp_dir=str(ai),
+        icd_eval_dir="unused",
+        output_dir=str(out),
+        judges=[{"slug": "gpt", "backend": "anthropic", "model": "m"}],
+        thresholds=[0.4],
+        run_shuffled=False,
+        arm6=None,
+        _judges=[judge],
+        _corr={"r_pb": r_pb, "code_names": codes},
+        _code_descriptions=descs,
+    )
+    assert (out / "multi_judge_summary.json").exists()
+    assert (out / "verdict_matrix.csv").exists()
+    # Arm 0 (original prompt) block — apples-to-apples with the paper's table.
+    a0 = summary["arm0_original"]["per_judge"]["gpt"]["r>0.4"]
+    assert a0["n"] == 2
+    assert a0["yes_only_rate"] == 0.5  # 1 YES + 1 PARTIAL over 2
+    assert a0["yes_partial_rate"] == 1.0
+    assert "hit1_rate" not in a0  # rank_key=None → no hit@k for Arm 0
+    # Arm 1 (de-anchored) block — has hit@k (exact value depends on slate shuffle,
+    # so assert structure, not a specific rate).
+    a1 = summary["arm1_deanchored"]["per_judge"]["gpt"]["r>0.4"]
+    assert a1["n"] == 2
+    assert "hit1_rate" in a1 and a1["hit1_rate"] is not None
+
+
+def test_orchestrator_shuffled_null(tmp_path):
+    codes = ["icd9_4280", "icd9_42731", "icd9_25000", "icd9_5849"]
+    descs = {"4280": "heart failure", "42731": "afib", "25000": "diabetes", "5849": "aki"}
+    r_pb = np.array([[0.7, 0.2, 0.1, 0.05], [0.1, 0.6, 0.2, 0.05]], dtype=np.float32)
+    ai = tmp_path / "auto_interp"
+    ai.mkdir()
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "feature_idx": 0,
+                "tier": "strong_grounded",
+                "explanation": "hf",
+                "concordance_r_pb": 0.7,
+            },
+            {
+                "feature_idx": 1,
+                "tier": "strong_grounded",
+                "explanation": "af",
+                "concordance_r_pb": 0.6,
+            },
+        ]
+    ).to_csv(ai / "concordance_results.csv", index=False)
+    out = tmp_path / "out"
+    # Main loop: 2 feats × (Arm0 orig, Arm1 deanch, Arm2 retrieval) = 6 replies,
+    # THEN the shuffled-null loop: 2 feats × judge_deanchored = 2 replies. Total 8.
+    judge = _ScriptedJudge(
+        "gpt",
+        [
+            "YES | orig",
+            "YES | deanch",
+            "a | pick",  # feature 0 main
+            "YES | orig",
+            "YES | deanch",
+            "a | pick",  # feature 1 main
+            "NO | wrong",
+            "NO | wrong",  # shuffled null, both features
+        ],
+    )
+    summary = run_concordance_multi_judge(
+        auto_interp_dir=str(ai),
+        icd_eval_dir="unused",
+        output_dir=str(out),
+        judges=[{"slug": "gpt", "backend": "anthropic", "model": "m"}],
+        thresholds=[0.4],
+        run_shuffled=True,
+        arm6=None,
+        _judges=[judge],
+        _corr={"r_pb": r_pb, "code_names": codes},
+        _code_descriptions=descs,
+    )
+    assert "shuffled_null" in summary
+    assert summary["shuffled_null"]["gpt"]["yes_partial_rate"] == 0.0  # both NO on wrong code
+
+
+def test_judge_original_renders_prompt_verbatim():
+    captured = {}
+
+    class _Rec(Judge):
+        def complete(self, prompt, max_tokens=256):
+            captured["prompt"] = prompt
+            return "YES | ok"
+
+    j = _Rec("x", "anthropic", model="m", client=None)
+    judge_original(j, "expl text", "42731", "atrial fibrillation", 0.284)
+    # byte-identical to what the original check_concordance would format
+    assert captured["prompt"] == CONCORDANCE_PROMPT.format(
+        explanation="expl text", r_pb=0.284, icd_code="42731", icd_description="atrial fibrillation"
+    )
+
+
+class _CapJudge(Judge):
+    def __init__(self, slug, replies):
+        super().__init__(slug, "anthropic", model="m", client=None)
+        self._replies = list(replies)
+        self.prompts = []
+
+    def complete(self, prompt, max_tokens=256):
+        self.prompts.append(prompt)
+        return self._replies.pop(0)
+
+
+def test_orchestrator_arm0_uses_stored_original_values(tmp_path):
+    import pandas as pd
+
+    codes = ["icd9_4280", "icd9_42731", "icd9_25000", "icd9_5849"]
+    descs = {"4280": "heart failure", "42731": "afib", "25000": "diabetes", "5849": "aki"}
+    r_pb = np.array([[0.7, 0.2, 0.1, 0.05]], dtype=np.float32)  # argmax = 4280
+    ai = tmp_path / "auto_interp"
+    ai.mkdir()
+    # Stored ORIGINAL target is 42731 with a bespoke description + r — deliberately
+    # DIFFERENT from the argmax (4280) so we can tell which one Arm 0 uses.
+    pd.DataFrame(
+        [
+            {
+                "feature_idx": 0,
+                "tier": "strong_grounded",
+                "explanation": "hf text",
+                "concordance_icd_code": "icd9_42731",
+                "concordance_icd_description": "ORIGINAL DESC afib",
+                "concordance_r_pb": 0.284,
+            }
+        ]
+    ).to_csv(ai / "concordance_results.csv", index=False)
+    out = tmp_path / "out"
+    # 1 feature, run_shuffled=False → 3 calls: Arm0, Arm1, Arm2.
+    judge = _CapJudge("gpt", ["YES | ok", "YES | ok", "a | pick"])
+    run_concordance_multi_judge(
+        auto_interp_dir=str(ai),
+        icd_eval_dir="unused",
+        output_dir=str(out),
+        judges=[{"slug": "gpt", "backend": "anthropic", "model": "m"}],
+        thresholds=[0.4],
+        run_shuffled=False,
+        arm6=None,
+        _judges=[judge],
+        _corr={"r_pb": r_pb, "code_names": codes},
+        _code_descriptions=descs,
+    )
+    arm0 = judge.prompts[0]  # first call per feature is Arm 0
+    assert "42731" in arm0  # STORED code (not argmax 4280)
+    assert "ORIGINAL DESC afib" in arm0  # STORED description
+    assert "0.284" in arm0  # STORED r (rendered :.3f)
+    assert "4280" not in arm0  # NOT the recomputed argmax
+
+
+def test_config_has_required_keys():
+    cfg = yaml.safe_load(Path("configs/concordance_multi_judge.yaml").read_text())
+    for key in ("auto_interp_dir", "icd_eval_dir", "judges", "thresholds"):
+        assert key in cfg
+    assert any(j["backend"] == "reuse" for j in cfg["judges"])  # Sonnet reused
+    assert any(j.get("model") == "openai/gpt-4o" for j in cfg["judges"])  # reviewer-named
+
+
+def test_arm0_config_has_required_keys():
+    import yaml
+
+    cfg = yaml.safe_load(Path("configs/arm0_4omini.yaml").read_text())
+    for key in ("auto_interp_dir", "judges", "thresholds"):
+        assert key in cfg
+    assert cfg["judges"][0]["backend"] == "openrouter"
+    assert cfg["judges"][0]["model"] == "openai/gpt-4o-mini"
+
+
+def test_icd9_chapter_mapping():
+    from mech_interp_research.concordance_multi_judge import icd9_chapter
+
+    assert icd9_chapter("4280") == "circulatory"
+    assert icd9_chapter("icd9_25000") == "endocrine"
+    assert icd9_chapter("311") == "mental"
+    assert icd9_chapter("V1582") == "V_supplementary"
+    assert icd9_chapter("49390") == "respiratory"
+
+
+def test_discriminative_slate_structure():
+    from mech_interp_research.concordance_multi_judge import build_discriminative_slate
+
+    # 8 codes across systems; correct = 4280 (circulatory).
+    codes = [
+        "icd9_4280",
+        "icd9_42731",
+        "icd9_25000",
+        "icd9_311",
+        "icd9_49390",
+        "icd9_2851",
+        "icd9_56400",
+        "icd9_73300",
+    ]
+    descs = {
+        "4280": "chf",
+        "42731": "afib",
+        "25000": "diabetes",
+        "311": "depression",
+        "49390": "asthma",
+        "2851": "anemia",
+        "56400": "constipation",
+        "73300": "osteoporosis",
+    }
+    r = np.zeros(len(codes))
+    r[0] = 0.25  # 4280 correct/strongest
+    r[1] = 0.20  # 42731 also circulatory (must NOT appear as a distractor)
+    slate, chance = build_discriminative_slate("4280", r, codes, descs, n_distractors=4, seed=1)
+
+    correct = [e for e in slate if e["is_correct"]]
+    assert len(correct) == 1 and correct[0]["code"] == "4280"
+    assert slate[-1]["code"] == "__none__"  # none is last
+    distractors = [e for e in slate if not e["is_correct"] and e["code"] != "__none__"]
+    # every distractor is a DIFFERENT chapter than the correct code (circulatory)
+    from mech_interp_research.concordance_multi_judge import icd9_chapter
+
+    assert all(icd9_chapter(e["code"]) != "circulatory" for e in distractors)
+    assert "42731" not in {e["code"] for e in distractors}  # same-chapter code excluded
+    assert abs(chance - 1.0 / len(slate)) < 1e-12  # floor = 1/(K+correct+none)
+    letters = [e["letter"] for e in slate]
+    assert letters == sorted(set(letters))  # unique ordered letters
+
+
+def test_parse_retrieval_angle_bracket_letter():
+    # Judges often echo the "Format: <letter>" hint literally as "<i> | ...".
+    slate = [
+        {"code": "4280", "description": "hf", "rank_by_rpb": 1, "letter": "a"},
+        {"code": "__none__", "description": "none", "rank_by_rpb": None, "letter": "i"},
+    ]
+    assert parse_retrieval_response("<a> | direct match", slate)["picked_code"] == "4280"
+    out = parse_retrieval_response("<i> | none of these fit", slate)
+    assert out["picked_code"] == "__none__" and out["is_none"] is True
+    # prose starting with a capital letter must still NOT be read as a pick
+    assert (
+        parse_retrieval_response("A more specific code fits", slate)["picked_code"] == "__unparse__"
+    )

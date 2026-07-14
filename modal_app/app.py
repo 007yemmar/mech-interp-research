@@ -24,6 +24,7 @@ image = (
         "sae-lens>=0.3",
         "wandb>=0.16",
         "anthropic>=0.30",
+        "openai>=1.40",
     )
     # Ship our extraction library AND the modal_app package itself — the
     # latter is required because modal_app/extract.py imports from

@@ -1,0 +1,25 @@
+# Discriminative retrieval eval — multi-judge panel (all via OpenRouter).
+#
+# Same bug-fixed slate (1 grounded code + 7 unrelated cross-chapter distractors +
+# none) judged by three model families, so hit@1 can be reported per judge with
+# inter-judge agreement. hit@1 vs 1/9 chance floor.
+#
+# Run:
+#   uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/retrieval_panel.yaml --detach
+
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_eval_dir:    /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_csv_path:    /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: null
+
+judges:
+  - {slug: gpt-4o,       backend: openrouter, model: openai/gpt-4o}
+  - {slug: sonnet-4-6,   backend: openrouter, model: anthropic/claude-sonnet-4.6}   # Claude family, via OpenRouter
+  - {slug: deepseek-v3,  backend: openrouter, model: deepseek/deepseek-chat}        # top open-source
+
+n_distractors: 7
+r_unrelated: 0.05
+thresholds: [0.3, 0.5]
+max_workers: 6
+logging_level: INFO
