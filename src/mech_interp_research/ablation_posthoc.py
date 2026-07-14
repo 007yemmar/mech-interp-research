@@ -417,6 +417,117 @@ def effect_size_calibration(
 
 
 # ---------------------------------------------------------------------------
+# #5 — Section-local concentration (from measure_sections=True runs)
+# ---------------------------------------------------------------------------
+
+
+def load_section_results(
+    shard_ckpt_dir: str | Path,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load per-note section vs rest ablation effects from a measure_sections run.
+
+    Returns (section_delta_df, rest_delta_df), each indexed by note_idx with one
+    column per feature:
+        section_delta = per_feature_section[j] - loss_recon_section
+        rest_delta    = per_feature_rest[j]    - loss_recon_rest
+    Notes without a discharge-diagnosis section (empty per_feature_section) are
+    omitted. Both frames are empty if the run had measure_sections=False.
+    """
+    shard_ckpt_dir = Path(shard_ckpt_dir)
+    files = sorted(shard_ckpt_dir.glob("shard_*_results.json"))
+    if not files:
+        raise FileNotFoundError(f"No shard_*_results.json in {shard_ckpt_dir}")
+    sec_rows: dict[int, dict[int, float]] = {}
+    rest_rows: dict[int, dict[int, float]] = {}
+    for fp in files:
+        for rec in json.loads(fp.read_text()):
+            pfs = rec.get("per_feature_section") or {}
+            if not pfs:
+                continue  # section not measured / not found for this note
+            lrs = rec.get("loss_recon_section")
+            lrr = rec.get("loss_recon_rest")
+            if lrs is None or np.isnan(float(lrs)):
+                continue
+            note_idx = int(rec["note_idx"])
+            sec_rows[note_idx] = {int(f): float(v) - float(lrs) for f, v in pfs.items()}
+            if lrr is not None and not np.isnan(float(lrr)):
+                pfr = rec.get("per_feature_rest") or {}
+                rest_rows[note_idx] = {int(f): float(v) - float(lrr) for f, v in pfr.items()}
+            else:
+                rest_rows[note_idx] = {}
+    if not sec_rows:
+        return pd.DataFrame(), pd.DataFrame()
+    section_delta_df = pd.DataFrame.from_dict(sec_rows, orient="index").sort_index()
+    rest_delta_df = pd.DataFrame.from_dict(rest_rows, orient="index").sort_index()
+    section_delta_df.index.name = "note_idx"
+    rest_delta_df.index.name = "note_idx"
+    logger.info(f"Loaded section effects for {len(section_delta_df)} notes with a section")
+    return section_delta_df, rest_delta_df
+
+
+def section_local_specificity(
+    targets: list[dict[str, Any]],
+    section_delta_df: pd.DataFrame,
+    rest_delta_df: pd.DataFrame,
+    icd_matrix: np.ndarray,
+    code_names: list[str],
+    note_idx_to_row: dict[int, int],
+) -> pd.DataFrame:
+    """Is a feature's ablation effect stronger in the diagnosis section than the rest?
+
+    Per grounded feature (true code c), computes the pos-vs-neg Cliff's delta of
+    the section-restricted effect and of the rest-restricted effect. A positive
+    ``concentration`` (section_delta - rest_delta) means the causal contribution
+    localizes to where the diagnosis is written — the #5 evidence for
+    mechanistic faithfulness.
+    """
+    code_to_col = {c: i for i, c in enumerate(code_names)}
+    rows: list[dict[str, Any]] = []
+    for tgt in targets:
+        j = int(tgt["feature_idx"])
+        code = str(tgt["code"])
+        base = {"feature": j, "code": code, "kind": tgt.get("kind", "grounded")}
+        if code not in code_to_col or j not in section_delta_df.columns:
+            rows.append({**base, "section_delta": float("nan"), "note": "no data"})
+            continue
+        col = code_to_col[code]
+        sec_vals: list[float] = []
+        rest_vals: list[float] = []
+        labels: list[int] = []
+        for note_idx in section_delta_df.index:
+            row = note_idx_to_row.get(int(note_idx))
+            if row is None:
+                continue
+            sv = section_delta_df.at[note_idx, j]
+            if pd.isna(sv):
+                continue
+            rv = rest_delta_df.at[note_idx, j] if j in rest_delta_df.columns else float("nan")
+            sec_vals.append(float(sv))
+            rest_vals.append(float(rv))
+            labels.append(int(icd_matrix[row, col]))
+        sec = np.asarray(sec_vals)
+        rst = np.asarray(rest_vals)
+        y = np.asarray(labels) == 1
+        _, _, sec_d = mannwhitney_cliffs_delta(sec[y], sec[~y])
+        valid = ~np.isnan(rst)
+        yv = y[valid]
+        rv2 = rst[valid]
+        _, p_rest, rest_d = mannwhitney_cliffs_delta(rv2[yv], rv2[~yv])
+        rows.append(
+            {
+                **base,
+                "n_section_notes": int(len(sec)),
+                "n_pos": int(y.sum()),
+                "section_delta": float(sec_d),
+                "rest_delta": float(rest_d),
+                "concentration": float(sec_d - rest_d),
+                "note": "",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -506,6 +617,23 @@ def run_ablation_posthoc(
     matched.to_csv(posthoc_dir / "length_matched.csv", index=False)
     calib.to_csv(posthoc_dir / "effect_size_calibration.csv", index=False)
 
+    # #5 section-local concentration (only present for measure_sections runs).
+    section_block = None
+    section_delta_df, rest_delta_df = load_section_results(out_dir / shard_checkpoint_subdir)
+    if not section_delta_df.empty:
+        section_df = section_local_specificity(
+            targets, section_delta_df, rest_delta_df, icd_matrix, code_names, note_idx_to_row
+        )
+        section_df.to_csv(posthoc_dir / "section_local.csv", index=False)
+        sg = section_df[section_df["kind"] == "grounded"]
+        section_block = {
+            "n_notes_with_section": int(len(section_delta_df)),
+            "mean_section_delta": float(sg["section_delta"].mean()),
+            "mean_rest_delta": float(sg["rest_delta"].mean()),
+            "mean_concentration": float(sg["concentration"].mean()),
+            "frac_features_section_gt_rest": float((sg["concentration"] > 0).mean()),
+        }
+
     grounded = off_summary[off_summary["kind"] == "grounded"]
     matched_g = matched[matched["kind"] == "grounded"]
     summary = {
@@ -541,6 +669,8 @@ def run_ablation_posthoc(
             ),
         },
     }
+    if section_block is not None:
+        summary["section_local"] = section_block
     (posthoc_dir / "ablation_posthoc_summary.json").write_text(json.dumps(summary, indent=2))
     logger.info(f"Wrote post-hoc analyses to {posthoc_dir}")
     return summary

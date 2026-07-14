@@ -20,9 +20,11 @@ from mech_interp_research.ablation_posthoc import (
     bh_adjust,
     effect_size_calibration,
     length_matched_specificity,
+    load_section_results,
     load_shard_results,
     off_target_specificity,
     residualize,
+    section_local_specificity,
 )
 
 
@@ -190,3 +192,80 @@ def test_load_shard_results_roundtrip(tmp_path):
     assert abs(delta_df.loc[5, 100] - (1.70 - 1.63)) < 1e-9
     assert abs(delta_df.loc[6, 100] - 0.0) < 1e-9
     assert abs(notes_df.loc[5, "loss_recon"] - 1.63) < 1e-9
+
+
+# --- #5 section-local aggregator ------------------------------------------
+
+
+def _section_synth(seed: int = 0):
+    rng = np.random.default_rng(seed)
+    n = 300
+    note_ids = np.arange(n)
+    c0 = (note_ids % 3 == 0).astype(np.int8)
+    c1 = (note_ids % 4 == 0).astype(np.int8)
+    icd_matrix = np.column_stack([c0, c1]).astype(np.int8)
+    code_names = ["icd9_c0", "icd9_c1"]
+
+    def noise():
+        return rng.normal(0, 1e-3, n)
+
+    # feature 100: effect concentrated in the section on c0-positive notes
+    sec100 = 0.5 * (c0 == 1) + noise()
+    rest100 = noise()
+    # feature 200: diffuse — same effect in section and rest (on c1)
+    sec200 = 0.3 * (c1 == 1) + noise()
+    rest200 = 0.3 * (c1 == 1) + noise()
+    section_delta_df = pd.DataFrame(
+        {100: sec100, 200: sec200}, index=pd.Index(note_ids, name="note_idx")
+    )
+    rest_delta_df = pd.DataFrame(
+        {100: rest100, 200: rest200}, index=pd.Index(note_ids, name="note_idx")
+    )
+    note_idx_to_row = {int(i): int(i) for i in note_ids}
+    targets = [
+        {"feature_idx": 100, "code": "icd9_c0", "kind": "grounded", "r_pb": 0.8},
+        {"feature_idx": 200, "code": "icd9_c1", "kind": "grounded", "r_pb": 0.7},
+    ]
+    return targets, section_delta_df, rest_delta_df, icd_matrix, code_names, note_idx_to_row
+
+
+def test_section_local_concentration():
+    targets, sdf, rdf, icd, names, n2r = _section_synth()
+    out = section_local_specificity(targets, sdf, rdf, icd, names, n2r)
+    f100 = out[out["feature"] == 100].iloc[0]
+    f200 = out[out["feature"] == 200].iloc[0]
+    # concentrated feature: strong in the section, ~0 in the rest, positive concentration
+    assert f100["section_delta"] > 0.4
+    assert abs(f100["rest_delta"]) < 0.2
+    assert f100["concentration"] > 0.3
+    # diffuse feature: section ≈ rest, concentration ≈ 0
+    assert abs(f200["concentration"]) < 0.2
+
+
+def test_load_section_results_roundtrip(tmp_path):
+    shard_dir = tmp_path / "shard_results"
+    shard_dir.mkdir()
+    recs = [
+        {
+            "note_idx": 1,
+            "loss_recon_section": 1.60,
+            "loss_recon_rest": 1.62,
+            "per_feature_section": {"100": 1.75},
+            "per_feature_rest": {"100": 1.63},
+            "n_section_tokens": 50,
+            "n_rest_tokens": 100,
+        },
+        {
+            # no discharge-diagnosis section found → omitted from the frames
+            "note_idx": 2,
+            "loss_recon_section": float("nan"),
+            "loss_recon_rest": float("nan"),
+            "per_feature_section": {},
+            "per_feature_rest": {},
+        },
+    ]
+    (shard_dir / "shard_0281_results.json").write_text(json.dumps(recs))
+    sdf, rdf = load_section_results(shard_dir)
+    assert list(sdf.index) == [1]  # note 2 (no section) omitted
+    assert abs(sdf.loc[1, 100] - (1.75 - 1.60)) < 1e-9  # section_delta = abl - recon_section
+    assert abs(rdf.loc[1, 100] - (1.63 - 1.62)) < 1e-9  # rest_delta = abl - recon_rest

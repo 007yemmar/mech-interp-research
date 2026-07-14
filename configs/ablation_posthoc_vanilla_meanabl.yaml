@@ -1,0 +1,26 @@
+# Post-hoc analyses on the VANILLA MEAN-ABLATION run (#6, /out/ablation/vanilla_meanabl).
+#
+# Emits #2/#3/#4 computed on the mean-ablation effects: off-target specificity,
+# note-length/#codes-matched delta, and effect-size calibration (the nats
+# magnitude of the mean-ablation counterfactual). Run once the mean-ablation
+# full run finishes. (No section_local block — that run used measure_sections=False.)
+#
+# Run (CPU, ~seconds):
+#   modal run modal_app/ablation_posthoc.py --config-file configs/ablation_posthoc_vanilla_meanabl.yaml
+
+ablation_output_dir: /out/ablation/vanilla_meanabl
+
+icd_csv_path: /data/sample_50k.csv
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+held_out_shard_start: 281
+held_out_shard_end: 312
+shard_checkpoint_subdir: shard_results
+output_subdir: posthoc_specificity
+
+restrict_true_negative: true
+min_off_target_pos: 10
+
+logging_level: INFO
