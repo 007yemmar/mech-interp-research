@@ -513,6 +513,13 @@ def section_local_specificity(
         yv = y[valid]
         rv2 = rst[valid]
         _, p_rest, rest_d = mannwhitney_cliffs_delta(rv2[yv], rv2[~yv])
+        # Size-invariant magnitude: mean per-token loss change (nats) on
+        # positive notes. Both losses are per-token means, so this is fair to
+        # compare across regions of different length (unlike Cliff's delta,
+        # whose noise floor — and hence value — depends on region size).
+        sec_nats_pos = float(np.mean(sec[y])) if y.any() else float("nan")
+        rest_pos = valid & y
+        rest_nats_pos = float(np.mean(rst[rest_pos])) if rest_pos.any() else float("nan")
         rows.append(
             {
                 **base,
@@ -521,6 +528,9 @@ def section_local_specificity(
                 "section_delta": float(sec_d),
                 "rest_delta": float(rest_d),
                 "concentration": float(sec_d - rest_d),
+                "section_nats_pos": sec_nats_pos,
+                "rest_nats_pos": rest_nats_pos,
+                "nats_concentration": sec_nats_pos - rest_nats_pos,
                 "note": "",
             }
         )
@@ -632,6 +642,12 @@ def run_ablation_posthoc(
             "mean_rest_delta": float(sg["rest_delta"].mean()),
             "mean_concentration": float(sg["concentration"].mean()),
             "frac_features_section_gt_rest": float((sg["concentration"] > 0).mean()),
+            # Size-invariant magnitudes (nats/token on positive notes) — the fair
+            # cross-region comparison; delta above is size-confounded.
+            "mean_section_nats": float(sg["section_nats_pos"].mean()),
+            "mean_rest_nats": float(sg["rest_nats_pos"].mean()),
+            "mean_nats_concentration": float(sg["nats_concentration"].mean()),
+            "frac_features_section_nats_gt_rest": float((sg["nats_concentration"] > 0).mean()),
         }
 
     grounded = off_summary[off_summary["kind"] == "grounded"]

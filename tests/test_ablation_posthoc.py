@@ -238,8 +238,13 @@ def test_section_local_concentration():
     assert f100["section_delta"] > 0.4
     assert abs(f100["rest_delta"]) < 0.2
     assert f100["concentration"] > 0.3
-    # diffuse feature: section ≈ rest, concentration ≈ 0
+    # size-invariant magnitude (nats): ~0.5 in section, ~0 in rest for feature 100
+    assert abs(f100["section_nats_pos"] - 0.5) < 0.1
+    assert abs(f100["rest_nats_pos"]) < 0.1
+    assert f100["nats_concentration"] > 0.3
+    # diffuse feature: section ≈ rest in both delta and nats
     assert abs(f200["concentration"]) < 0.2
+    assert abs(f200["nats_concentration"]) < 0.1
 
 
 def test_load_section_results_roundtrip(tmp_path):
