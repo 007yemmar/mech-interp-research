@@ -280,7 +280,8 @@ def test_find_keyword_token_spans_on_real_note_text() -> None:
         ids = tok(text, truncation=True, max_length=8192, add_special_tokens=True)["input_ids"]
         assert max(idx) < len(ids)
         decoded = tok.decode([ids[i] for i in idx]).lower()
-        assert keyword[:6] in decoded  # subword pieces reassemble to the term
+        prefix_found = keyword[:6] in decoded  # subword pieces reassemble to the term
+        assert prefix_found, f"keyword prefix absent from {len(decoded)} decoded chars"
     if hits == 0:
         pytest.skip("no notes in the sample contain the keyword")
 
