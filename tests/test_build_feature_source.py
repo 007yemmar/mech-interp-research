@@ -64,18 +64,23 @@ def test_sample_tokens_includes_every_row_of_each_sampled_note(tmp_path: Path) -
     """Every sampled note must appear with ALL of its tokens, not a subsample.
 
     Regression test for the pre-fix bug: `_sample_tokens` used to draw
-    `calibration_tokens_per_shard` rows uniformly at random across the
-    WHOLE shard, so a note with (say) 550 tokens would typically contribute
-    only a handful of scattered rows to the sample -- never its full 550.
-    That defeated `calibrate_thresholds_note_level`'s whole premise (its
-    target is the note's max over ALL tokens). This test asserts, for every
-    note_id that appears in the returned sample, that the sample contains
-    EXACTLY that note's full token count -- a property a random per-token
-    subsample essentially never satisfies (with 554 rows across 3
-    differently-sized notes in one shard, the chance a random subsample
-    happens to contain a note's rows in their entirety, and nothing else of
-    that note, is negligible), and a property whole-note sampling always
-    satisfies exactly.
+    `calibration_tokens_per_shard` rows uniformly at random across the WHOLE
+    shard. This test's config PINS that old key to 100 -- a value smaller
+    than every note in the fixture (137/249/168 tokens) -- alongside the new
+    `calibration_notes_per_shard` key the fixed code actually reads. The
+    fixed implementation ignores `calibration_tokens_per_shard` entirely, so
+    pinning it has no effect here; its only purpose is to make this exact
+    committed config a genuine regression check against the PRE-FIX
+    implementation, which reads that key and would otherwise (at this small
+    fixture scale) swallow the whole 554-row shard whole and hide the
+    defect -- a first version of this test made exactly that mistake and
+    passed against the buggy code by accident (caught in review). With the
+    budget pinned below every note's size, the pre-fix code CANNOT fully
+    represent any note it samples: this asserts, for every note_id that
+    appears in the result, that it appears with EXACTLY its full token
+    count -- the property that distinguishes whole-note sampling from a
+    within-note subsample, checked directly rather than inferred from a
+    note-count side effect.
     """
     import modal_app.build_feature_source as bfs
 
@@ -85,7 +90,7 @@ def test_sample_tokens_includes_every_row_of_each_sampled_note(tmp_path: Path) -
     rng = np.random.default_rng(0)
     d_model = 8
     # Deliberately distinct, "ugly" sizes so exact-count matches can't be
-    # coincidental.
+    # coincidental, and all larger than the pinned old-style budget below.
     note_token_counts = [137, 249, 168]
     meta_rows = _write_shard(acts_dir, 0, note_token_counts, d_model, 0, rng)
     with open(acts_dir / "metadata.jsonl", "w") as f:
@@ -95,7 +100,8 @@ def test_sample_tokens_includes_every_row_of_each_sampled_note(tmp_path: Path) -
     config = {
         "activations_dir": str(acts_dir),
         "calibration_n_shards": 1,
-        "calibration_notes_per_shard": 2,  # a strict subset of the 3 notes
+        "calibration_notes_per_shard": 2,  # read by the FIXED implementation
+        "calibration_tokens_per_shard": 100,  # read by the PRE-FIX one; see docstring
         "seed": 0,
     }
     token_sample, note_ids = bfs._sample_tokens(config, held_out_start=1, log=log)
@@ -103,7 +109,7 @@ def test_sample_tokens_includes_every_row_of_each_sampled_note(tmp_path: Path) -
     true_counts = {r["note_idx"]: r["row_end"] - r["row_start"] for r in meta_rows}
     sampled_note_ids, sampled_counts = np.unique(note_ids, return_counts=True)
 
-    assert len(sampled_note_ids) == 2, "budget was 2 notes/shard"
+    assert len(sampled_note_ids) > 0, "the sample must contain at least one note"
     for note_id, count in zip(sampled_note_ids.tolist(), sampled_counts.tolist(), strict=True):
         assert count == true_counts[note_id], (
             f"note {note_id}: sample has {count} of {true_counts[note_id]} tokens "
@@ -115,13 +121,24 @@ def test_sample_tokens_includes_every_row_of_each_sampled_note(tmp_path: Path) -
 def test_sample_tokens_note_max_matches_true_full_note_max(tmp_path: Path) -> None:
     """A signal concentrated in a note's LAST token must survive into the sample.
 
-    Direct regression test for Critical 1's consequence: with the pre-fix
-    per-token subsampling, a note's max over the SAMPLE was used as a proxy
-    for its max over ALL tokens. A note whose only large activation sits in
-    its final token is exactly the case where that proxy fails -- a small
-    uniform subsample of a several-hundred-token note has low probability
-    of landing on that one specific row. Here the note is sampled in full,
-    so the sample's max must equal the true full-note max exactly.
+    Regression test for Critical 1's consequence, made to actually
+    discriminate: the config below PINS the pre-fix implementation's
+    `calibration_tokens_per_shard` to 200 -- smaller than the 550-token
+    spiked note -- alongside `calibration_notes_per_shard`, which is what
+    the FIXED implementation reads (`calibration_tokens_per_shard` is dead
+    to it). Without that pin, this fixture's 1250-row shard is smaller than
+    the pre-fix default of 40_000, so the pre-fix code would swallow it
+    whole and this test would pass against buggy code too -- exactly what
+    happened in review before this fix.
+
+    With the budget pinned below the spiked note's true size, the pre-fix
+    code cannot possibly represent that note in full, so the FIRST
+    assertion below (full token count for the spiked note) fails against it
+    directly, for the intended reason -- not as a side effect of some other
+    count. Only once that holds does the second assertion (the sampled max
+    along the spike dimension equals the true full-note max, computed
+    independently from the whole shard) become a meaningful check that the
+    fix preserves late-note signal correctly.
     """
     import modal_app.build_feature_source as bfs
 
@@ -161,21 +178,22 @@ def test_sample_tokens_note_max_matches_true_full_note_max(tmp_path: Path) -> No
     config = {
         "activations_dir": str(acts_dir),
         "calibration_n_shards": 1,
-        "calibration_notes_per_shard": 3,  # take all 3 notes in the shard
+        "calibration_notes_per_shard": 3,  # read by the FIXED implementation
+        "calibration_tokens_per_shard": 200,  # read by the PRE-FIX one; see docstring
         "seed": 1,
     }
     token_sample, note_ids = bfs._sample_tokens(config, held_out_start=1, log=log)
 
     mask = note_ids == spiked_note["note_idx"]
-    assert (
-        int(mask.sum()) == spiked_note["row_end"] - spiked_note["row_start"]
-    ), "the spiked note must appear in the sample with ALL of its tokens"
-    sampled_note_max = token_sample[mask][:, spike_dim].max()
-    assert sampled_note_max == pytest.approx(true_full_note_max), (
-        "the sample's max along the spike dimension must equal the TRUE "
-        "full-note max -- a within-note subsample would very likely have "
-        "missed the single spiked (last) token and understated this"
+    true_count = spiked_note["row_end"] - spiked_note["row_start"]
+    assert int(mask.sum()) == true_count, (
+        f"the spiked note must appear in the sample with ALL {true_count} of its "
+        f"tokens, got {int(mask.sum())} -- a within-note subsample, not a full note"
     )
+    sampled_note_max = token_sample[mask][:, spike_dim].max()
+    assert sampled_note_max == pytest.approx(
+        true_full_note_max
+    ), "the sample's max along the spike dimension must equal the TRUE full-note max"
 
 
 def test_sample_tokens_respects_held_out_shard_start(tmp_path: Path) -> None:
