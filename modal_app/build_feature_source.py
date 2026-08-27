@@ -70,6 +70,18 @@ def _arm_c_selected_features(
     (one latent index per code — the argmax over the reference SAE's latents
     on SELECTION notes), ``r_selection`` (the corresponding signed r_pb per
     code), and ``n_selection_notes``.
+
+    Important 3: the cache is keyed only by path, and this file persists
+    across runs on the artifacts volume. A stale cache built from a
+    different sae_shard_ckpt_dir or held_out_shard_start can still yield the
+    SAME 46 code_names (passing the ordering guards elsewhere in this
+    module) while carrying the WRONG feature_ids / r_selection — silently
+    pairing every arm's note-level calibration target and B2's dilution
+    target against the wrong (latent, code) selection. So a cache hit is
+    only honoured if the settings that determine the selection still match
+    the current config; otherwise this raises, naming the mismatched
+    key(s), instead of silently reusing a selection built under different
+    conditions.
     """
     shared_path = Path(
         config.get(
@@ -77,9 +89,31 @@ def _arm_c_selected_features(
             "/out/sources/_shared/arm_c_selected_features.json",
         )
     )
+    expected = {
+        "sae_shard_ckpt_dir": str(config["sae_shard_ckpt_dir"]),
+        "held_out_shard_start": int(held_out_start),
+        "icd_csv_path": str(config["icd_csv_path"]),
+        "min_prevalence": float(config.get("min_prevalence", 0.02)),
+        "max_codes": int(config.get("max_codes", 50)),
+    }
+
     if shared_path.exists():
+        cached = json.loads(shared_path.read_text())
+        mismatches = {k: (cached.get(k), v) for k, v in expected.items() if cached.get(k) != v}
+        if mismatches:
+            detail = "; ".join(
+                f"{k}: cached={c!r} != current config={v!r}" for k, (c, v) in mismatches.items()
+            )
+            raise ValueError(
+                f"Cached Arm C selection at {shared_path} was built from "
+                f"different settings than this run's config ({detail}). Reusing "
+                "it would silently pair this run against the WRONG (latent, "
+                "code) selection. Delete the cache, or point "
+                "arm_c_selected_features_path at a fresh location, if this "
+                "config change is intentional."
+            )
         log.info("Reusing cached Arm C selection: %s", shared_path)
-        return json.loads(shared_path.read_text())
+        return cached
 
     import numpy as np
 
@@ -91,13 +125,12 @@ def _arm_c_selected_features(
     )
     from mech_interp_research.necessity_stats import select_feature_per_code, split_by_shard
 
-    sae_shard_ckpt_dir = config["sae_shard_ckpt_dir"]
-    vectors, note_meta = reassemble_note_vectors(sae_shard_ckpt_dir)
+    vectors, note_meta = reassemble_note_vectors(expected["sae_shard_ckpt_dir"])
     Y, code_names, matched_meta = load_and_align_icd_labels(
-        Path(config["icd_csv_path"]),
+        Path(expected["icd_csv_path"]),
         note_meta,
-        min_prevalence=float(config.get("min_prevalence", 0.02)),
-        max_codes=int(config.get("max_codes", 50)),
+        min_prevalence=expected["min_prevalence"],
+        max_codes=expected["max_codes"],
         icd_col_prefix=config.get("icd_col_prefix", "icd9_"),
         join_key=config.get("join_key", "admission_id"),
         min_notes=int(config.get("min_notes", 100)),
@@ -114,8 +147,7 @@ def _arm_c_selected_features(
         "feature_ids": feature_ids,
         "r_selection": r_selection,
         "n_selection_notes": int(sel.sum()),
-        "sae_shard_ckpt_dir": str(sae_shard_ckpt_dir),
-        "held_out_shard_start": int(held_out_start),
+        **expected,
     }
     shared_path.parent.mkdir(parents=True, exist_ok=True)
     shared_path.write_text(json.dumps(result, indent=2))
@@ -129,13 +161,28 @@ def _arm_c_selected_features(
 
 
 def _sample_tokens(config: dict[str, Any], held_out_start: int, log: Any):
-    """Random token rows + their note ids, from SELECTION shards.
+    """FULL-note activation rows + their note ids, from SELECTION shards.
+
+    Sampling MUST be at note granularity, not token granularity. The
+    pre-fix version drew `calibration_tokens_per_shard` rows uniformly at
+    random across an entire shard — at tokens_per_shard=500_000 (the 50k
+    extraction config) and ~3,089 tokens/note, a 40_000-row sample covers
+    roughly 8% of any note it touches. A note's max over that 8% slice
+    systematically understates its true (all-tokens) max, so
+    calibrate_thresholds_note_level's bisection — which assumes the sampled
+    per-note max approximates the full-note max the downstream audit
+    pipeline actually pools over — drives theta down until far more tokens
+    clear it than should, and every arm over-fires relative to Arm C once
+    applied to full notes. This is the same note-vs-token mismatch Ruling 1
+    exists to eliminate, reintroduced one layer down.
+
+    So: pick a budget of whole notes per shard (`calibration_notes_per_shard`,
+    default 50 — a few hundred notes total across the default 6 shards is
+    ample resolution for calibrating to a ~0.675 target rate) and take EVERY
+    row in row_start:row_end for each selected note — never a sub-slice.
 
     Returns (token_sample, note_ids): note_ids[i] is the note_idx (from
-    metadata.jsonl) that token_sample[i] belongs to, derived directly from
-    each shard's row_start/row_end per note rather than reconstructed after
-    the fact. calibrate_thresholds_note_level needs this to group sampled
-    tokens by note when computing note-level detection rates (Ruling 1).
+    metadata.jsonl) that token_sample[i] belongs to.
     """
     import numpy as np
     from safetensors.numpy import load_file
@@ -144,7 +191,7 @@ def _sample_tokens(config: dict[str, Any], held_out_start: int, log: Any):
 
     acts = Path(config["activations_dir"])
     n_shards = int(config.get("calibration_n_shards", 6))
-    per_shard = int(config.get("calibration_tokens_per_shard", 40_000))
+    notes_per_shard = int(config.get("calibration_notes_per_shard", 50))
     rng = np.random.default_rng(int(config.get("seed", 42)))
 
     metadata = load_metadata(acts)
@@ -154,30 +201,37 @@ def _sample_tokens(config: dict[str, Any], held_out_start: int, log: Any):
 
     token_chunks = []
     note_id_chunks = []
+    n_notes_total = 0
     for i in sorted(chosen):
         shard_path = eligible[i]
         shard_idx = int(shard_path.stem.split("_")[1])
+        shard_meta = metadata[metadata["shard"] == shard_idx]
+        take_notes = min(notes_per_shard, len(shard_meta))
+        if take_notes == 0:
+            continue
+        note_pos = rng.choice(len(shard_meta), size=take_notes, replace=False)
+        selected_notes = shard_meta.iloc[note_pos]
+
         arr = load_file(str(shard_path))["activations"].astype(np.float32)
-        take = min(per_shard, arr.shape[0])
-        idx = rng.choice(arr.shape[0], size=take, replace=False)
-
-        row_note_id = np.full(arr.shape[0], -1, dtype=np.int64)
-        for _, note_row in metadata[metadata["shard"] == shard_idx].iterrows():
-            row_note_id[int(note_row["row_start"]) : int(note_row["row_end"])] = int(
-                note_row["note_idx"]
+        for _, note_row in selected_notes.iterrows():
+            row_start, row_end = int(note_row["row_start"]), int(note_row["row_end"])
+            if row_end <= row_start:
+                continue
+            token_chunks.append(arr[row_start:row_end])
+            note_id_chunks.append(
+                np.full(row_end - row_start, int(note_row["note_idx"]), dtype=np.int64)
             )
-
-        sampled_note_ids = row_note_id[idx]
-        keep = sampled_note_ids >= 0
-        token_chunks.append(arr[idx][keep])
-        note_id_chunks.append(sampled_note_ids[keep])
+            n_notes_total += 1
+        del arr
 
     token_sample = np.concatenate(token_chunks, axis=0)
     note_ids = np.concatenate(note_id_chunks, axis=0)
     log.info(
-        "Calibration token sample: %s rows across %d notes",
+        "Calibration token sample: %s rows across %d FULL notes (%d shards x up to %d notes/shard)",
         token_sample.shape,
-        len(set(note_ids.tolist())),
+        n_notes_total,
+        len(chosen),
+        notes_per_shard,
     )
     return token_sample, note_ids
 
@@ -405,6 +459,22 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
     bisection loop. Re-projecting per alpha step would re-multiply the full
     scanned-token matrix on every one of ~36 evaluations per code instead of
     once, turning a seconds-scale solve into an hours-scale one.
+
+    Important 2: `score_fn` (below) necessarily targets the UN-thresholded
+    raw projection — theta doesn't exist yet at solve time, since it is
+    calibrated from the FINISHED W in build_source_remote, and alpha is one
+    of the inputs to that W. Reconciling the two exactly would require
+    solving alpha and theta jointly, which is circular; this stays a
+    one-shot proxy solve, not an iterated fit. To keep that residual gap
+    auditable rather than silently assumed away, every un-thresholded
+    projection computed here (`blended`, at the SOLVED alpha) is also
+    stashed into `pre_final` and returned via `aux`, so
+    build_source_remote can re-measure each column's actual POST-threshold
+    on-target |r| once theta is known and record it next to the target
+    (see `_measure_b2_post_threshold_r`).
+
+    Returns (W, meta, aux) — unlike _build_diff_in_means / _build_keyword_b1,
+    which return (W, meta).
     """
     import numpy as np
     from safetensors.numpy import load_file
@@ -487,6 +557,10 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
     alphas: list[float | None] = [None] * n_codes
     partners: list[str | None] = [None] * n_codes
     unreachable_codes: list[str] = []
+    # Un-thresholded projection at each code's SOLVED alpha, kept for
+    # _measure_b2_post_threshold_r (Important 2) — never used to change
+    # alpha itself, only to audit the achieved value after theta exists.
+    pre_final = np.zeros((P.shape[0], n_codes), dtype=np.float64)
 
     for c in range(n_codes):
         if c not in has_direction:
@@ -524,6 +598,8 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
             alpha = 0.0
         alphas[c] = alpha
         W[:, c] = blend_directions(m[:, c], m[:, p_idx], alpha)
+        denom_final = np.sqrt(1.0 + 2.0 * alpha * mc_dot_mother + alpha**2)
+        pre_final[:, c] = (p + alpha * q) / denom_final
 
     meta = {
         "code_names": code_names,
@@ -538,17 +614,70 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
         "dilution_unreachable_codes": unreachable_codes,
         "dilution_partner_seed": int(config.get("seed", 42)),
     }
-    return W, meta
+    aux = {
+        "pre_final": pre_final,
+        "note_id_tok": note_id_tok,
+        "n_scan_notes": n_scan_notes,
+        "Y_scan": Y_scan,
+        "code_names": code_names,
+        "has_direction": has_direction,
+    }
+    return W, meta, aux
 
 
 def _build_keyword(
     config: dict[str, Any], arm: str, held_out_start: int, arm_c: dict[str, Any], log: Any
 ):
+    """Returns (W, meta, b2_aux) — b2_aux is None for every arm but keyword_b2."""
     if arm == "keyword_b1":
-        return _build_keyword_b1(config, held_out_start, log)
+        W, meta = _build_keyword_b1(config, held_out_start, log)
+        return W, meta, None
     if arm == "keyword_b2":
         return _build_keyword_b2(config, held_out_start, arm_c, log)
     raise ValueError(f"unknown keyword arm {arm!r}")
+
+
+def _measure_b2_post_threshold_r(theta: Any, aux: dict[str, Any], log: Any) -> list[float | None]:
+    """B2's actual post-threshold, on-target |r|, for the audit record.
+
+    Important 2: `_build_keyword_b2`'s dilution solve necessarily targets an
+    un-thresholded proxy (theta doesn't exist until AFTER W is finished, so
+    alpha can't be solved against the thresholded quantity without a
+    circular alpha<->theta fit — deliberately not attempted here). Arm C's
+    target `r_selection` is the SAE's actual JumpReLU-thresholded pooled
+    correlation, and thresholding collapses non-firing notes to an exact
+    zero, which typically RAISES |r| for a selective latent — so the
+    achieved value measured here is expected to run below
+    `dilution_target_r_selection` for at least some codes. This function
+    changes nothing about alpha; it only measures, on the SAME scanned
+    notes used for the dilution solve, what the FINAL (thresholded) column
+    of W actually achieves, so that gap is visible in source_meta.json
+    rather than assumed away.
+    """
+    import numpy as np
+
+    from mech_interp_research.icd_eval import compute_point_biserial_vectorised
+
+    pre_final = aux["pre_final"]
+    note_id_tok = aux["note_id_tok"]
+    n_scan_notes = aux["n_scan_notes"]
+    Y_scan = aux["Y_scan"]
+    code_names = aux["code_names"]
+    has_direction = set(aux["has_direction"])
+
+    achieved: list[float | None] = [None] * len(code_names)
+    for c in range(len(code_names)):
+        if c not in has_direction:
+            continue
+        col = pre_final[:, c]
+        z = col * (col > float(theta[c]))
+        note_max = np.zeros(n_scan_notes, dtype=np.float64)
+        np.maximum.at(note_max, note_id_tok, z)
+        r_pb, _ = compute_point_biserial_vectorised(note_max[:, None], Y_scan[:, c][:, None])
+        achieved[c] = float(abs(r_pb[0, 0]))
+
+    log.info("B2 post-threshold on-target |r| (achieved, per code): %s", achieved)
+    return achieved
 
 
 @app.function(
@@ -586,10 +715,11 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     arm_c = _arm_c_selected_features(config, held_out_start, log)
     feature_ids = arm_c["feature_ids"]
 
+    b2_aux: dict[str, Any] | None = None
     if arm == "diff_in_means":
         W, meta = _build_diff_in_means(config, held_out_start, log)
     elif arm.startswith("keyword"):
-        W, meta = _build_keyword(config, arm, held_out_start, arm_c, log)
+        W, meta, b2_aux = _build_keyword(config, arm, held_out_start, arm_c, log)
     else:
         raise ValueError(f"unknown arm {arm!r}")
 
@@ -619,6 +749,17 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
         sae_shard_ckpt_dir, feature_ids, held_out_shard_start=held_out_start
     )
     theta = calibrate_thresholds_note_level(W, token_sample, note_ids, target_rates)
+
+    # Important 2 — B2's dilution solve necessarily targets an
+    # un-thresholded proxy (theta doesn't exist until W is finished). Now
+    # that theta does exist, measure what each B2 column ACTUALLY achieves
+    # post-threshold, on the same scanned notes used for the dilution
+    # solve, and record it next to the target so the gap is auditable
+    # rather than assumed away.
+    if b2_aux is not None:
+        meta["dilution_achieved_r_post_threshold"] = _measure_b2_post_threshold_r(
+            theta, b2_aux, log
+        )
 
     # Token-level calibration is computed too, but reported-only: it is NOT
     # what theta above is set to. Recorded so the note-vs-token mismatch that

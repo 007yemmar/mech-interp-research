@@ -32,7 +32,7 @@ held_out_shard_start: 281
 
 target_density: 0.002220     # reported-only, see source_diff_in_means.yaml
 calibration_n_shards: 6
-calibration_tokens_per_shard: 40000
+calibration_notes_per_shard: 50    # whole notes per shard, NOT a token count (see build_feature_source.py:_sample_tokens)
 
 scan_n_shards: 24            # selection shards scanned for keyword occurrences
 min_token_positions: 200     # below this, a code is reported as underpowered
