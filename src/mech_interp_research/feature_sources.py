@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -369,3 +370,59 @@ def accumulate_keyword_direction(
     if rows.ndim == 1:
         rows = rows[None, :]
     return acc + rows.sum(axis=0), count + rows.shape[0]
+
+
+def blend_directions(m_c: np.ndarray, m_other: np.ndarray, alpha: float) -> np.ndarray:
+    """Unit-normalised ``m_c + alpha * m_other``."""
+    v = np.asarray(m_c, dtype=np.float64) + float(alpha) * np.asarray(m_other, dtype=np.float64)
+    norm = float(np.linalg.norm(v))
+    if norm < 1e-12:
+        raise ValueError("blend produced a ~zero-norm direction")
+    return (v / norm).astype(np.float32)
+
+
+def solve_dilution_alpha(
+    score_fn: Callable[[float], float],
+    target: float,
+    alpha_max: float = 32.0,
+    n_grid: int = 24,
+    n_refine: int = 12,
+) -> float:
+    """Find alpha such that ``score_fn(alpha) ~= target``.
+
+    ``score_fn`` maps a blend coefficient to an on-target |r|. It is expected to
+    decrease with alpha but is not assumed strictly monotone, so a coarse grid
+    brackets the crossing before bisection refines it.
+
+    Raises:
+        ValueError: if score_fn(0.0) < target — the undiluted direction is
+            already weaker than the target, so no dilution can reach it.
+    """
+    s0 = float(score_fn(0.0))
+    if s0 < target:
+        raise ValueError(
+            f"target {target:.4f} is unreachable: undiluted score is {s0:.4f}. "
+            "The keyword direction is weaker than the SAE latent for this code."
+        )
+
+    grid = np.concatenate([[0.0], np.geomspace(1e-3, alpha_max, n_grid - 1)])
+    lo, hi = 0.0, None
+    for alpha in grid[1:]:
+        if float(score_fn(float(alpha))) <= target:
+            hi = float(alpha)
+            break
+        lo = float(alpha)
+
+    if hi is None:
+        logger.warning(
+            "score never fell to %.4f by alpha=%.1f; returning alpha_max", target, alpha_max
+        )
+        return float(alpha_max)
+
+    for _ in range(n_refine):
+        mid = 0.5 * (lo + hi)
+        if float(score_fn(mid)) > target:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)

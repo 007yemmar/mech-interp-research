@@ -307,3 +307,39 @@ def test_accumulate_keyword_direction_computes_streaming_mean() -> None:
 
     assert count == 37
     np.testing.assert_allclose(acc / count, rows.mean(axis=0), rtol=1e-10)
+
+
+def test_blend_directions_is_unit_norm_and_interpolates() -> None:
+    from mech_interp_research.feature_sources import blend_directions
+
+    rng = np.random.default_rng(13)
+    a = rng.normal(size=20)
+    a /= np.linalg.norm(a)
+    b = rng.normal(size=20)
+    b /= np.linalg.norm(b)
+
+    np.testing.assert_allclose(blend_directions(a, b, 0.0), a, rtol=1e-6)
+    for alpha in (0.5, 2.0, 10.0):
+        out = blend_directions(a, b, alpha)
+        assert abs(np.linalg.norm(out) - 1.0) < 1e-6
+    # large alpha is dominated by b
+    assert float(blend_directions(a, b, 1e3) @ b) > 0.99
+
+
+def test_solve_dilution_alpha_hits_the_target() -> None:
+    """A monotone decreasing score is inverted to within tolerance."""
+    from mech_interp_research.feature_sources import solve_dilution_alpha
+
+    def score(alpha: float) -> float:
+        return 0.9 / (1.0 + alpha)  # 0.9 at alpha=0, decreasing
+
+    alpha = solve_dilution_alpha(score, target=0.3)
+    assert abs(score(alpha) - 0.3) < 1e-3
+
+
+def test_solve_dilution_alpha_raises_when_target_unreachable() -> None:
+    """If the undiluted direction is already weaker than the target, say so."""
+    from mech_interp_research.feature_sources import solve_dilution_alpha
+
+    with pytest.raises(ValueError, match="unreachable"):
+        solve_dilution_alpha(lambda a: 0.2 / (1.0 + a), target=0.5)
