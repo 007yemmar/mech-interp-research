@@ -27,6 +27,7 @@ from mech_interp_research.auto_interp import (
     parse_concordance_response,
     resolve_token_text,
 )
+from mech_interp_research.feature_sources import icd9_chapter
 from mech_interp_research.icd_eval import load_saved_correlations
 from mech_interp_research.shuffled_control import permute_global
 
@@ -684,44 +685,15 @@ def regenerate_explanations(
 # Discriminative retrieval slate: 1 correct code + K unrelated cross-chapter
 # distractors + "none". Distractors are statistically unrelated to the feature,
 # in a DIFFERENT ICD-9 chapter than the correct code, and prevalence-matched.
+#
+# `icd9_chapter` (imported above) lives in `feature_sources.py` — Arm B2's
+# dilution-partner rule (spec Sec 4.2.2, `modal_app/build_feature_source.py`)
+# uses the exact same cross-chapter rule as this module's distractor
+# selection, so it is the single shared implementation rather than two
+# copies. Re-exported into this module's namespace by the import so existing
+# call sites (`from mech_interp_research.concordance_multi_judge import
+# icd9_chapter`) are unaffected.
 # ---------------------------------------------------------------------------
-
-_ICD9_CHAPTERS = [
-    (1, 139, "infectious"),
-    (140, 239, "neoplasm"),
-    (240, 279, "endocrine"),
-    (280, 289, "blood"),
-    (290, 319, "mental"),
-    (320, 389, "nervous"),
-    (390, 459, "circulatory"),
-    (460, 519, "respiratory"),
-    (520, 579, "digestive"),
-    (580, 629, "genitourinary"),
-    (630, 679, "pregnancy"),
-    (680, 709, "skin"),
-    (710, 739, "musculoskeletal"),
-    (740, 759, "congenital"),
-    (760, 779, "perinatal"),
-    (780, 799, "symptoms"),
-    (800, 999, "injury"),
-]
-
-
-def icd9_chapter(code) -> str:
-    """Map an ICD-9 code to its chapter (organ system). V/E codes are own groups."""
-    c = str(code).replace("icd9_", "").strip().upper()
-    if c.startswith("V"):
-        return "V_supplementary"
-    if c.startswith("E"):
-        return "E_external"
-    try:
-        num = int(c[:3])
-    except ValueError:
-        return "unknown"
-    for lo, hi, name in _ICD9_CHAPTERS:
-        if lo <= num <= hi:
-            return name
-    return "unknown"
 
 
 def build_discriminative_slate(

@@ -1,10 +1,12 @@
 # Feature source: keyword_b1 -- undiluted keyword-mean token directions.
 #
 # For each ICD-9 code, scans a deterministic sample of selection shards for
-# tokens matching the code's keyword list (icd9_keywords_improved.yaml) and
-# averages the activations at those token positions into a unit-norm
-# direction. This is the sensitivity ceiling control: an unmistakable
-# lexical signal that concordance judges should reliably accept.
+# tokens matching the code's ONE core keyword (icd9_keywords_improved.yaml,
+# keywords[0] -- "first keyword under `# Core terms`", spec Sec 4.2.1; the
+# rest of that code's keyword list is deliberately unused) and averages the
+# activations at those token positions into a unit-norm direction. This is
+# the sensitivity ceiling control: an unmistakable lexical signal that
+# concordance judges should reliably accept.
 #
 # Codes with fewer than min_token_positions matched tokens are reported as
 # underpowered in source_meta.json (not dropped or errored).

@@ -188,6 +188,7 @@ def _sample_tokens(config: dict[str, Any], held_out_start: int, log: Any):
     from safetensors.numpy import load_file
 
     from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.necessity_stats import split_by_shard
 
     acts = Path(config["activations_dir"])
     n_shards = int(config.get("calibration_n_shards", 6))
@@ -195,8 +196,13 @@ def _sample_tokens(config: dict[str, Any], held_out_start: int, log: Any):
     rng = np.random.default_rng(int(config.get("seed", 42)))
 
     metadata = load_metadata(acts)
+    # Selection/audit boundary via the one canonical implementation
+    # (necessity_stats.split_by_shard) rather than a third inline spelling
+    # of "< held_out_start" parsed out of shard filenames.
+    sel_mask, _ = split_by_shard(metadata, held_out_shard_start=held_out_start)
+    eligible_shard_ids = set(int(s) for s in metadata.loc[sel_mask, "shard"].unique())
     shard_files = sorted(acts.glob("shard_*.safetensors"))
-    eligible = [p for p in shard_files if int(p.stem.split("_")[1]) < held_out_start]
+    eligible = [p for p in shard_files if int(p.stem.split("_")[1]) in eligible_shard_ids]
     chosen = rng.choice(len(eligible), size=min(n_shards, len(eligible)), replace=False)
 
     token_chunks = []
@@ -279,18 +285,30 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
     """Shared B1 scan: per-code keyword-mean token direction over selection shards.
 
     For each of a deterministic sample of selection shards, tokenizes every
-    scanned note once per (code, keyword) pair that survives a cheap
-    substring pre-filter (skips tokenizing a note that plainly doesn't
-    contain the keyword at all), locates the keyword's token span via
-    `find_keyword_token_spans`, and folds the matched activation rows into a
-    running per-code mean via `accumulate_keyword_direction`.
+    scanned note once per code whose CORE keyword (spec Sec 4.2.1: "first
+    keyword under `# Core terms`", i.e. `keyword_dict[code][0]` and nothing
+    else) survives a cheap substring pre-filter (skips tokenizing a note that
+    plainly doesn't contain the keyword at all), locates the keyword's token
+    span via `find_keyword_token_spans`, and folds the matched activation
+    rows into a running per-code mean via `accumulate_keyword_direction`.
+
+    Critical 1 fix: an earlier version unioned token spans over EVERY keyword
+    in a code's YAML list. The YAML's lists deliberately include broad
+    entries alongside the core term (`icd9_4019` pairs `hypertension` with
+    `blood pressure` and a page of ACE inhibitors; `icd9_4241`'s 2-3 char
+    entries like `AS`/`AI`/`AR` match inside ordinary words with no boundary
+    at all) — using the whole list reproduces exactly the blur Arm D has and
+    destroys Arm B as a control (spec Sec 4.2.1). Only `keywords[0]` is used.
+    Short (<=3 char) keywords are still matched safely: `find_keyword_token_spans`
+    applies `lexical_baseline._build_pattern`'s word-boundary convention.
 
     Returns (m, scan) where m is [d_model, n_codes] (unit-norm columns; zero
     column for a code with zero keyword-matched tokens) and `scan` carries
     everything keyword_b2 needs to reuse this pass without re-scanning:
     code_names, scan_meta (matched selection notes actually scanned,
-    row-aligned to Y_scan), Y_scan, scan_shards, token_positions,
-    underpowered_codes, d_model.
+    row-aligned to Y_scan), Y_scan, scan_shards, keyword_per_code,
+    token_positions, occurrence_counts, mean_span_len,
+    alignment_mismatches, underpowered_codes, d_model.
     """
     import numpy as np
     import pandas as pd
@@ -302,7 +320,7 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
         find_keyword_token_spans,
     )
     from mech_interp_research.icd_eval import load_and_align_icd_labels, load_metadata
-    from mech_interp_research.lexical_baseline import load_keyword_dict
+    from mech_interp_research.lexical_baseline import _build_pattern, load_keyword_dict
     from mech_interp_research.necessity_stats import split_by_shard
 
     acts_dir = Path(config["activations_dir"])
@@ -322,6 +340,14 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
     Y_sel = Y[sel]
 
     keyword_dict = load_keyword_dict(config["icd_keywords_yaml_path"], code_filter=code_names)
+
+    # Finding 1 / spec Sec 4.2.1: exactly one core keyword per code — the
+    # first entry in the YAML list, nothing else. `keyword_per_code` is also
+    # returned in `scan` so `source_meta.json` records the chosen string per
+    # code for the mandated manual eyeball check (spec Sec 4.2.1).
+    core_keywords: dict[str, str | None] = {
+        code: (keyword_dict.get(code) or [None])[0] for code in code_names
+    }
 
     rng = np.random.default_rng(int(config.get("seed", 42)))
     eligible_shards = sorted(int(s) for s in sel_meta["shard"].unique())
@@ -354,6 +380,13 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
     sums: dict[str, np.ndarray | None] = dict.fromkeys(code_names)
     counts: dict[str, int] = dict.fromkeys(code_names, 0)
     token_positions: dict[str, int] = dict.fromkeys(code_names, 0)
+    occurrence_counts: dict[str, int] = dict.fromkeys(code_names, 0)
+    # Occurrence-count regex, built once per code from the SAME word-boundary
+    # convention find_keyword_token_spans applies internally (Sec 4.2.1) —
+    # used only to record `mean_span_len` for the manual review, never to
+    # decide which tokens enter the direction.
+    kw_patterns = {code: _build_pattern(kw) for code, kw in core_keywords.items() if kw is not None}
+    alignment_mismatches = 0
 
     for shard_idx in scan_shards:
         shard_path = acts_dir / f"shard_{shard_idx:04d}.safetensors"
@@ -374,27 +407,69 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
             n_note_tokens = row_end - row_start
             text_lower = text.lower()
 
-            for code in code_names:
-                keywords = keyword_dict.get(code, [])
-                if not keywords:
-                    continue
-                hit_idx: set[int] = set()
-                for kw in keywords:
-                    if kw.lower() not in text_lower:
-                        continue  # cheap pre-filter: skip tokenizing on a guaranteed miss
-                    hit_idx.update(
-                        find_keyword_token_spans(text, tokenizer, kw, max_length=max_length)
+            # Cheap pre-filter: which codes' core keyword could possibly be
+            # present at all? Skip tokenizing entirely if none.
+            hit_codes = [
+                code
+                for code in code_names
+                if core_keywords[code] is not None and core_keywords[code].lower() in text_lower
+            ]
+            if not hit_codes:
+                continue
+
+            # Tokenize ONCE per note (not once per matching code — reusing
+            # `offsets` below is strictly cheaper than the pre-fix code's
+            # per-keyword re-tokenization). Finding 3: n_tokens is already in
+            # metadata.jsonl (carried through the icd-label join into
+            # note_row) — an independent value from row_end - row_start —
+            # so comparing the re-tokenized length against it is a real
+            # cross-check, not a restatement. A tokenizer/version drift
+            # would otherwise silently misalign row_start + i against the
+            # wrong activation row for every hit in this note, so a mismatch
+            # here means SKIP the whole note (never spend the substring hit)
+            # rather than trust the indices. Follows feature_inspector.py's
+            # per-note alignment-check pattern.
+            expected_n_tokens = int(note_row.get("n_tokens", n_note_tokens))
+            encoded = tokenizer(
+                text,
+                truncation=True,
+                max_length=max_length,
+                add_special_tokens=True,
+                return_offsets_mapping=True,
+            )
+            offsets = encoded["offset_mapping"]
+            if len(offsets) != expected_n_tokens:
+                alignment_mismatches += 1
+                if alignment_mismatches <= 5:
+                    log.warning(
+                        "Token alignment mismatch for note %d: re-tokenized=%d, "
+                        "metadata n_tokens=%d — skipping this note for the keyword scan",
+                        note_idx,
+                        len(offsets),
+                        expected_n_tokens,
                     )
-                if not hit_idx:
+                continue
+
+            for code in hit_codes:
+                kw = core_keywords[code]
+                idx = find_keyword_token_spans(text, tokenizer, kw, offsets=offsets)
+                if not idx:
                     continue
-                valid = [i for i in hit_idx if i < n_note_tokens]
+                valid = [i for i in idx if i < n_note_tokens]
                 if not valid:
                     continue
                 rows = shard_acts[[row_start + i for i in valid]]
                 acc = sums[code] if sums[code] is not None else np.zeros(d_model, dtype=np.float64)
                 sums[code], counts[code] = accumulate_keyword_direction(acc, counts[code], rows)
                 token_positions[code] += len(valid)
+                occurrence_counts[code] += sum(1 for _ in kw_patterns[code].finditer(text))
         del shard_acts
+
+    if alignment_mismatches > 0:
+        log.warning(
+            "Total keyword-scan token alignment mismatches (notes skipped): %d",
+            alignment_mismatches,
+        )
 
     m = np.zeros((d_model, len(code_names)), dtype=np.float32)
     underpowered: list[str] = []
@@ -412,15 +487,21 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
         if token_positions[code] < min_positions:
             underpowered.append(code)
 
+    mean_span_len: dict[str, float | None] = {
+        code: (token_positions[code] / occurrence_counts[code]) if occurrence_counts[code] else None
+        for code in code_names
+    }
+
     log.info(
         "Keyword scan: %d/%d codes with a direction (%d underpowered, < %d token positions), "
-        "%d shards scanned, %d selection notes considered",
+        "%d shards scanned, %d selection notes considered, %d alignment mismatches",
         len(code_names) - len(underpowered),
         len(code_names),
         len(underpowered),
         min_positions,
         len(scan_shards),
         len(scan_meta),
+        alignment_mismatches,
     )
 
     scan = {
@@ -428,7 +509,11 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
         "scan_meta": scan_meta,
         "Y_scan": Y_scan,
         "scan_shards": scan_shards,
+        "keyword_per_code": core_keywords,
         "token_positions": token_positions,
+        "occurrence_counts": occurrence_counts,
+        "mean_span_len": mean_span_len,
+        "alignment_mismatches": alignment_mismatches,
         "underpowered_codes": underpowered,
         "d_model": d_model,
         "n_selection_notes": int(sel.sum()),
@@ -440,7 +525,15 @@ def _build_keyword_b1(config: dict[str, Any], held_out_start: int, log: Any):
     m, scan = _scan_keyword_directions(config, held_out_start, log)
     meta = {
         "code_names": scan["code_names"],
+        # Finding 2 / spec Sec 4.2.1: the chosen core keyword and mean span
+        # length per code, so the 46 strings can be eyeballed directly from
+        # source_meta.json ("the single highest-leverage manual check in
+        # this spec").
+        "keyword_per_code": scan["keyword_per_code"],
         "keyword_token_positions": scan["token_positions"],
+        "keyword_occurrence_counts": scan["occurrence_counts"],
+        "keyword_mean_span_len": scan["mean_span_len"],
+        "keyword_alignment_mismatches": scan["alignment_mismatches"],
         "underpowered_codes": scan["underpowered_codes"],
         "scan_shards": scan["scan_shards"],
         "n_selection_notes_scanned": int(len(scan["scan_meta"])),
@@ -479,8 +572,11 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
     import numpy as np
     from safetensors.numpy import load_file
 
-    from mech_interp_research.concordance_multi_judge import icd9_chapter
-    from mech_interp_research.feature_sources import blend_directions, solve_dilution_alpha
+    from mech_interp_research.feature_sources import (
+        blend_directions,
+        icd9_chapter,
+        solve_dilution_alpha,
+    )
     from mech_interp_research.icd_eval import compute_point_biserial_vectorised
 
     m, scan = _scan_keyword_directions(config, held_out_start, log)
@@ -603,7 +699,11 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
 
     meta = {
         "code_names": code_names,
+        "keyword_per_code": scan["keyword_per_code"],
         "keyword_token_positions": scan["token_positions"],
+        "keyword_occurrence_counts": scan["occurrence_counts"],
+        "keyword_mean_span_len": scan["mean_span_len"],
+        "keyword_alignment_mismatches": scan["alignment_mismatches"],
         "underpowered_codes": scan["underpowered_codes"],
         "scan_shards": scan_shards,
         "n_selection_notes_scanned": int(len(scan_meta)),
@@ -680,6 +780,49 @@ def _measure_b2_post_threshold_r(theta: Any, aux: dict[str, Any], log: Any) -> l
     return achieved
 
 
+def _check_arm_matches_arm_c(meta: dict[str, Any], arm_c: dict[str, Any]) -> None:
+    """Both population-identity guards `build_source_remote` runs before calibrating.
+
+    A pure function (no Modal, no I/O) precisely so it can be unit tested
+    directly — extracted out of `build_source_remote`'s body, which otherwise
+    needs a live Modal volume/secret context to invoke at all.
+
+    1. code_names equality: feature_ids / r_selection (in `arm_c`) are
+       indexed by code POSITION, so this arm's own code_names (from its own
+       label alignment) must match Arm C's (from sae_shard_ckpt_dir) exactly.
+       A shape mismatch would already raise inside
+       calibrate_thresholds_note_level downstream, but a same-length
+       reordering would not, so this checks equality, not just length.
+    2. n_selection_notes equality (Finding 4): code_names equality alone does
+       not prove the two selections were computed on the SAME note
+       population — a sae_shard_ckpt_dir pointing at a different (but
+       similarly-composed) population could still yield the identical 46
+       code names. n_selection_notes is already computed independently by
+       both sides (this arm's own split_by_shard, and
+       _arm_c_selected_features's), so cross-checking it is a real, cheap
+       population check rather than a restatement of the code_names one.
+    """
+    if meta.get("code_names") != arm_c["code_names"]:
+        raise ValueError(
+            "Code ordering mismatch between this arm's label alignment and "
+            "Arm C's selection (sae_shard_ckpt_dir). Check that the pooled/"
+            "activation source used to build this arm's direction and "
+            "sae_shard_ckpt_dir cover the identical note population with "
+            "identical join_key/icd_col_prefix/min_prevalence/max_codes/"
+            "min_notes settings."
+        )
+
+    if int(meta.get("n_selection_notes", -1)) != int(arm_c["n_selection_notes"]):
+        raise ValueError(
+            f"n_selection_notes mismatch between this arm ({meta.get('n_selection_notes')}) "
+            f"and Arm C's selection ({arm_c['n_selection_notes']}). Both are computed "
+            "independently (this arm's own label alignment vs. sae_shard_ckpt_dir's), so "
+            "a mismatch means sae_shard_ckpt_dir does not cover the identical selection-note "
+            "population as this arm's activations_dir/pooled_ckpt_dir — even though code_names "
+            "matched. Check that both point at the same extraction run."
+        )
+
+
 @app.function(
     image=image,
     cpu=DEFAULT_CPU,
@@ -697,9 +840,9 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
         DEFAULT_TARGET_DENSITY,
         calibrate_thresholds,
         calibrate_thresholds_note_level,
-        sae_note_level_densities,
         write_pseudo_sae,
     )
+    from mech_interp_research.necessity_stats import sae_note_level_densities
 
     logging.basicConfig(level=config.get("logging_level", "INFO"))
     log = logging.getLogger("build_feature_source")
@@ -723,22 +866,7 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError(f"unknown arm {arm!r}")
 
-    # feature_ids / r_selection are indexed by code POSITION, so this arm's
-    # own code_names (from its own label alignment) must match Arm C's
-    # (from sae_shard_ckpt_dir) exactly — same guard as inside
-    # _build_keyword_b2, repeated here so diff_in_means and keyword_b1 are
-    # covered too. A shape mismatch would already raise inside
-    # calibrate_thresholds_note_level below, but a same-length reordering
-    # would not, so this checks equality, not just length.
-    if meta.get("code_names") != arm_c["code_names"]:
-        raise ValueError(
-            "Code ordering mismatch between this arm's label alignment and "
-            "Arm C's selection (sae_shard_ckpt_dir). Check that the pooled/"
-            "activation source used to build this arm's direction and "
-            "sae_shard_ckpt_dir cover the identical note population with "
-            "identical join_key/icd_col_prefix/min_prevalence/max_codes/"
-            "min_notes settings."
-        )
+    _check_arm_matches_arm_c(meta, arm_c)
 
     token_sample, note_ids = _sample_tokens(config, held_out_start, log)
 
@@ -748,7 +876,16 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     target_rates = sae_note_level_densities(
         sae_shard_ckpt_dir, feature_ids, held_out_shard_start=held_out_start
     )
-    theta = calibrate_thresholds_note_level(W, token_sample, note_ids, target_rates)
+    # calibrate_thresholds_note_level returns the note-level rate it actually
+    # achieved at `theta` (measured_note_rate below) — the audit number that
+    # proves calibration worked. Used directly rather than recomputed via a
+    # second numeric path (finding 7): the old code below re-derived the same
+    # quantity via a true float64 matmul, while the calibrator's own bisection
+    # works from a float32-cast-to-float64 `pre`, so the two could silently
+    # disagree.
+    theta, measured_note_rate = calibrate_thresholds_note_level(
+        W, token_sample, note_ids, target_rates
+    )
 
     # Important 2 — B2's dilution solve necessarily targets an
     # un-thresholded proxy (theta doesn't exist until W is finished). Now
@@ -768,12 +905,12 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     pre_token = token_sample.astype(np.float32) @ W
     measured_token_density = (pre_token > theta_token).mean(axis=0)
 
-    pre = token_sample.astype(np.float64) @ W.astype(np.float64)
+    # n_notes_sampled is a genuinely separate quantity (count of distinct
+    # notes in the calibration token sample) from measured_note_rate above,
+    # so this stays — only the redundant re-derivation of measured_note_rate
+    # itself was deleted.
     _, note_idx_compact = np.unique(note_ids, return_inverse=True)
     n_notes_sampled = int(note_idx_compact.max()) + 1 if note_idx_compact.size else 0
-    note_max = np.full((n_notes_sampled, W.shape[1]), -np.inf, dtype=np.float64)
-    np.maximum.at(note_max, note_idx_compact, pre)
-    measured_note_rate = (note_max > theta).mean(axis=0)
 
     meta.update(
         {
@@ -806,7 +943,7 @@ def main(config_file: str, detach: bool = False) -> None:
         uv run modal run modal_app/build_feature_source.py --config-file configs/source_diff_in_means.yaml
         uv run modal run modal_app/build_feature_source.py --config-file configs/source_keyword_b1.yaml --detach
     """
-    with open(config_file) as f:
+    with open(config_file, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     print(

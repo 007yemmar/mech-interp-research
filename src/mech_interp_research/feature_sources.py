@@ -21,8 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +58,13 @@ def write_pseudo_sae(
         raise ValueError(f"threshold must have shape ({k},), got {threshold.shape}")
     if not np.all(np.isfinite(W_enc)):
         raise ValueError("W_enc contains non-finite values")
+    if not np.all(np.isfinite(threshold)):
+        raise ValueError(
+            "threshold contains non-finite values: a NaN threshold silently produces a "
+            "permanently dead feature (pre > NaN is always False), which is "
+            "indistinguishable from a legitimately selective one downstream — reject it "
+            "here instead. `threshold < 0` does not catch this because NaN < 0 is False."
+        )
     if np.any(threshold < 0):
         raise ValueError(
             "threshold entries must be non-negative: encoding is "
@@ -143,7 +149,7 @@ def calibrate_thresholds_note_level(
     note_ids: np.ndarray,
     target_rates: np.ndarray,
     max_iter: int = 60,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Per-column threshold matching each direction's NOTE-level detection rate.
 
     This is the calibrator actually used to build arms (spec Sec 5.5). A note
@@ -166,7 +172,14 @@ def calibrate_thresholds_note_level(
         max_iter:     Bisection iterations per column.
 
     Returns:
-        threshold: [k] float32, clamped to >= 0.
+        (threshold, measured_note):
+            threshold:    [k] float32, clamped to >= 0.
+            measured_note: [k] float64, the note-level detection rate actually
+                achieved at ``threshold`` — the audit number that proves
+                calibration worked. Computed from the SAME ``note_max`` array
+                the bisection used and against the final (float32-cast)
+                ``threshold``, so a caller does not need to (and must not)
+                recompute it via a separate numeric path.
     """
     W_enc = np.asarray(W_enc, dtype=np.float32)
     token_sample = np.asarray(token_sample, dtype=np.float32)
@@ -199,7 +212,6 @@ def calibrate_thresholds_note_level(
     np.maximum.at(note_max, note_idx, pre)
 
     theta = np.zeros(k, dtype=np.float64)
-    measured_note = np.empty(k, dtype=np.float64)
 
     for c in range(k):
         col_note_max = note_max[:, c]
@@ -226,10 +238,12 @@ def calibrate_thresholds_note_level(
                     hi = mid
             theta[c] = hi
 
-        measured_note[c] = note_rate(theta[c])
-
     theta = np.maximum(theta, 0.0).astype(np.float32)
 
+    # The audit number: recomputed once, vectorised, against the FINAL
+    # (float32-cast) theta and the SAME note_max array the bisection used —
+    # not a second numeric path (see docstring).
+    measured_note = (note_max > theta.astype(np.float64)).mean(axis=0)
     measured_token = (pre > theta).mean(axis=0)
     logger.info(
         "Calibrated %d thresholds to note-level targets (measured note-rate mean %.4f, "
@@ -240,68 +254,15 @@ def calibrate_thresholds_note_level(
         float(measured_note.max()),
         float(measured_token.mean()),
     )
-    return theta
+    return theta, measured_note
 
 
-def sae_note_level_densities(
-    shard_ckpt_dir: str | Path,
-    feature_ids: Sequence[int],
-    held_out_shard_start: int = 281,
-) -> np.ndarray:
-    """Note-level detection rate of each Arm-C latent, on SELECTION notes only.
-
-    This is the per-code calibration target every constructed arm is built
-    against (spec Sec 5.5, Ruling 1): the fraction of selection notes
-    (shard < held_out_shard_start) where the reference SAE's matched latent
-    has a non-zero pooled value — i.e. fired on at least one token in that
-    note. A note is "detected" the same way the downstream ICD grounding
-    eval detects it (max-pooling a JumpReLU encoding is zero unless at least
-    one token cleared the latent's threshold), so this is exactly the
-    quantity ``calibrate_thresholds_note_level`` needs as ``target_rates``.
-
-    Audit notes (shard >= held_out_shard_start) are excluded so the
-    calibration target itself never touches held-out data.
-
-    Args:
-        shard_ckpt_dir: Directory of per-shard encode checkpoints from a
-            completed icd_eval run (``shard_NNNN_vectors.npy`` +
-            ``shard_NNNN_meta.jsonl``), as read by
-            ``icd_eval.reassemble_note_vectors``.
-        feature_ids:    Latent index per code (length n_codes), e.g. from
-            ``necessity_stats.select_feature_per_code`` on the selection set.
-        held_out_shard_start: Selection/audit shard boundary.
-
-    Returns:
-        target_rates: [n_codes] float64, one note-level detection rate per
-        entry of ``feature_ids``.
-    """
-    from mech_interp_research.icd_eval import reassemble_note_vectors
-
-    vectors, note_meta = reassemble_note_vectors(shard_ckpt_dir)
-    if "shard" not in note_meta.columns:
-        raise KeyError("shard_ckpt metadata must carry a 'shard' column to split on")
-
-    selection = note_meta["shard"].to_numpy() < held_out_shard_start
-    n_selection = int(selection.sum())
-    if n_selection == 0:
-        raise ValueError(
-            f"No selection notes (shard < {held_out_shard_start}) found in {shard_ckpt_dir}"
-        )
-
-    feature_ids_arr = np.asarray(list(feature_ids), dtype=int)
-    sel_vectors = vectors[selection][:, feature_ids_arr]  # [n_selection, n_codes]
-    rates = (sel_vectors != 0).mean(axis=0).astype(np.float64)
-
-    logger.info(
-        "Note-level densities for %d latents over %d selection notes "
-        "(mean=%.4f, min=%.4f, max=%.4f)",
-        feature_ids_arr.size,
-        n_selection,
-        float(rates.mean()),
-        float(rates.min()),
-        float(rates.max()),
-    )
-    return rates
+# `sae_note_level_densities` lives in `necessity_stats.py`, not here: it is a
+# measurement of the reference SAE that does filesystem I/O against
+# `icd_eval`'s checkpoint layout and depends on `necessity_stats.split_by_shard`
+# for the selection/audit boundary, whereas every other function in this
+# module is pure array construction with no I/O beyond `write_pseudo_sae`
+# itself. Import it from `mech_interp_research.necessity_stats`.
 
 
 DIFF_IN_MEANS_VARIANTS = ("v1_plain", "v2_zscored", "v3_diag_lda")
@@ -378,6 +339,8 @@ def find_keyword_token_spans(
     tokenizer,
     keyword: str,
     max_length: int = 8192,
+    expected_n_tokens: int | None = None,
+    offsets: list[tuple[int, int]] | None = None,
 ) -> list[int]:
     """Token indices covering every case-insensitive occurrence of ``keyword``.
 
@@ -385,23 +348,66 @@ def find_keyword_token_spans(
     without assuming a one-token keyword — Gemma splits most clinical terms into
     several subwords, and all of them belong to the direction.
 
+    Matching follows ``lexical_baseline._build_pattern``'s convention exactly
+    (same ``SHORT_KEYWORD_THRESHOLD``): keywords of 3 characters or fewer are
+    matched with a word-boundary regex, everything else with a plain
+    case-insensitive substring. Without this, a short keyword like ``AS`` or
+    ``AI`` matches inside ordinary words (*was*, *pain*) with no boundary at
+    all — see ``icd9_4241``'s keyword list, whose 2-3 character entries
+    otherwise outnumber genuine hits by orders of magnitude.
+
     Tokenizer settings match extraction exactly (add_special_tokens=True,
     truncation, max_length), so the returned index i corresponds to activation
-    row ``row_start + i`` for that note.
+    row ``row_start + i`` for that note — PROVIDED the re-tokenization here
+    reproduces the token count recorded at extraction time. If
+    ``expected_n_tokens`` is given (the note's ``n_tokens`` from
+    ``metadata.jsonl``) and the re-tokenized length disagrees, every index
+    this call would return is a silent off-by-some-drift into the wrong
+    activation row, so this returns ``[]`` and logs a warning instead of
+    returning indices that look plausible but are not trustworthy.
+
+    Args:
+        offsets: Pre-computed ``offset_mapping`` from a prior call to
+            ``tokenizer(..., return_offsets_mapping=True)`` on this exact
+            ``text``/``max_length``. When given, this call skips
+            re-tokenizing (and skips the ``expected_n_tokens`` check — the
+            caller is asserting it already verified alignment once for this
+            note and is reusing the same offsets across multiple keywords,
+            which is both cheaper and exactly what a caller scanning several
+            codes against the same note should do).
     """
     if not keyword:
         return []
 
-    encoded = tokenizer(
-        text,
-        truncation=True,
-        max_length=max_length,
-        add_special_tokens=True,
-        return_offsets_mapping=True,
-    )
-    offsets = encoded["offset_mapping"]
+    # Lazy import: keeps this module's own import graph light (no
+    # pandas/scipy/safetensors via icd_eval at module-import time) while
+    # reusing lexical_baseline's word-boundary convention exactly rather
+    # than re-deriving it.
+    from mech_interp_research.lexical_baseline import _build_pattern
 
-    pattern = re.compile(re.escape(keyword), flags=re.IGNORECASE)
+    if offsets is None:
+        encoded = tokenizer(
+            text,
+            truncation=True,
+            max_length=max_length,
+            add_special_tokens=True,
+            return_offsets_mapping=True,
+        )
+        offsets = encoded["offset_mapping"]
+
+        if expected_n_tokens is not None and len(offsets) != expected_n_tokens:
+            logger.warning(
+                "Token count mismatch re-tokenizing for keyword %r: re-tokenized=%d, "
+                "metadata n_tokens=%d. This note's activation-row alignment cannot be "
+                "trusted (tokenizer/version drift would shift every index) — treating "
+                "as zero hits rather than risk folding a misaligned row into the direction.",
+                keyword,
+                len(offsets),
+                expected_n_tokens,
+            )
+            return []
+
+    pattern = _build_pattern(keyword)
     char_spans = [(m.start(), m.end()) for m in pattern.finditer(text)]
     if not char_spans:
         return []
@@ -487,3 +493,52 @@ def solve_dilution_alpha(
         else:
             hi = mid
     return 0.5 * (lo + hi)
+
+
+# ---------------------------------------------------------------------------
+# ICD-9 chapter lookup — shared by Arm B2's cross-chapter dilution partner
+# rule (spec Sec 4.2.2) and the retrieval slate's cross-chapter distractors
+# (`concordance_multi_judge.build_discriminative_slate`, F22), which uses the
+# identical rule. Lives here (rather than being defined twice, once per
+# caller) as the single implementation; `concordance_multi_judge` re-exports
+# it instead of keeping its own copy. This is a ~15-line pure function with
+# no dependency beyond stdlib, so it costs this module nothing to host it —
+# contrast `sae_note_level_densities`, which was moved OUT of this module
+# specifically because it was not pure and dragged in a heavier import chain.
+# ---------------------------------------------------------------------------
+_ICD9_CHAPTERS = [
+    (1, 139, "infectious"),
+    (140, 239, "neoplasm"),
+    (240, 279, "endocrine"),
+    (280, 289, "blood"),
+    (290, 319, "mental"),
+    (320, 389, "nervous"),
+    (390, 459, "circulatory"),
+    (460, 519, "respiratory"),
+    (520, 579, "digestive"),
+    (580, 629, "genitourinary"),
+    (630, 679, "pregnancy"),
+    (680, 709, "skin"),
+    (710, 739, "musculoskeletal"),
+    (740, 759, "congenital"),
+    (760, 779, "perinatal"),
+    (780, 799, "symptoms"),
+    (800, 999, "injury"),
+]
+
+
+def icd9_chapter(code) -> str:
+    """Map an ICD-9 code to its chapter (organ system). V/E codes are own groups."""
+    c = str(code).replace("icd9_", "").strip().upper()
+    if c.startswith("V"):
+        return "V_supplementary"
+    if c.startswith("E"):
+        return "E_external"
+    try:
+        num = int(c[:3])
+    except ValueError:
+        return "unknown"
+    for lo, hi, name in _ICD9_CHAPTERS:
+        if lo <= num <= hi:
+            return name
+    return "unknown"

@@ -11,6 +11,8 @@ code-level permutation test replaces an unpaired two-proportion test.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -46,6 +48,72 @@ def split_by_shard(
 def select_feature_per_code(r_pb_selection: np.ndarray) -> list[int]:
     """Index of the strongest-|r| feature for each code, on the SELECTION set."""
     return [int(i) for i in np.argmax(np.abs(np.asarray(r_pb_selection)), axis=0)]
+
+
+def sae_note_level_densities(
+    shard_ckpt_dir: str | Path,
+    feature_ids: Sequence[int],
+    held_out_shard_start: int = DEFAULT_HELD_OUT_SHARD_START,
+) -> np.ndarray:
+    """Note-level detection rate of each Arm-C latent, on SELECTION notes only.
+
+    This is the per-code calibration target every constructed arm is built
+    against (spec Sec 5.5, Ruling 1): the fraction of selection notes
+    (shard < held_out_shard_start) where the reference SAE's matched latent
+    has a non-zero pooled value — i.e. fired on at least one token in that
+    note. A note is "detected" the same way the downstream ICD grounding
+    eval detects it (max-pooling a JumpReLU encoding is zero unless at least
+    one token cleared the latent's threshold), so this is exactly the
+    quantity ``calibrate_thresholds_note_level`` needs as ``target_rates``.
+
+    Audit notes (shard >= held_out_shard_start) are excluded so the
+    calibration target itself never touches held-out data. The split is
+    delegated to ``split_by_shard`` — the single canonical implementation of
+    the selection/audit boundary this module exists to enforce (see module
+    docstring) — rather than reimplementing the shard comparison inline.
+
+    Args:
+        shard_ckpt_dir: Directory of per-shard encode checkpoints from a
+            completed icd_eval run (``shard_NNNN_vectors.npy`` +
+            ``shard_NNNN_meta.jsonl``), as read by
+            ``icd_eval.reassemble_note_vectors``.
+        feature_ids:    Latent index per code (length n_codes), e.g. from
+            ``select_feature_per_code`` on the selection set.
+        held_out_shard_start: Selection/audit shard boundary.
+
+    Returns:
+        target_rates: [n_codes] float64, one note-level detection rate per
+        entry of ``feature_ids``.
+    """
+    # Lazy import: this is the one function in this module that does
+    # filesystem I/O against icd_eval's shard-checkpoint layout; every other
+    # function here is pure array/dataframe arithmetic, so the heavier
+    # icd_eval import chain (scipy, safetensors) stays out of the common
+    # path.
+    from mech_interp_research.icd_eval import reassemble_note_vectors
+
+    vectors, note_meta = reassemble_note_vectors(shard_ckpt_dir)
+    selection, _audit = split_by_shard(note_meta, held_out_shard_start=held_out_shard_start)
+    n_selection = int(selection.sum())
+    if n_selection == 0:
+        raise ValueError(
+            f"No selection notes (shard < {held_out_shard_start}) found in {shard_ckpt_dir}"
+        )
+
+    feature_ids_arr = np.asarray(list(feature_ids), dtype=int)
+    sel_vectors = vectors[selection][:, feature_ids_arr]  # [n_selection, n_codes]
+    rates = (sel_vectors != 0).mean(axis=0).astype(np.float64)
+
+    logger.info(
+        "Note-level densities for %d latents over %d selection notes "
+        "(mean=%.4f, min=%.4f, max=%.4f)",
+        feature_ids_arr.size,
+        n_selection,
+        float(rates.mean()),
+        float(rates.min()),
+        float(rates.max()),
+    )
+    return rates
 
 
 def selection_bias_delta(
@@ -85,6 +153,12 @@ def paired_code_permutation_test(
     which an unpaired two-proportion test would ignore. Under the null the arm
     labels are exchangeable within each code, so each draw flips a random subset
     of the per-code differences.
+
+    This test is CONSERVATIVE at n=46: measured P(p < 0.05 | null) ≈ 0.02
+    against a nominal 0.05, from the discreteness of {-1, 0, 1} per-code
+    differences plus the +1 correction below. Reported p-values are therefore
+    upper bounds on significance, not calibrated estimates — a non-significant
+    result must not be read as evidence of equivalence between arms.
 
     Args:
         a, b:    [n_codes] per-code outcomes (0/1 verdicts or continuous scores).

@@ -13,10 +13,42 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 from safetensors.numpy import save_file
 
 log = logging.getLogger("test_build_feature_source")
+
+
+class _StubTokenizer:
+    """Deterministic whitespace tokenizer with offset_mapping, standing in for
+    a real (network-dependent) HF tokenizer in these offline tests.
+
+    Splits on runs of non-whitespace characters. When
+    ``add_special_tokens`` is set, a BOS/EOS-style empty ``(0, 0)`` span is
+    added at the start and end — `find_keyword_token_spans` already treats
+    ``start == end`` as a span-less special token.
+    """
+
+    def __call__(
+        self,
+        text,
+        truncation=True,
+        max_length=8192,
+        add_special_tokens=True,
+        return_offsets_mapping=False,
+    ):
+        import re
+
+        spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+        if add_special_tokens:
+            spans = [(0, 0), *spans, (0, 0)]
+        if truncation:
+            spans = spans[:max_length]
+        result = {"input_ids": list(range(len(spans)))}
+        if return_offsets_mapping:
+            result["offset_mapping"] = spans
+        return result
 
 
 def _write_shard(
@@ -220,3 +252,206 @@ def test_sample_tokens_respects_held_out_shard_start(tmp_path: Path) -> None:
     _, note_ids = bfs._sample_tokens(config, held_out_start=1, log=log)
     audit_note_ids = {r["note_idx"] for r in aud_meta}
     assert not audit_note_ids & set(note_ids.tolist()), "audit-shard notes leaked into the sample"
+
+
+# ---------------------------------------------------------------------------
+# Finding 2 (whole-branch review, 2026-08-27): Arm C cache-validation guard.
+# ---------------------------------------------------------------------------
+def test_arm_c_selected_features_raises_on_cache_mismatch(tmp_path: Path) -> None:
+    """A cached Arm C selection built from different settings must not be reused.
+
+    A stale cache built with a different sae_shard_ckpt_dir could still
+    carry the SAME 46 code_names (passing every other guard) while pairing
+    every arm's calibration target against the WRONG (latent, code)
+    selection -- so this must raise, not silently return the cache.
+    """
+    import modal_app.build_feature_source as bfs
+
+    cache_path = tmp_path / "arm_c_selected_features.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "code_names": ["icd9_test"],
+                "feature_ids": [0],
+                "r_selection": [0.5],
+                "n_selection_notes": 100,
+                "sae_shard_ckpt_dir": "/old/shard_ckpt",
+                "held_out_shard_start": 281,
+                "icd_csv_path": "/notes.csv",
+                "min_prevalence": 0.02,
+                "max_codes": 50,
+            }
+        )
+    )
+
+    config = {
+        "arm_c_selected_features_path": str(cache_path),
+        "sae_shard_ckpt_dir": "/new/shard_ckpt",  # differs from the cached value
+        "icd_csv_path": "/notes.csv",
+    }
+
+    with pytest.raises(ValueError, match="sae_shard_ckpt_dir"):
+        bfs._arm_c_selected_features(config, held_out_start=281, log=log)
+
+
+def test_arm_c_selected_features_reuses_matching_cache(tmp_path: Path) -> None:
+    """A cache built under IDENTICAL settings is reused verbatim, no recompute."""
+    import modal_app.build_feature_source as bfs
+
+    cache_path = tmp_path / "arm_c_selected_features.json"
+    cached = {
+        "code_names": ["icd9_test"],
+        "feature_ids": [3],
+        "r_selection": [0.42],
+        "n_selection_notes": 100,
+        "sae_shard_ckpt_dir": "/shard_ckpt",
+        "held_out_shard_start": 281,
+        "icd_csv_path": "/notes.csv",
+        "min_prevalence": 0.02,
+        "max_codes": 50,
+    }
+    cache_path.write_text(json.dumps(cached))
+
+    config = {
+        "arm_c_selected_features_path": str(cache_path),
+        "sae_shard_ckpt_dir": "/shard_ckpt",
+        "icd_csv_path": "/notes.csv",
+    }
+    result = bfs._arm_c_selected_features(config, held_out_start=281, log=log)
+    assert result == cached
+
+
+# ---------------------------------------------------------------------------
+# Finding 4: the code_names / n_selection_notes population-identity guards.
+# ---------------------------------------------------------------------------
+def test_check_arm_matches_arm_c_passes_when_consistent() -> None:
+    import modal_app.build_feature_source as bfs
+
+    arm_c = {"code_names": ["icd9_a", "icd9_b"], "n_selection_notes": 100}
+    meta = {"code_names": ["icd9_a", "icd9_b"], "n_selection_notes": 100}
+    bfs._check_arm_matches_arm_c(meta, arm_c)  # must not raise
+
+
+def test_check_arm_matches_arm_c_raises_on_code_names_mismatch() -> None:
+    import modal_app.build_feature_source as bfs
+
+    arm_c = {"code_names": ["icd9_a", "icd9_b"], "n_selection_notes": 100}
+    meta = {"code_names": ["icd9_b", "icd9_a"], "n_selection_notes": 100}  # reordered
+    with pytest.raises(ValueError, match="[Cc]ode"):
+        bfs._check_arm_matches_arm_c(meta, arm_c)
+
+
+def test_check_arm_matches_arm_c_raises_on_n_selection_notes_mismatch() -> None:
+    """Finding 4: identical code_names is not sufficient -- a
+    sae_shard_ckpt_dir pointing at a different note population could still
+    produce the same 46 code names while disagreeing on population size.
+    """
+    import modal_app.build_feature_source as bfs
+
+    arm_c = {"code_names": ["icd9_a", "icd9_b"], "n_selection_notes": 100}
+    meta = {"code_names": ["icd9_a", "icd9_b"], "n_selection_notes": 50}
+    with pytest.raises(ValueError, match="n_selection_notes"):
+        bfs._check_arm_matches_arm_c(meta, arm_c)
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 (Critical): only the core keyword (keywords[0]) may contribute
+# to a code's direction -- a regression test that fails against the
+# pre-fix (whole-list-union) code.
+# ---------------------------------------------------------------------------
+def test_scan_keyword_directions_only_core_keyword_contributes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two notes, both positive for icd9_test. Note A contains the CORE
+    keyword ("corekw"); note B contains only a NON-core keyword ("otherkw")
+    from the same code's YAML list -- exactly the shape of `icd9_4019`
+    pairing `hypertension` with `blood pressure`, etc.
+
+    A large, distinctive activation spike is planted at each keyword's
+    token position, and note B's spike (1000) dwarfs note A's (10). Under
+    the pre-fix full-keyword-list code, note B's huge spike would dominate
+    the resulting mean direction (dim 1). With only the core keyword
+    scanned, note B must never even be tokenized for this code -- the
+    direction must be built entirely from note A's small spike (dim 0).
+    """
+    import transformers
+
+    import modal_app.build_feature_source as bfs
+
+    acts_dir = tmp_path / "activations"
+    acts_dir.mkdir()
+    d_model = 4
+
+    # Note A ("patient reports corekw today"): BOS,patient,reports,corekw,today,EOS
+    #   -> "corekw" is token index 3 -> activation row row_start(0) + 3 = 3
+    # Note B ("patient had otherkw event"): BOS,patient,had,otherkw,event,EOS
+    #   -> "otherkw" is token index 3 -> activation row row_start(6) + 3 = 9
+    arr = np.full((12, d_model), 0.01, dtype=np.float32)
+    arr[3] = [10.0, 0.0, 0.0, 0.0]
+    arr[9] = [0.0, 1000.0, 0.0, 0.0]
+    save_file({"activations": arr}, str(acts_dir / "shard_0000.safetensors"))
+
+    meta_rows = [
+        {
+            "note_idx": 0,
+            "shard": 0,
+            "row_start": 0,
+            "row_end": 6,
+            "n_tokens": 6,
+            "admission_id": "A0",
+        },
+        {
+            "note_idx": 1,
+            "shard": 0,
+            "row_start": 6,
+            "row_end": 12,
+            "n_tokens": 6,
+            "admission_id": "A1",
+        },
+    ]
+    with open(acts_dir / "metadata.jsonl", "w") as f:
+        for r in meta_rows:
+            f.write(json.dumps(r) + "\n")
+
+    icd_csv = tmp_path / "notes.csv"
+    pd.DataFrame(
+        {
+            "admission_id": ["A0", "A1"],
+            "note_text": ["patient reports corekw today", "patient had otherkw event"],
+            "icd9_test": [1, 1],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    yaml_path = tmp_path / "keywords.yaml"
+    yaml_path.write_text(
+        "icd9_test:\n  description: test code\n  keywords:\n    - corekw\n    - otherkw\n"
+    )
+
+    monkeypatch.setattr(
+        transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: _StubTokenizer()
+    )
+
+    config = {
+        "activations_dir": str(acts_dir),
+        "icd_csv_path": str(icd_csv),
+        "icd_keywords_yaml_path": str(yaml_path),
+        "min_notes": 1,
+        "scan_n_shards": 1,
+        "seed": 0,
+        "min_token_positions": 0,
+    }
+
+    m, scan = bfs._scan_keyword_directions(config, held_out_start=1, log=log)
+
+    code_idx = scan["code_names"].index("icd9_test")
+    assert scan["keyword_per_code"]["icd9_test"] == "corekw"
+
+    direction = m[:, code_idx]
+    assert direction[1] == pytest.approx(0.0, abs=1e-6), (
+        "note B ('otherkw' only) contributed to icd9_test's direction -- "
+        "this is exactly finding 1's bug (unioning the whole keyword list)"
+    )
+    assert int(np.argmax(np.abs(direction))) == 0, (
+        "direction is dominated by dim 1 (note B's huge 'otherkw' spike) rather "
+        "than dim 0 (note A's 'corekw' spike)"
+    )
