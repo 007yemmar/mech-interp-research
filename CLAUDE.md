@@ -68,6 +68,12 @@ modal run modal_app/auto_interp.py --config-file configs/auto_interp_jumprelu.ya
 # Modal — shuffled-explanation control (scorer null baseline; run after auto_interp)
 modal run modal_app/shuffled_control.py --config-file configs/shuffled_control.yaml
 
+# Modal — random-matched directions (necessity baseline A4; CPU only, ~1h45, resumable)
+modal run modal_app/random_matched.py --config-file configs/random_matched.yaml --detach
+
+# Modal — necessity head-to-head: every source through ONE audit path (CPU, minutes)
+modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_sae.yaml
+
 # Inspect Modal volumes (paths are relative to volume root, no /out/ prefix)
 modal volume ls sae-artifacts activations/
 modal volume ls sae-artifacts saes/
@@ -109,6 +115,11 @@ modal_app/tfidf_lr_baseline.py     # TF-IDF + LR classification baseline (strati
 modal_app/feature_inspector.py     # token-level evidence for top SAE-ICD associations
     ↓
 modal_app/auto_interp.py           # LLM explanations + scoring + ICD concordance validation
+
+# --- SAE-necessity suite (answers "is the SAE needed?", not "does it work?") ---
+modal_app/random_matched.py        # A4: 18,432 covariance-matched random directions → same audit
+    ↓  (any source producing shard_ckpt-format pooled vectors)
+necessity_audit.audit()            # the shared audit: grounding + selection + off-target + monospec
 ```
 
 All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sae-artifacts` holds every downstream artifact (activations, centered activations, SAE checkpoints).
@@ -132,6 +143,8 @@ All heavy compute runs on Modal. The `mimic-iv-raw` volume holds input CSVs; `sa
 | `icd_eval.py` | ICD-9 grounding pipeline: `JumpReLUSAE` (numpy-only encoder), `encode_and_pool`, vectorised point-biserial correlation, BH FDR correction, `run_icd_eval` orchestrator; post-hoc helpers: `reassemble_note_vectors`, `compute_partial_point_biserial`, `compute_monospecificity`, `run_posthoc_analyses` |
 | `lexical_baseline.py` | Keyword co-occurrence baseline: YAML keyword dict → regex indicators → point-biserial correlation → head-to-head vs SAE; keyword-absent recall analysis |
 | `tfidf_lr_baseline.py` | TF-IDF + LR baseline: per-code stratified k-fold CV (AUC-ROC/PR), Wilcoxon signed-rank paired significance, supplementary best-feature correlation comparison |
+| `necessity_audit.py` | **Source-agnostic audit harness.** Runs the full grounding audit — point-biserial + BH-FDR, one-feature-per-code selection, c-negative off-target specificity, monospecificity ladder — on any `[n_notes × k]` matrix, regardless of where the features came from. `audit()` takes **separate selection and audit matrices** because best-of-k selection scored on the same notes is upward-biased, and the bias grows with k. Reuses `icd_eval` primitives unchanged; `icd_eval` itself is untouched so published numbers cannot move. Home of `off_target_specificity_corr`. |
+| `random_matched.py` | **Necessity baseline A4.** `estimate_activation_covariance` (Σ + retained token sample in one pass, float64), `sample_matched_directions` (`eigh` by default — clips negative eigenvalues that fp16 accumulation produces, and yields PCA from the same decomposition), `calibrate_thresholds` (per-direction quantiles reproducing an SAE's mean L0), `project_and_pool` (the `encode_and_pool` counterpart with `x @ D` in place of the SAE encode), `apply_thresholds`, `run_random_matched`. |
 | `feature_inspector.py` | Token-level feature inspection: two-pass algorithm scans activation shards for top-k tokens per grounded latent, re-tokenizes matched notes for context extraction, computes firing statistics and diversity metrics |
 | `auto_interp.py` | Auto-interpretability pipeline: LLM explanation generation (Anthropic SDK), Fuzzing + Detection scoring (Paulo et al. 2024), 5-way categorization, ICD-9 concordance validation (YES/PARTIAL/NO), dual-model comparison (Sonnet vs Haiku), tier-level summaries, per-feature checkpointing for resume |
 | `shuffled_control.py` | Shuffled-explanation control: re-scores each feature's contexts against a wrong explanation (global derangement + within-tier permutation), establishes the Fuzzing/Detection null baseline (Paulo et al. 2024 ~0.51), paired Wilcoxon vs real scores |
@@ -213,6 +226,20 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
         shuffled_control_summary.json     # per scorer x scheme x tier: mean_real, mean_shuffled, delta, CI, Wilcoxon p
         shuffled_control_per_feature.csv  # one row per feature with real + shuffled scores
         per_feature/<model>/              # resume checkpoints
+/out/necessity/random_matched/<run_id>/   # random_matched.py (necessity baseline A4)
+    directions.npy                        # [2304, 18432] float32, unit-norm columns
+    directions_manifest.json              # seed, method, ridge, eigen diagnostics, Σ provenance
+    sigma_stats.json
+    thresholds_l0_40.92.npy               # per-direction τ, one file per sparsity arm
+    shard_ckpt_select/                    # shards 0–30,   UN-thresholded pooled vectors
+    shard_ckpt_audit/                     # shards 281–311, UN-thresholded pooled vectors
+                                          #   ← both in the standard shard_ckpt format
+    audit_dense/                          # one dir per arm; canonical necessity_audit output:
+    audit_l0_40.92/                       #   audit_summary.json, grounding_summary.json,
+    audit_l0_47.57/                       #   correlation_matrices.npz, monospecificity.json,
+                                          #   selected_features.csv, off_target_{summary,long}.csv
+                                          #   (+ *_allnotes.csv cross-checks)
+    run_summary.json                      # config snapshot + all arms side by side
 ```
 
 ### Data handling rules (MIMIC-IV / PHI)
@@ -283,3 +310,35 @@ Two control baselines test whether SAE grounding reflects genuine learned repres
 **TF-IDF + Logistic Regression** (`tfidf_lr_baseline.py`): fits TF-IDF (10k features, 1+2-grams, sublinear TF) on matched note texts, then trains per-code LR classifiers on both TF-IDF and SAE features using stratified 5-fold CV. Compares AUC-ROC and AUC-PR head-to-head per code, with Wilcoxon signed-rank paired significance test across all codes. Also computes supplementary best-feature point-biserial correlation.
 
 Both baselines depend on `shard_ckpt/` from a completed ICD eval run and must be run after `icd_eval.py`.
+
+### SAE-necessity suite
+
+The baselines above ask whether SAE grounding survives surface-text controls. The necessity suite asks a different question, the one the meta-review left open: **is an SAE needed to produce these audit signals at all?** Answering it requires running non-SAE sources through the *identical* audit — same label-selection rule, same off-target diagnostic, same explanation budget.
+
+**The audit harness** (`necessity_audit.py`) is what makes "identical" structural rather than asserted. It consumes any `[n_notes × k]` matrix of per-note feature values and knows nothing about its provenance. The feature-source contract is the existing `shard_ckpt/` format — `shard_NNNN_vectors.npy` + `shard_NNNN_meta.jsonl` — which `icd_eval.encode_and_pool` and `raw_lr_baseline.pool_raw_activations` already write, so the SAE and raw activations are valid sources with no new code. A new source only has to write those two files per shard.
+
+```python
+audit_from_checkpoints(               # or audit() directly on in-memory matrices
+    checkpoint_dir=...,               # any shard_ckpt-format dir
+    code_names=[...],                 # the FIXED 46-code panel — never re-derive per source
+    select_shard_start=0,   select_shard_end=31,
+    audit_shard_start=281,  audit_shard_end=312,
+)
+```
+
+Two invariants the harness enforces rather than documents: overlapping selection/audit shard ranges raise, and `AuditConfig.selection` reduces every method to exactly one feature per code (`top_per_code` for high-k sources, `identity` for the one-direction-per-code baselines).
+
+**Why the selection split is not optional.** Picking the best of 18,432 columns per code and then reporting that column's correlation on the same notes is upward-biased, and the bias grows with k — precisely the regime this suite exists to test. `audit()` therefore takes separate `F_select` / `F_audit`. Passing `F_select=None` reproduces the in-sample behaviour but sets `in_sample_selection: true` in `audit_summary.json`.
+
+**Random-matched directions — A4** (`random_matched.py`): draws 18,432 directions from `N(0, Σ_activations)` and runs them through the SAE's exact pipeline. If arbitrary directions ground and concord as well as learned ones, the apparent structure comes from searching many candidates against 46 codes, and the method rather than the architecture is in question. It also yields **max |r| over 18,432 matched random directions**, which calibrates the "we searched 18,432 candidates per code" objection against the paper's 0.864.
+
+Operational notes:
+
+- **CPU only, ~1h 45, resumable.** The projection is arithmetically an SAE encode (~1.3e15 FLOPs) but is dominated by ~140 GB of shard reads, so a GPU buys almost nothing. Both projection phases checkpoint per shard; re-running the same command resumes.
+- **Σ is estimated on train shards** (0–3 by default), never on the audit split — the directions must not be shaped by the notes they are later tested on. Costs 4 shard reads that nothing else in the run performs.
+- **Thresholding commutes with max-pooling.** For `f(x) = x if x > τ else 0`, `max(f(x)) == f(max(x))`. So `project_and_pool` stores **un-thresholded** pooled values once and every sparsity arm — dense, JumpReLU-matched (L0 = 40.92), vanilla-matched (L0 = 47.57) — is produced afterwards for free by `apply_thresholds`. Adding an arm costs seconds, not another projection. **This is false for `mean` and `topk_mean`**, so `project_and_pool` refuses anything but `max`.
+- **Never project a whole shard.** At ~489k tokens and k = 18,432, one shard is a 36 GB float32 intermediate. The loop slices per note on `row_start`/`row_end` and chunks within the note, exactly as `encode_and_pool` does.
+- **`code_names_json` should always be set.** Without it the code panel is re-derived by prevalence on the audit split and may not match the panel the SAE was audited against — producing tables that line up while measuring different things.
+- **`run_summary.json` reports `note_level_l0`, not token-level.** After max-pooling over thousands of tokens most directions have some token above threshold, so that figure is much larger than 40.92 and is not a calibration check. The token-level target is enforced inside `calibrate_thresholds`.
+
+Full design and decision rationale: `.tmp/random_matched_design.md`.
