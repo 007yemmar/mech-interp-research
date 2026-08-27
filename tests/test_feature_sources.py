@@ -9,6 +9,26 @@ import numpy as np
 import pytest
 
 
+def _load_gemma_tokenizer():
+    """Fast Gemma-2-2b tokenizer, or skip if unavailable in this environment.
+
+    Mirrors the ``if not csv.exists(): pytest.skip(...)`` pattern used for
+    ``./test.csv`` below: loading the tokenizer needs network access and a
+    HuggingFace token, and `find_keyword_token_spans` needs a *fast*
+    tokenizer for `return_offsets_mapping` to exist at all. Environmental
+    unavailability should skip, not fail, these tests.
+    """
+    try:
+        from transformers import AutoTokenizer
+
+        tok = AutoTokenizer.from_pretrained("google/gemma-2-2b")
+    except Exception as e:  # pragma: no cover - environment-dependent
+        pytest.skip(f"gemma-2-2b tokenizer unavailable: {e!r}")
+    if not tok.is_fast:
+        pytest.skip("tokenizer is not a fast tokenizer; offset_mapping unavailable")
+    return tok
+
+
 def test_write_pseudo_sae_round_trips_through_jumprelu_loader(tmp_path: Path) -> None:
     """A written checkpoint loads back and encodes identically to a direct matmul."""
     from mech_interp_research.feature_sources import write_pseudo_sae
@@ -232,3 +252,57 @@ def test_unknown_variant_raises() -> None:
     X, Y = _planted_problem()
     with pytest.raises(ValueError, match="variant"):
         build_diff_in_means_variants(X, Y, variant="v9_nonsense")
+
+
+def test_find_keyword_token_spans_on_real_note_text() -> None:
+    """Token indices returned actually decode to the keyword, on real MIMIC text."""
+    import pandas as pd
+
+    from mech_interp_research.feature_sources import find_keyword_token_spans
+
+    csv = Path("./test.csv")
+    if not csv.exists():
+        pytest.skip("./test.csv not present")
+
+    df = pd.read_csv(csv, nrows=200)
+    text_col = next(c for c in ("note_text", "text", "TEXT") if c in df.columns)
+    tok = _load_gemma_tokenizer()
+
+    keyword = "hypertension"
+    hits = 0
+    for text in df[text_col].dropna().astype(str):
+        if keyword not in text.lower():
+            continue
+        idx = find_keyword_token_spans(text, tok, keyword)
+        if not idx:
+            continue
+        hits += 1
+        ids = tok(text, truncation=True, max_length=8192, add_special_tokens=True)["input_ids"]
+        assert max(idx) < len(ids)
+        decoded = tok.decode([ids[i] for i in idx]).lower()
+        assert keyword[:6] in decoded  # subword pieces reassemble to the term
+    if hits == 0:
+        pytest.skip("no notes in the sample contain the keyword")
+
+
+def test_find_keyword_token_spans_returns_empty_for_absent_keyword() -> None:
+    from mech_interp_research.feature_sources import find_keyword_token_spans
+
+    tok = _load_gemma_tokenizer()
+    assert find_keyword_token_spans("the patient is stable", tok, "zzzznotaword") == []
+
+
+def test_accumulate_keyword_direction_computes_streaming_mean() -> None:
+    """Accumulating in chunks equals averaging everything at once."""
+    from mech_interp_research.feature_sources import accumulate_keyword_direction
+
+    rng = np.random.default_rng(11)
+    rows = rng.normal(size=(37, 12))
+
+    acc = np.zeros(12, dtype=np.float64)
+    count = 0
+    for start in range(0, 37, 7):
+        acc, count = accumulate_keyword_direction(acc, count, rows[start : start + 7])
+
+    assert count == 37
+    np.testing.assert_allclose(acc / count, rows.mean(axis=0), rtol=1e-10)

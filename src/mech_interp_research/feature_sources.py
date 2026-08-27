@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import numpy as np
@@ -308,3 +309,63 @@ def build_diff_in_means_variants(
         D[:, c] = diff / norm
 
     return D.astype(np.float32)
+
+
+def find_keyword_token_spans(
+    text: str,
+    tokenizer,
+    keyword: str,
+    max_length: int = 8192,
+) -> list[int]:
+    """Token indices covering every case-insensitive occurrence of ``keyword``.
+
+    Uses ``return_offsets_mapping`` so character spans map onto token indices
+    without assuming a one-token keyword — Gemma splits most clinical terms into
+    several subwords, and all of them belong to the direction.
+
+    Tokenizer settings match extraction exactly (add_special_tokens=True,
+    truncation, max_length), so the returned index i corresponds to activation
+    row ``row_start + i`` for that note.
+    """
+    if not keyword:
+        return []
+
+    encoded = tokenizer(
+        text,
+        truncation=True,
+        max_length=max_length,
+        add_special_tokens=True,
+        return_offsets_mapping=True,
+    )
+    offsets = encoded["offset_mapping"]
+
+    pattern = re.compile(re.escape(keyword), flags=re.IGNORECASE)
+    char_spans = [(m.start(), m.end()) for m in pattern.finditer(text)]
+    if not char_spans:
+        return []
+
+    indices: list[int] = []
+    for tok_i, (start, end) in enumerate(offsets):
+        if start == end:  # special tokens carry an empty span
+            continue
+        for c_start, c_end in char_spans:
+            if start < c_end and end > c_start:  # any overlap
+                indices.append(tok_i)
+                break
+    return indices
+
+
+def accumulate_keyword_direction(
+    acc: np.ndarray,
+    count: int,
+    rows: np.ndarray,
+) -> tuple[np.ndarray, int]:
+    """Fold ``rows`` into a running sum for a streaming mean.
+
+    Returns (updated_sum, updated_count). Divide by the count to get the mean.
+    float64 accumulation, matching the convention in ``center.py``.
+    """
+    rows = np.asarray(rows, dtype=np.float64)
+    if rows.ndim == 1:
+        rows = rows[None, :]
+    return acc + rows.sum(axis=0), count + rows.shape[0]
