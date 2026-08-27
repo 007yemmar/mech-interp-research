@@ -169,3 +169,66 @@ def test_calibrate_thresholds_note_level_are_non_negative() -> None:
     target_rates = np.full(k, 0.01, dtype=np.float64)
     theta = calibrate_thresholds_note_level(W, tokens, note_ids, target_rates)
     assert np.all(theta >= 0.0)
+
+
+def _planted_problem(seed: int = 7, n: int = 4_000, d: int = 24, k_codes: int = 3):
+    """A labelled activation matrix with a planted per-code mean shift."""
+    rng = np.random.default_rng(seed)
+    scale = rng.uniform(0.5, 5.0, size=d)  # heterogeneous per-dim variance
+    X = (rng.normal(size=(n, d)) * scale).astype(np.float64)
+    Y = (rng.random(size=(n, k_codes)) < 0.3).astype(np.float64)
+    for c in range(k_codes):
+        X[Y[:, c] == 1, c] += 1.5  # code c shifts dimension c
+    return X, Y
+
+
+def test_v2_equals_unit_normalised_stacked_point_biserial() -> None:
+    """z-scored diff-in-means IS the stack of per-dimension r_pb, up to scale."""
+    from mech_interp_research.feature_sources import build_diff_in_means_variants
+    from mech_interp_research.icd_eval import compute_point_biserial_vectorised
+
+    X, Y = _planted_problem()
+    D = build_diff_in_means_variants(X, Y, variant="v2_zscored")
+
+    r_pb, _ = compute_point_biserial_vectorised(X, Y)  # [d, n_codes]
+    for c in range(Y.shape[1]):
+        stacked = r_pb[:, c] / np.linalg.norm(r_pb[:, c])
+        np.testing.assert_allclose(D[:, c], stacked, rtol=1e-5, atol=1e-6)
+
+
+def test_variants_recover_the_planted_dimension() -> None:
+    """Every variant puts its largest weight on the dimension that was shifted."""
+    from mech_interp_research.feature_sources import build_diff_in_means_variants
+
+    X, Y = _planted_problem()
+    for variant in ("v1_plain", "v2_zscored", "v3_diag_lda"):
+        D = build_diff_in_means_variants(X, Y, variant=variant)
+        for c in range(Y.shape[1]):
+            assert int(np.argmax(np.abs(D[:, c]))) == c, f"{variant} missed code {c}"
+
+
+def test_variants_are_unit_norm_and_float32() -> None:
+    from mech_interp_research.feature_sources import build_diff_in_means_variants
+
+    X, Y = _planted_problem()
+    D = build_diff_in_means_variants(X, Y, variant="v1_plain")
+    assert D.dtype == np.float32
+    np.testing.assert_allclose(np.linalg.norm(D, axis=0), 1.0, rtol=1e-5)
+
+
+def test_degenerate_code_yields_zero_column() -> None:
+    """A code with no positives gets a zero column and a warning, not a crash."""
+    from mech_interp_research.feature_sources import build_diff_in_means_variants
+
+    X, Y = _planted_problem()
+    Y[:, 1] = 0.0  # no positives for code 1
+    D = build_diff_in_means_variants(X, Y, variant="v2_zscored")
+    np.testing.assert_allclose(D[:, 1], 0.0)
+
+
+def test_unknown_variant_raises() -> None:
+    from mech_interp_research.feature_sources import build_diff_in_means_variants
+
+    X, Y = _planted_problem()
+    with pytest.raises(ValueError, match="variant"):
+        build_diff_in_means_variants(X, Y, variant="v9_nonsense")

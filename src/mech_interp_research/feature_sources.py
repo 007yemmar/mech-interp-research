@@ -239,3 +239,72 @@ def calibrate_thresholds_note_level(
         float(measured_token.mean()),
     )
     return theta
+
+
+DIFF_IN_MEANS_VARIANTS = ("v1_plain", "v2_zscored", "v3_diag_lda")
+
+
+def build_diff_in_means_variants(
+    X: np.ndarray,
+    Y: np.ndarray,
+    variant: str = "v2_zscored",
+) -> np.ndarray:
+    """One unit direction per code from a labelled pooled-activation matrix.
+
+    Variants differ only in how the raw mean difference is rescaled per dimension:
+
+        v1_plain     w[d] = M1[d] - M0[d]
+        v2_zscored   w[d] = (M1[d] - M0[d]) / sigma[d]
+        v3_diag_lda  w[d] = (M1[d] - M0[d]) / sigma[d]**2
+
+    v2 is exactly the stack of per-dimension point-biserial correlations, up to a
+    per-code positive scalar that unit-normalisation removes. sigma is the
+    population standard deviation over the rows of X, matching
+    ``compute_point_biserial_vectorised``.
+
+    Args:
+        X:       [n_notes, d_model] pooled activations.
+        Y:       [n_notes, n_codes] binary labels.
+        variant: One of DIFF_IN_MEANS_VARIANTS.
+
+    Returns:
+        D: [d_model, n_codes] float32, unit-norm columns; zero column for a code
+           with no positives or no negatives.
+    """
+    if variant not in DIFF_IN_MEANS_VARIANTS:
+        raise ValueError(f"unknown variant {variant!r}; expected one of {DIFF_IN_MEANS_VARIANTS}")
+
+    Xd = np.asarray(X, dtype=np.float64)
+    Yd = np.asarray(Y, dtype=np.float64)
+    n_notes, d_model = Xd.shape
+    n_codes = Yd.shape[1]
+
+    sigma = Xd.std(axis=0)  # population sd, matches the r_pb implementation
+    safe_sigma = np.where(sigma > 1e-12, sigma, np.inf)
+
+    D = np.zeros((d_model, n_codes), dtype=np.float64)
+    for c in range(n_codes):
+        mask = Yd[:, c] > 0.5
+        n_pos, n_neg = int(mask.sum()), int((~mask).sum())
+        if n_pos == 0 or n_neg == 0:
+            logger.warning(
+                "Code column %d has n_pos=%d n_neg=%d; emitting zero direction.",
+                c,
+                n_pos,
+                n_neg,
+            )
+            continue
+
+        diff = Xd[mask].mean(axis=0) - Xd[~mask].mean(axis=0)
+        if variant == "v2_zscored":
+            diff = diff / safe_sigma
+        elif variant == "v3_diag_lda":
+            diff = diff / (safe_sigma**2)
+
+        norm = float(np.linalg.norm(diff))
+        if norm < 1e-12:
+            logger.warning("Code column %d has ~zero-norm direction; skipping.", c)
+            continue
+        D[:, c] = diff / norm
+
+    return D.astype(np.float32)
