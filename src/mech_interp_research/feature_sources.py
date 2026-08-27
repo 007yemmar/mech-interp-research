@@ -85,3 +85,157 @@ def write_pseudo_sae(
 
     logger.info("Wrote pseudo-SAE source: %s (d_model=%d, k=%d)", out, d_model, k)
     return out
+
+
+DEFAULT_TARGET_DENSITY = 0.002220  # mean_l0 40.9157 / d_sae 18432
+
+
+def calibrate_thresholds(
+    W_enc: np.ndarray,
+    token_sample: np.ndarray,
+    target_density: float = DEFAULT_TARGET_DENSITY,
+) -> np.ndarray:
+    """Per-column threshold that makes each direction fire at ``target_density``.
+
+    This is the TOKEN-level calibrator. It is retained for reporting only —
+    per spec Sec 5.5, arms are built against the NOTE-level detection rate
+    (see `calibrate_thresholds_note_level`), because the audit pipeline
+    correlates ICD codes against max-pooled, per-note SAE activations, and
+    note-level detection is what drives that number. A direction calibrated
+    to a token-level density of 0.222% fires on ~99.97% of notes (each note
+    averages ~3,089 tokens), while the real SAE latents this harness must
+    match average 67.5% note-level detection — a ~400x mismatch on the
+    quantity the pipeline actually measures.
+
+    Args:
+        W_enc:          [d_model, k] direction matrix.
+        token_sample:   [n_tokens, d_model] sample of centered token activations.
+        target_density: Fraction of tokens each direction should fire on.
+
+    Returns:
+        threshold: [k] float32, clamped to >= 0.
+    """
+    if not 0.0 < target_density < 1.0:
+        raise ValueError(f"target_density must be in (0, 1), got {target_density}")
+
+    W_enc = np.asarray(W_enc, dtype=np.float32)
+    pre = np.asarray(token_sample, dtype=np.float32) @ W_enc  # [n_tokens, k]
+    theta = np.quantile(pre, 1.0 - target_density, axis=0)
+    theta = np.maximum(theta, 0.0).astype(np.float32)
+
+    measured = (pre > theta).mean(axis=0)
+    logger.info(
+        "Calibrated %d thresholds to density %.5f (measured mean %.5f, min %.5f, max %.5f)",
+        theta.size,
+        target_density,
+        float(measured.mean()),
+        float(measured.min()),
+        float(measured.max()),
+    )
+    return theta
+
+
+def calibrate_thresholds_note_level(
+    W_enc: np.ndarray,
+    token_sample: np.ndarray,
+    note_ids: np.ndarray,
+    target_rates: np.ndarray,
+    max_iter: int = 60,
+) -> np.ndarray:
+    """Per-column threshold matching each direction's NOTE-level detection rate.
+
+    This is the calibrator actually used to build arms (spec Sec 5.5). A note
+    is "detected" by column c if any of its tokens has a pre-activation above
+    theta_c. Raising theta_c can only shrink the set of detected notes, so
+    note-level rate is a monotone non-increasing function of theta_c —
+    bisection is therefore exact (up to the resolution of `max_iter`).
+
+    ``target_rates`` should be the note-level detection rate measured for the
+    Arm-C (real SAE) latent matched to each column, i.e. `p_c` from Task 0.1 —
+    not the token-level `target_density` used by `calibrate_thresholds`.
+
+    Args:
+        W_enc:        [d_model, k] direction matrix.
+        token_sample: [n_tokens, d_model] sample of centered token activations.
+        note_ids:     [n_tokens] integer array; note_ids[i] is the note index
+                      that token i (row i of token_sample) belongs to.
+        target_rates: [k] desired fraction of notes with >=1 firing token,
+                      one per column.
+        max_iter:     Bisection iterations per column.
+
+    Returns:
+        threshold: [k] float32, clamped to >= 0.
+    """
+    W_enc = np.asarray(W_enc, dtype=np.float32)
+    token_sample = np.asarray(token_sample, dtype=np.float32)
+    note_ids = np.asarray(note_ids)
+    target_rates = np.asarray(target_rates, dtype=np.float64)
+
+    if token_sample.shape[0] != note_ids.shape[0]:
+        raise ValueError(
+            "token_sample and note_ids must have matching row counts, got "
+            f"{token_sample.shape[0]} vs {note_ids.shape[0]}"
+        )
+    d_model, k = W_enc.shape
+    if target_rates.shape != (k,):
+        raise ValueError(f"target_rates must have shape ({k},), got {target_rates.shape}")
+    if not np.all((target_rates >= 0.0) & (target_rates <= 1.0)):
+        raise ValueError("target_rates entries must be in [0, 1]")
+
+    pre = (token_sample @ W_enc).astype(np.float64)  # [n_tokens, k]
+
+    _, note_idx = np.unique(note_ids, return_inverse=True)
+    n_notes = int(note_idx.max()) + 1 if note_idx.size else 0
+    if n_notes == 0:
+        raise ValueError("note_ids must be non-empty")
+
+    # Only the per-note max pre-activation matters for detection: a note
+    # fires iff its max token pre-activation exceeds theta. Collapsing to
+    # this [n_notes, k] array makes each bisection step O(n_notes) instead
+    # of O(n_tokens).
+    note_max = np.full((n_notes, k), -np.inf, dtype=np.float64)
+    np.maximum.at(note_max, note_idx, pre)
+
+    theta = np.zeros(k, dtype=np.float64)
+    measured_note = np.empty(k, dtype=np.float64)
+
+    for c in range(k):
+        col_note_max = note_max[:, c]
+        target = float(target_rates[c])
+        hi_bound = float(max(col_note_max.max(), 0.0))
+
+        def note_rate(th: float, col_note_max: np.ndarray = col_note_max) -> float:
+            return float((col_note_max > th).mean())
+
+        rate_at_zero = note_rate(0.0)
+        if rate_at_zero <= target:
+            # Even at the theta=0 floor, the achievable rate is already at
+            # or below target: raising theta below 0 is forbidden (see
+            # write_pseudo_sae's non-negativity constraint), so 0 is the
+            # closest achievable threshold. This also covers target=1.0.
+            theta[c] = 0.0
+        else:
+            lo, hi = 0.0, hi_bound
+            for _ in range(max_iter):
+                mid = (lo + hi) / 2.0
+                if note_rate(mid) > target:
+                    lo = mid
+                else:
+                    hi = mid
+            theta[c] = hi
+
+        measured_note[c] = note_rate(theta[c])
+
+    theta = np.maximum(theta, 0.0).astype(np.float32)
+
+    measured_token = (pre > theta).mean(axis=0)
+    logger.info(
+        "Calibrated %d thresholds to note-level targets (measured note-rate mean %.4f, "
+        "min %.4f, max %.4f; token-level measured mean %.5f)",
+        k,
+        float(measured_note.mean()),
+        float(measured_note.min()),
+        float(measured_note.max()),
+        float(measured_token.mean()),
+    )
+    return theta
