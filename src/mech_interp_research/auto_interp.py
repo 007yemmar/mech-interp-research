@@ -52,6 +52,7 @@ def select_features(
     weak_lo: float = 0.1,
     weak_hi: float = 0.3,
     seed: int = 42,
+    explicit_features: list[int] | None = None,
 ) -> dict[str, list[int]]:
     """Select features in four tiers for auto-interp.
 
@@ -71,11 +72,25 @@ def select_features(
         weak_lo: Lower bound for weak grounding (default 0.1).
         weak_hi: Upper bound for weak grounding (default 0.3).
         seed: Random seed for reproducible sampling.
+        explicit_features: If given, bypass tiering entirely and return exactly
+            these feature indices as 'strong_grounded', with the other tiers
+            empty. Used by sources whose k has no tier structure (one direction
+            per code). Default None reproduces the original behaviour exactly.
 
     Returns:
         Dict with keys 'strong_grounded', 'weak_grounded', 'non_grounded',
         'dead', each mapping to a list of feature indices.
     """
+    if explicit_features is not None:
+        ids = [int(i) for i in explicit_features]
+        logger.info("Explicit feature list supplied (%d features); skipping tiering.", len(ids))
+        return {
+            "strong_grounded": ids,
+            "weak_grounded": [],
+            "non_grounded": [],
+            "dead": [],
+        }
+
     rng = np.random.default_rng(seed)
     d_sae = r_pb.shape[0]
     max_abs_r = np.abs(r_pb).max(axis=1)
@@ -1582,6 +1597,7 @@ def run_auto_interp(
     scorers: list[str] | None = None,
     concordance_thresholds: list[float] | None = None,
     random_seed: int = 42,
+    explicit_features: list[int] | None = None,
     icd_descriptions_path: str | None = None,
     icd_keywords_yaml_path: str | None = None,
     model_name: str = "google/gemma-2-2b",
@@ -1633,6 +1649,7 @@ def run_auto_interp(
         n_non_grounded=n_non_grounded,
         n_dead=n_dead,
         seed=random_seed,
+        explicit_features=explicit_features,
     )
 
     feature_list: list[tuple[int, str]] = []

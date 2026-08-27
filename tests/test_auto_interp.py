@@ -1231,3 +1231,50 @@ class TestScoreExplanationAgainstContexts:
         assert fuzz is None  # fuzzing not requested
         assert det is not None and 0.0 <= det <= 1.0
         assert perr == 0
+
+
+def test_select_features_explicit_list_bypasses_tiering() -> None:
+    """An explicit list is returned as the strong tier with all others empty."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import select_features
+
+    rng = np.random.default_rng(0)
+    d_sae, n_codes = 40, 4
+    r_pb = rng.normal(scale=0.2, size=(d_sae, n_codes))
+    p_adj = np.full((d_sae, n_codes), 0.5)
+    significant = np.zeros((d_sae, n_codes), dtype=bool)
+    note_vectors = rng.random(size=(50, d_sae))
+
+    out = select_features(
+        r_pb,
+        p_adj,
+        significant,
+        [f"icd9_{i}" for i in range(n_codes)],
+        note_vectors,
+        explicit_features=[3, 11, 29],
+    )
+
+    assert out["strong_grounded"] == [3, 11, 29]
+    assert out["weak_grounded"] == []
+    assert out["non_grounded"] == []
+    assert out["dead"] == []
+
+
+def test_select_features_default_is_unchanged_by_the_new_parameter() -> None:
+    """explicit_features=None must reproduce the pre-existing tiering exactly."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import select_features
+
+    rng = np.random.default_rng(1)
+    d_sae, n_codes = 60, 3
+    r_pb = rng.normal(scale=0.3, size=(d_sae, n_codes))
+    p_adj = rng.random(size=(d_sae, n_codes))
+    significant = p_adj < 0.2
+    note_vectors = rng.random(size=(40, d_sae))
+    args = (r_pb, p_adj, significant, [f"icd9_{i}" for i in range(n_codes)], note_vectors)
+
+    a = select_features(*args, seed=42)
+    b = select_features(*args, seed=42, explicit_features=None)
+    assert a == b
