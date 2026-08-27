@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -241,6 +241,67 @@ def calibrate_thresholds_note_level(
         float(measured_token.mean()),
     )
     return theta
+
+
+def sae_note_level_densities(
+    shard_ckpt_dir: str | Path,
+    feature_ids: Sequence[int],
+    held_out_shard_start: int = 281,
+) -> np.ndarray:
+    """Note-level detection rate of each Arm-C latent, on SELECTION notes only.
+
+    This is the per-code calibration target every constructed arm is built
+    against (spec Sec 5.5, Ruling 1): the fraction of selection notes
+    (shard < held_out_shard_start) where the reference SAE's matched latent
+    has a non-zero pooled value — i.e. fired on at least one token in that
+    note. A note is "detected" the same way the downstream ICD grounding
+    eval detects it (max-pooling a JumpReLU encoding is zero unless at least
+    one token cleared the latent's threshold), so this is exactly the
+    quantity ``calibrate_thresholds_note_level`` needs as ``target_rates``.
+
+    Audit notes (shard >= held_out_shard_start) are excluded so the
+    calibration target itself never touches held-out data.
+
+    Args:
+        shard_ckpt_dir: Directory of per-shard encode checkpoints from a
+            completed icd_eval run (``shard_NNNN_vectors.npy`` +
+            ``shard_NNNN_meta.jsonl``), as read by
+            ``icd_eval.reassemble_note_vectors``.
+        feature_ids:    Latent index per code (length n_codes), e.g. from
+            ``necessity_stats.select_feature_per_code`` on the selection set.
+        held_out_shard_start: Selection/audit shard boundary.
+
+    Returns:
+        target_rates: [n_codes] float64, one note-level detection rate per
+        entry of ``feature_ids``.
+    """
+    from mech_interp_research.icd_eval import reassemble_note_vectors
+
+    vectors, note_meta = reassemble_note_vectors(shard_ckpt_dir)
+    if "shard" not in note_meta.columns:
+        raise KeyError("shard_ckpt metadata must carry a 'shard' column to split on")
+
+    selection = note_meta["shard"].to_numpy() < held_out_shard_start
+    n_selection = int(selection.sum())
+    if n_selection == 0:
+        raise ValueError(
+            f"No selection notes (shard < {held_out_shard_start}) found in {shard_ckpt_dir}"
+        )
+
+    feature_ids_arr = np.asarray(list(feature_ids), dtype=int)
+    sel_vectors = vectors[selection][:, feature_ids_arr]  # [n_selection, n_codes]
+    rates = (sel_vectors != 0).mean(axis=0).astype(np.float64)
+
+    logger.info(
+        "Note-level densities for %d latents over %d selection notes "
+        "(mean=%.4f, min=%.4f, max=%.4f)",
+        feature_ids_arr.size,
+        n_selection,
+        float(rates.mean()),
+        float(rates.min()),
+        float(rates.max()),
+    )
+    return rates
 
 
 DIFF_IN_MEANS_VARIANTS = ("v1_plain", "v2_zscored", "v3_diag_lda")

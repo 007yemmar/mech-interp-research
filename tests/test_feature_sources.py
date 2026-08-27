@@ -191,6 +191,63 @@ def test_calibrate_thresholds_note_level_are_non_negative() -> None:
     assert np.all(theta >= 0.0)
 
 
+def _write_shard_ckpt(ckpt_dir: Path, shard: int, vectors: np.ndarray, note_idx_start: int) -> None:
+    """Write one shard's pooled vectors + metadata, in the encode_and_pool checkpoint shape."""
+    np.save(ckpt_dir / f"shard_{shard:04d}_vectors.npy", vectors)
+    with open(ckpt_dir / f"shard_{shard:04d}_meta.jsonl", "w") as f:
+        for i in range(vectors.shape[0]):
+            f.write(json.dumps({"note_idx": note_idx_start + i, "shard": shard}) + "\n")
+
+
+def test_sae_note_level_densities_uses_only_selection_shards(tmp_path: Path) -> None:
+    """Densities are the fraction of SELECTION notes with a non-zero pooled value.
+
+    Audit-shard notes (shard >= held_out_shard_start) must never influence the
+    result — the calibration target must not touch held-out data.
+    """
+    from mech_interp_research.feature_sources import sae_note_level_densities
+
+    ckpt_dir = tmp_path / "shard_ckpt"
+    ckpt_dir.mkdir()
+
+    # Selection shard (shard=0, < held_out_shard_start=10): 4 notes, d_sae=4.
+    # latent 0 fires (nonzero) on 3/4 notes; latent 2 fires on 1/4.
+    sel_vectors = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [2.0, 0.0, 3.0, 0.0],
+            [1.5, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    _write_shard_ckpt(ckpt_dir, shard=0, vectors=sel_vectors, note_idx_start=0)
+
+    # Audit shard (shard=20 >= 10): every latent fires on every note. If this
+    # leaked into the computation, the measured rates would be pulled toward 1.0.
+    audit_vectors = np.ones((4, 4), dtype=np.float32)
+    _write_shard_ckpt(ckpt_dir, shard=20, vectors=audit_vectors, note_idx_start=100)
+
+    feature_ids = [0, 2]  # code 0 -> latent 0, code 1 -> latent 2
+    rates = sae_note_level_densities(ckpt_dir, feature_ids, held_out_shard_start=10)
+
+    np.testing.assert_allclose(rates, [0.75, 0.25])
+
+
+def test_sae_note_level_densities_raises_with_no_selection_notes(tmp_path: Path) -> None:
+    """A held_out_shard_start below every shard leaves nothing to calibrate on."""
+    from mech_interp_research.feature_sources import sae_note_level_densities
+
+    ckpt_dir = tmp_path / "shard_ckpt"
+    ckpt_dir.mkdir()
+    _write_shard_ckpt(
+        ckpt_dir, shard=5, vectors=np.ones((2, 3), dtype=np.float32), note_idx_start=0
+    )
+
+    with pytest.raises(ValueError, match="[Ss]election"):
+        sae_note_level_densities(ckpt_dir, [0], held_out_shard_start=0)
+
+
 def _planted_problem(seed: int = 7, n: int = 4_000, d: int = 24, k_codes: int = 3):
     """A labelled activation matrix with a planted per-code mean shift."""
     rng = np.random.default_rng(seed)

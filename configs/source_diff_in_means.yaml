@@ -1,0 +1,54 @@
+# Feature source: diff-in-means (Arm D).
+#
+# Builds one direction per ICD-9 code from pooled RAW (unencoded) activations
+# + labels (V1/V2/V3 per build_diff_in_means_variants), calibrated to the
+# reference SAE's NOTE-level per-code detection rate (spec Sec 5.5) so each
+# direction fires on notes at the rate the real SAE latent it is compared
+# against does -- not at a token-level firing rate, which would overshoot by
+# ~400x on this quantity (see modal_app/build_feature_source.py docstring).
+#
+# Run:
+#   uv run modal run modal_app/build_feature_source.py --config-file configs/source_diff_in_means.yaml
+
+arm: diff_in_means
+variant: v2_zscored          # v1_plain | v2_zscored | v3_diag_lda
+output_dir: /out/sources/dim_v2_zscored
+
+# Centered activation shards -- only used here for threshold calibration
+# (_sample_tokens draws a token sample from selection shards).
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+# Pooled RAW (not SAE-encoded) activations per note, from the raw-LR
+# baseline's shard_ckpt -- the direction-construction input for this arm.
+pooled_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+
+# Reference JumpReLU SAE's own pooled-vector checkpoints. Used twice: (1) to
+# select Arm C's 46 (latent, code) pairs on the selection set -- the same
+# selection every other arm is calibrated against
+# (_arm_c_selected_features in build_feature_source.py, cached to
+# arm_c_selected_features_path below); (2) to measure each selected latent's
+# NOTE-level detection rate, which is this arm's threshold calibration
+# target (Ruling 1 / spec Sec 5.5).
+sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
+
+icd_csv_path: /data/sample_50k.csv
+
+held_out_shard_start: 281
+
+# Token-level density is still computed and written to source_meta.json, but
+# ONLY for audit -- it is not what the threshold is calibrated to. Compare
+# note_level_target_rate / note_level_measured_rate against
+# token_level_*_reported_only in the written source_meta.json.
+target_density: 0.002220
+calibration_n_shards: 6
+calibration_tokens_per_shard: 40000
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+seed: 42
+logging_level: INFO
