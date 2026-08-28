@@ -16,5 +16,6 @@ max_codes: 50
 min_notes: 100
 
 r_threshold: 0.1
-bh_q: 0.05
+fdr_q: 0.05
+skip_diagnostics: true   # diagnostic_metrics.json already written; saves ~15 min of re-scan
 logging_level: INFO
