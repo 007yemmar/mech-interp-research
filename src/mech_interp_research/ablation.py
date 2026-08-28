@@ -142,6 +142,30 @@ class AblationConfig:
     # Subset of held-out notes for the smoke run. None = all matched notes.
     max_notes: int | None = None
 
+    # ----------------- Intervention (#6 mean-ablation) ---------------------
+    # "zero" (default): remove the feature's whole contribution (original).
+    # "mean": clamp the feature to its dataset-mean activation m_j, removing
+    #   only this note's deviation from baseline (cleaner counterfactual).
+    intervention: str = "zero"
+    # Optional precomputed {feature_idx: m_j} JSON. If None and intervention
+    # == "mean", m_j is estimated from the activation shards at run time.
+    mean_act_path: str | None = None
+    mean_act_n_shards: int = 4  # shards sampled for the m_j estimate
+    mean_act_max_tokens: int = 200000  # token cap for the m_j estimate
+
+    # ----------------- Section-local loss (#5) -----------------------------
+    # When True, additionally measure CE over the discharge-diagnosis section
+    # tokens vs the rest of the note (per pass), alongside the final-25% window.
+    measure_sections: bool = False
+    # Header regexes that open the target section (first match, to next header).
+    section_headers: list[str] = field(
+        default_factory=lambda: [
+            r"discharge diagnos[ie]s",
+            r"final diagnos[ie]s",
+            r"discharge diagnosis",
+        ]
+    )
+
     # ----------------- Output ----------------------------------------------
     output_dir: str = ""
     # Per-shard checkpoint subdir. Resume: re-running skips shards with
@@ -182,6 +206,8 @@ class AblationConfig:
             )
         if not (0.0 < self.loss_window_frac <= 1.0):
             raise ValueError(f"loss_window_frac must be in (0, 1], got {self.loss_window_frac}")
+        if self.intervention not in ("zero", "mean"):
+            raise ValueError(f"intervention must be 'zero' or 'mean', got {self.intervention!r}")
 
 
 def load_ablation_config(path: str | Path) -> AblationConfig:
@@ -402,6 +428,30 @@ class TorchSAE:
         )
         return x_hat - contribution
 
+    @torch.no_grad()
+    def decode_with_mean_ablation(
+        self,
+        z: torch.Tensor,  # [..., d_sae]
+        feature_idx: int,
+        mean_act: float,
+    ) -> torch.Tensor:
+        """Decode while clamping feature_idx to its dataset-mean activation.
+
+        Mean-ablation counterfactual: instead of removing the feature entirely
+        (zero-ablation), we set it to its typical level m_j, removing only this
+        note's *deviation* from baseline:
+
+            x_hat_mean_abl = decode(z) - (z[..., j] - m_j) . W_dec[j]
+
+        When m_j = 0 this reduces exactly to decode_with_ablation. Reuses the
+        full decode so the caller can share x_hat across many features.
+        """
+        x_hat = self.decode(z)
+        contribution = (z[..., feature_idx : feature_idx + 1] - mean_act) * self.W_dec[
+            feature_idx : feature_idx + 1
+        ]
+        return x_hat - contribution
+
 
 # ---------------------------------------------------------------------------
 # 3.  Forward-hook splice mechanism
@@ -572,6 +622,57 @@ def cross_entropy_in_window(
     return float(loss.item())
 
 
+def build_section_mask(
+    text: str,
+    offset_mapping: Any,  # [seq_len, 2] array/list of (char_start, char_end) per token
+    n_real: int,
+    seq_len: int,
+    section_headers: list[str],
+) -> np.ndarray:
+    """Bool mask over prediction positions whose predicted token falls in the
+    first matched clinical section (e.g. discharge diagnosis).
+
+    Same shifted-prediction convention as build_loss_window_mask: position t
+    (0..seq_len-2) predicts token t+1, so t is "in section" iff token t+1's
+    character span overlaps the section span. The section runs from the first
+    matched header to the next header (any pattern) after it, else end of text.
+
+    Torch-free (returns np.ndarray) so it unit-tests without a model. Returns
+    all-False if no header matches — the caller falls back to the loss window.
+    """
+    import re
+
+    mask = np.zeros(max(seq_len - 1, 0), dtype=bool)
+    if not section_headers or seq_len < 2 or n_real < 2:
+        return mask
+    header_re = re.compile("|".join(f"(?:{h})" for h in section_headers), re.IGNORECASE)
+    matches = list(header_re.finditer(text))
+    if not matches:
+        return mask
+    first = matches[0]
+    sec_start = first.start()
+    sec_end = len(text)
+    for m in matches[1:]:
+        if m.start() > first.end():
+            sec_end = m.start()
+            break
+    for t in range(min(seq_len - 1, n_real - 1)):
+        cs, ce = int(offset_mapping[t + 1][0]), int(offset_mapping[t + 1][1])
+        if cs == 0 and ce == 0:
+            continue  # special token (BOS etc.)
+        if cs < sec_end and ce > sec_start:
+            mask[t] = True
+    return mask
+
+
+def real_prediction_mask(n_real: int, seq_len: int) -> np.ndarray:
+    """Bool mask [seq_len-1] of positions that predict a real (non-pad) token."""
+    mask = np.zeros(max(seq_len - 1, 0), dtype=bool)
+    if n_real >= 2:
+        mask[0 : n_real - 1] = True
+    return mask
+
+
 # ---------------------------------------------------------------------------
 # 5.  Per-note ablation
 # ---------------------------------------------------------------------------
@@ -598,6 +699,16 @@ class NoteAblationResult:
     # to detect features that fire mostly outside the window (which would
     # explain a null ablation effect despite high overall activation).
     per_feature_mean_act_in_window: dict[int, float] = field(default_factory=dict)
+    # --- Section-local (#5); populated only when measure_sections=True. ---
+    # Losses over the discharge-diagnosis section vs the rest of the note.
+    n_section_tokens: int = 0
+    n_rest_tokens: int = 0
+    loss_clean_section: float = float("nan")
+    loss_recon_section: float = float("nan")
+    per_feature_section: dict[int, float] = field(default_factory=dict)
+    loss_clean_rest: float = float("nan")
+    loss_recon_rest: float = float("nan")
+    per_feature_rest: dict[int, float] = field(default_factory=dict)
 
 
 def run_ablation_for_note(
@@ -614,8 +725,16 @@ def run_ablation_for_note(
     loss_window_frac: float,
     min_loss_window_tokens: int,
     layer_dtype: torch.dtype,
+    intervention: str = "zero",
+    mean_acts: dict[int, float] | None = None,
+    measure_sections: bool = False,
+    section_headers: list[str] | None = None,
 ) -> NoteAblationResult | None:
     """Run all ablations for one note. Returns None if note is too short.
+
+    intervention: "zero" removes the feature's whole contribution; "mean"
+    clamps it to its dataset mean m_j (from ``mean_acts``), the #6 counterfactual.
+    measure_sections: additionally measure section vs rest CE per pass (#5).
 
     Steps:
       1. Tokenize text (truncate to max_length, add special tokens — matches extraction).
@@ -637,6 +756,7 @@ def run_ablation_for_note(
         truncation=True,
         max_length=max_length,
         add_special_tokens=True,
+        return_offsets_mapping=measure_sections,
     )
     input_ids = enc["input_ids"].to(device)
     attn_mask = enc["attention_mask"].to(device)
@@ -648,6 +768,31 @@ def run_ablation_for_note(
     if n_in_window < min_loss_window_tokens:
         return None  # skip this note
 
+    # Section-local masks (#5): section = discharge-diagnosis span, rest = the
+    # remaining real prediction positions. cross_entropy_in_window returns NaN
+    # for an all-False mask (no section found), which we record as NaN.
+    section_mask_t: torch.Tensor | None = None
+    rest_mask_t: torch.Tensor | None = None
+    n_section_tokens = 0
+    n_rest_tokens = 0
+    if measure_sections:
+        offsets = enc["offset_mapping"][0]
+        sec_np = build_section_mask(text, offsets, n_real, seq_len, section_headers or [])
+        rest_np = real_prediction_mask(n_real, seq_len) & ~sec_np
+        section_mask_t = torch.from_numpy(sec_np)
+        rest_mask_t = torch.from_numpy(rest_np)
+        n_section_tokens = int(sec_np.sum())
+        n_rest_tokens = int(rest_np.sum())
+
+    def _sec_rest(logits: torch.Tensor) -> tuple[float, float]:
+        """Section and rest CE for one pass (NaN each when disabled/empty)."""
+        if not measure_sections:
+            return float("nan"), float("nan")
+        return (
+            cross_entropy_in_window(logits, input_ids, section_mask_t),
+            cross_entropy_in_window(logits, input_ids, rest_mask_t),
+        )
+
     # ---- 1. Clean forward: capture x16, no splice ----
     splice.mode = "capture"
     splice.captured = None
@@ -657,6 +802,7 @@ def run_ablation_for_note(
     if x16 is None:
         raise RuntimeError("LayerSplice failed to capture residual — hook not firing?")
     loss_clean = cross_entropy_in_window(out.logits, input_ids, window_mask)
+    loss_clean_section, loss_clean_rest = _sec_rest(out.logits)
     # Free the 4 GB logits tensor and the rest of the forward's intermediates
     # before allocating new ones for the next forward.
     del out
@@ -696,12 +842,15 @@ def run_ablation_for_note(
     with torch.no_grad():
         out_recon = model(input_ids=input_ids, attention_mask=attn_mask, use_cache=False)
     loss_recon = cross_entropy_in_window(out_recon.logits, input_ids, window_mask)
+    loss_recon_section, loss_recon_rest = _sec_rest(out_recon.logits)
     del out_recon
 
     # ---- 4. Per-feature ablations ----
     per_feature_loss: dict[int, float] = {}
     per_feature_mean_act: dict[int, float] = {}
     per_feature_mean_act_in_window: dict[int, float] = {}
+    per_feature_section: dict[int, float] = {}
+    per_feature_rest: dict[int, float] = {}
 
     # Token-position window: residual positions whose predictions are scored
     # by the loss. Matches the convention in build_loss_window_mask: prediction
@@ -713,7 +862,11 @@ def run_ablation_for_note(
     window_token_end = max(window_token_start + 1, n_real)
 
     for j in target_feature_indices:
-        x_hat_abl = sae.decode_with_ablation(z, feature_idx=j)
+        if intervention == "mean":
+            m_j = float(mean_acts.get(j, 0.0)) if mean_acts else 0.0
+            x_hat_abl = sae.decode_with_mean_ablation(z, feature_idx=j, mean_act=m_j)
+        else:
+            x_hat_abl = sae.decode_with_ablation(z, feature_idx=j)
         splice.splice_tensor = _build_full(x_hat_abl)
         with torch.no_grad():
             out_abl = model(input_ids=input_ids, attention_mask=attn_mask, use_cache=False)
@@ -723,6 +876,10 @@ def run_ablation_for_note(
         per_feature_mean_act_in_window[j] = float(
             z[0, window_token_start:window_token_end, j].mean().item()
         )
+        if measure_sections:
+            ls, lr = _sec_rest(out_abl.logits)
+            per_feature_section[j] = ls
+            per_feature_rest[j] = lr
         # Free per-feature forward intermediates so consecutive features don't
         # accumulate ~4 GB of fp16 logits each on the active-tensors list.
         del out_abl, x_hat_abl
@@ -740,6 +897,14 @@ def run_ablation_for_note(
         per_feature=per_feature_loss,
         per_feature_mean_act=per_feature_mean_act,
         per_feature_mean_act_in_window=per_feature_mean_act_in_window,
+        n_section_tokens=n_section_tokens,
+        n_rest_tokens=n_rest_tokens,
+        loss_clean_section=loss_clean_section,
+        loss_recon_section=loss_recon_section,
+        per_feature_section=per_feature_section,
+        loss_clean_rest=loss_clean_rest,
+        loss_recon_rest=loss_recon_rest,
+        per_feature_rest=per_feature_rest,
     )
 
 
@@ -1036,6 +1201,62 @@ def _make_target_feature_list(targets: list[dict[str, Any]]) -> list[int]:
     return ordered
 
 
+def compute_mean_latent_activations(
+    sae: TorchSAE,
+    activations_dir: str | Path,
+    feature_indices: list[int],
+    max_tokens: int = 200_000,
+    n_shards: int = 4,
+    encode_batch_tokens: int = 16384,
+) -> dict[int, float]:
+    """Mean latent activation m_j for each target feature, for mean-ablation.
+
+    Streams a sample of activation shards (fp16 safetensors), encodes them
+    through the SAE (a matmul — no Gemma forward), and averages each target
+    latent over tokens. Shards in ``activations_dir`` are already in the SAE's
+    input space (centered for vanilla/JumpReLU, raw for GemmaScope), matching
+    how run_ablation_for_note encodes, so we feed them to ``sae.encode``
+    directly. Uses the first ``n_shards`` (training shards, not the held-out
+    tail) capped at ``max_tokens``.
+    """
+    from safetensors.torch import load_file
+
+    activations_dir = Path(activations_dir)
+    shard_files = sorted(activations_dir.glob("shard_*.safetensors"))[:n_shards]
+    if not shard_files:
+        raise FileNotFoundError(f"No shard_*.safetensors in {activations_dir}")
+    idx = torch.tensor(feature_indices, dtype=torch.long, device=sae.device)
+    sums = torch.zeros(len(feature_indices), dtype=torch.float64, device=sae.device)
+    total = 0
+    for fp in shard_files:
+        if total >= max_tokens:
+            break
+        acts = load_file(str(fp))["activations"]  # CPU tensor [T, d_model] fp16
+        remaining = max_tokens - total
+        if acts.shape[0] > remaining:
+            acts = acts[:remaining]
+        # Encode in small token batches to bound peak GPU memory. A whole-shard
+        # encode makes z = [~200k, 18432] fp32 (~15 GB) and OOMs a 40 GB GPU
+        # alongside Gemma; a 16k-token batch is ~1.2 GB. Batches accumulate into
+        # the same float64 sum, so the estimate is order-independent.
+        for i in range(0, acts.shape[0], encode_batch_tokens):
+            chunk = acts[i : i + encode_batch_tokens].to(device=sae.device, dtype=sae.dtype)
+            z = sae.encode(chunk)
+            sums += z.index_select(1, idx).sum(dim=0).to(torch.float64)
+            total += int(chunk.shape[0])
+            del chunk, z
+    if total == 0:
+        raise RuntimeError("No tokens read for mean-activation estimate")
+    means = (sums / total).cpu().tolist()
+    result = {int(j): float(m) for j, m in zip(feature_indices, means, strict=True)}
+    logger.info(
+        f"Computed mean latent activation over {total} tokens for "
+        f"{len(feature_indices)} features (range {min(result.values()):.4f}"
+        f"..{max(result.values()):.4f})"
+    )
+    return result
+
+
 def run_ablation(
     config: AblationConfig,
     on_shard_complete: Any = None,  # callable(shard_idx) → None
@@ -1134,6 +1355,31 @@ def run_ablation(
         f"{len(config.targets)} (feature, code) targets"
     )
 
+    # Mean-ablation (#6): resolve per-feature mean latent m_j once up front, and
+    # cache it in the output dir. On a preempted-then-resumed run this skips the
+    # (GPU-heavy) recompute and guarantees the resumed shards use the exact same
+    # m_j the already-completed shards were ablated with.
+    mean_acts: dict[int, float] | None = None
+    if config.intervention == "mean":
+        cache_path = (
+            Path(config.mean_act_path) if config.mean_act_path else output_dir / "mean_acts.json"
+        )
+        if cache_path.exists():
+            mean_acts = {int(k): float(v) for k, v in json.loads(cache_path.read_text()).items()}
+            logger.info(f"Loaded {len(mean_acts)} mean activations from {cache_path}")
+        else:
+            mean_acts = compute_mean_latent_activations(
+                sae,
+                config.activations_dir,
+                target_feature_indices,
+                max_tokens=config.mean_act_max_tokens,
+                n_shards=config.mean_act_n_shards,
+            )
+            save_path = output_dir / "mean_acts.json"
+            save_path.write_text(json.dumps({str(k): v for k, v in mean_acts.items()}))
+            logger.info(f"Saved mean activations to {save_path}")
+    logger.info(f"Intervention={config.intervention}, measure_sections={config.measure_sections}")
+
     all_results: list[NoteAblationResult] = []
     # Group held-out notes by shard for per-shard checkpointing.
     held_shards = sorted(held["shard"].unique())
@@ -1162,6 +1408,18 @@ def run_ablation(
                         },
                         per_feature_mean_act_in_window={
                             int(k): float(v) for k, v in act_in_window_raw.items()
+                        },
+                        n_section_tokens=int(rec.get("n_section_tokens", 0)),
+                        n_rest_tokens=int(rec.get("n_rest_tokens", 0)),
+                        loss_clean_section=float(rec.get("loss_clean_section", float("nan"))),
+                        loss_recon_section=float(rec.get("loss_recon_section", float("nan"))),
+                        per_feature_section={
+                            int(k): float(v) for k, v in rec.get("per_feature_section", {}).items()
+                        },
+                        loss_clean_rest=float(rec.get("loss_clean_rest", float("nan"))),
+                        loss_recon_rest=float(rec.get("loss_recon_rest", float("nan"))),
+                        per_feature_rest={
+                            int(k): float(v) for k, v in rec.get("per_feature_rest", {}).items()
                         },
                     )
                 )
@@ -1200,6 +1458,14 @@ def run_ablation(
                 "per_feature_mean_act_in_window": {
                     str(k): v for k, v in r.per_feature_mean_act_in_window.items()
                 },
+                "n_section_tokens": r.n_section_tokens,
+                "n_rest_tokens": r.n_rest_tokens,
+                "loss_clean_section": r.loss_clean_section,
+                "loss_recon_section": r.loss_recon_section,
+                "per_feature_section": {str(k): v for k, v in r.per_feature_section.items()},
+                "loss_clean_rest": r.loss_clean_rest,
+                "loss_recon_rest": r.loss_recon_rest,
+                "per_feature_rest": {str(k): v for k, v in r.per_feature_rest.items()},
             }
             for r in buffer
         ]
@@ -1238,6 +1504,10 @@ def run_ablation(
             loss_window_frac=config.loss_window_frac,
             min_loss_window_tokens=config.min_loss_window_tokens,
             layer_dtype=layer_dtype,
+            intervention=config.intervention,
+            mean_acts=mean_acts,
+            measure_sections=config.measure_sections,
+            section_headers=config.section_headers,
         )
         if result is None:
             n_skipped_short += 1
@@ -1288,8 +1558,20 @@ def run_ablation(
         "mean_loss_clean": float(stats_df["mean_loss_clean"].mean()),
         "mean_loss_recon": float(stats_df["mean_loss_recon"].mean()),
         "mean_recon_tax": float(stats_df["mean_recon_tax"].mean()),
+        "intervention": config.intervention,
         "config": asdict(config),
     }
+    # Section-local coverage (#5): how many notes had a discharge-diagnosis
+    # section found, and its typical size. Confirms the parser is firing.
+    if config.measure_sections and all_results:
+        n_found = sum(1 for r in all_results if r.n_section_tokens > 0)
+        sec_tokens = [r.n_section_tokens for r in all_results if r.n_section_tokens > 0]
+        summary["section_coverage"] = {
+            "n_notes_with_section": int(n_found),
+            "frac_notes_with_section": float(n_found / len(all_results)),
+            "mean_section_tokens": float(np.mean(sec_tokens)) if sec_tokens else 0.0,
+            "median_section_tokens": float(np.median(sec_tokens)) if sec_tokens else 0.0,
+        }
     summary_path = output_dir / "ablation_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=str))
     logger.info(f"Wrote {summary_path}")
