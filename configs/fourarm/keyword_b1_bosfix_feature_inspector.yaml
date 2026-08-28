@@ -1,0 +1,24 @@
+# Token-level contexts for keyword_b1 — feeds the LLM explainer.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/sources/keyword_b1
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/icd_eval/fourarm/keyword_b1_bosfix
+output_dir: /out/icd_eval/fourarm/keyword_b1_bosfix/feature_inspection
+
+model_name: google/gemma-2-2b
+max_length: 8192
+
+n_pairs: 46          # one direction per code
+top_k: 50
+context_window: 5
+n_shards: 20         # of the 31 audit shards
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+text_col: note_text
+
+rng_seed: 42
+logging_level: INFO
