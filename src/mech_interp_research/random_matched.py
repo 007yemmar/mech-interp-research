@@ -101,6 +101,7 @@ from mech_interp_research.necessity_audit import (
 logger = logging.getLogger(__name__)
 
 SamplingMethod = Literal["eigh", "cholesky"]
+DirectionsMode = Literal["random", "pca"]
 
 # JumpReLU and vanilla mean-L0 measured on the 31 held-out shards
 # (.tmp/evaluations/*/diagnostic_metrics.json, 15,172,037 tokens).
@@ -181,6 +182,10 @@ class RandomMatchedConfig:
     # directions
     k: int = 18432
     seed: int = 0
+    # "random" draws from N(0, Sigma) -- the A4 null. "pca" takes the top-k
+    # eigenvectors of the SAME Sigma, which the eigh path already computes, and
+    # runs them through the identical projection/threshold/pool/audit pipeline.
+    directions_mode: DirectionsMode = "random"
     sampling: SamplingMethod = "eigh"
     ridge: float = 1e-6
     normalize_directions: bool = True
@@ -221,6 +226,10 @@ class RandomMatchedConfig:
             )
         if self.k <= 0:
             raise ValueError(f"k must be positive, got {self.k}")
+        if self.directions_mode not in ("random", "pca"):
+            raise ValueError(
+                f"Unknown directions_mode {self.directions_mode!r}; expected random|pca."
+            )
         sel = (self.select_shard_start, self.select_shard_end)
         aud = (self.audit_shard_start, self.audit_shard_end)
         if max(sel[0], aud[0]) < min(sel[1], aud[1]):
@@ -229,6 +238,17 @@ class RandomMatchedConfig:
                 f"[{aud[0]}, {aud[1]}). Overlapping splits reintroduce exactly the "
                 "best-of-k selection bias this baseline exists to measure."
             )
+
+    @property
+    def source_prefix(self) -> str:
+        """Artefact label for this run's dictionary.
+
+        Written into ``audit_summary.json`` as ``source_name`` and used as the
+        key in the cross-method comparison, so it must track
+        ``directions_mode`` -- a PCA run labelled ``random_matched_*`` would
+        mislabel an entire method in the necessity table.
+        """
+        return "pca" if self.directions_mode == "pca" else "random_matched"
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> RandomMatchedConfig:
@@ -527,6 +547,88 @@ def sample_matched_directions(
 # ---------------------------------------------------------------------------
 # 5.  Threshold calibration (sparsity matching)
 # ---------------------------------------------------------------------------
+
+
+def pca_directions(
+    Sigma: np.ndarray,
+    k: int,
+    ridge: float = 1e-6,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Top-``k`` principal components of ``Sigma`` as a direction dictionary.
+
+    The meta-review asked for PCA specifically, and it costs almost nothing
+    here: ``sample_matched_directions`` already runs ``eigh`` on this same
+    Sigma to draw the random null, and the principal components *are* that
+    decomposition's eigenvectors. Using the same Sigma, the same projection,
+    the same thresholds and the same audit is what makes PCA comparable to the
+    random null rather than merely adjacent to it.
+
+    Components are returned in descending eigenvalue order and are orthonormal,
+    so no normalisation step is needed -- unlike the random draw, where columns
+    of ``V sqrt(L) G`` have to be rescaled to match the SAE's unit-norm decoder.
+
+    **The caveat to carry into the paper**: PCA caps at ``k = d_model = 2,304``,
+    well below the SAE's 18,432. Only random-matched and diff-in-means match the
+    dictionary size. Learning an *overcomplete* dictionary is part of the SAE's
+    case and should be argued, not hidden.
+
+    Args:
+        Sigma: [d_model, d_model] covariance, estimated on train shards only.
+        k: Number of components. Cannot exceed d_model.
+        ridge: Added to the diagonal before decomposition, matching the random
+            path so both dictionaries see the same conditioning.
+
+    Returns:
+        D: [d_model, k] float32, orthonormal columns, descending variance.
+        diagnostics: eigenvalues kept, explained-variance ratio, conditioning.
+
+    Raises:
+        ValueError: Sigma is not square, or k exceeds d_model.
+    """
+    if Sigma.ndim != 2 or Sigma.shape[0] != Sigma.shape[1]:
+        raise ValueError(f"Sigma must be square [d, d], got {Sigma.shape}")
+    d_model = Sigma.shape[0]
+    if k > d_model:
+        raise ValueError(
+            f"PCA k={k} cannot exceed d_model={d_model}. This is the structural limit the "
+            "paper must state: PCA cannot match an overcomplete SAE dictionary."
+        )
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
+
+    sigma_r = np.asarray(Sigma, dtype=np.float64) + ridge * np.eye(d_model)
+    eigvals, eigvecs = np.linalg.eigh(sigma_r)  # ascending
+    order = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[order]
+    eigvecs = eigvecs[:, order]
+
+    kept = eigvals[:k]
+    total = float(np.clip(eigvals, 0.0, None).sum())
+    positive = eigvals[eigvals > 0]
+
+    diagnostics = {
+        "method": "pca",
+        "k": int(k),
+        "d_model": int(d_model),
+        "ridge": float(ridge),
+        "normalized": True,  # eigenvectors are orthonormal by construction
+        "eigenvalues_kept": [float(v) for v in kept],
+        "explained_variance_ratio": float(np.clip(kept, 0.0, None).sum() / total)
+        if total > 0
+        else float("nan"),
+        "min_eigenvalue": float(eigvals.min()),
+        "max_eigenvalue": float(eigvals.max()),
+        "n_negative_eigenvalues": int((eigvals < 0).sum()),
+        "condition_number": float(positive.max() / positive.min())
+        if positive.size
+        else float("inf"),
+        "effective_rank": int((eigvals > 1e-10 * eigvals.max()).sum()),
+    }
+    logger.info(
+        f"PCA: kept {k}/{d_model} components, "
+        f"explained variance {diagnostics['explained_variance_ratio']:.4f}"
+    )
+    return eigvecs[:, :k].astype(np.float32), diagnostics
 
 
 def calibrate_thresholds(
@@ -1006,14 +1108,20 @@ def run_random_matched(
     (out / "sigma_stats.json").write_text(json.dumps(sigma_stats, indent=2, default=str))
 
     # ---- 2. Directions ----------------------------------------------------
-    D, dir_diagnostics = sample_matched_directions(
-        Sigma=sigma,
-        k=config.k,
-        seed=config.seed,
-        method=config.sampling,
-        ridge=config.ridge,
-        normalize=config.normalize_directions,
-    )
+    # Same Sigma, same ridge, same downstream pipeline for both modes; only the
+    # dictionary differs. That is what makes PCA a comparison rather than a
+    # separate experiment.
+    if config.directions_mode == "pca":
+        D, dir_diagnostics = pca_directions(Sigma=sigma, k=config.k, ridge=config.ridge)
+    else:
+        D, dir_diagnostics = sample_matched_directions(
+            Sigma=sigma,
+            k=config.k,
+            seed=config.seed,
+            method=config.sampling,
+            ridge=config.ridge,
+            normalize=config.normalize_directions,
+        )
     np.save(out / "directions.npy", D)
     (out / "directions_manifest.json").write_text(
         json.dumps(
@@ -1166,7 +1274,7 @@ def run_random_matched(
             F_audit=F_aud_arm,
             Y_audit=Y_audit,
             code_names=code_names,
-            source_name=f"random_matched_{name}",
+            source_name=f"{config.source_prefix}_{name}",
             F_select=F_sel_arm,
             Y_select=Y_select,
             config=config.audit_config,

@@ -941,3 +941,122 @@ def test_run_random_matched_arms_share_one_projection(tmp_path):
 
     assert before == after, "projection checkpoints were rewritten on the second run"
     assert (tmp_path / "out" / "audit_l0_8.00" / "audit_summary.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# PCA directions (code plan C5, plan item A5)
+#
+# The AC named PCA explicitly. It is nearly free here because
+# sample_matched_directions already runs eigh on the same Sigma -- the principal
+# components are the eigenvectors of that decomposition. Running them through
+# the *identical* project -> threshold -> max-pool -> audit pipeline the random
+# null uses is what makes the comparison meaningful.
+# ---------------------------------------------------------------------------
+
+
+def _anisotropic_sigma(d: int = 6, seed: int = 0):
+    """Covariance with a known, well-separated principal axis ordering."""
+    rng = np.random.default_rng(seed)
+    Q, _ = np.linalg.qr(rng.standard_normal((d, d)))
+    eigvals = np.array([100.0, 50.0, 10.0, 3.0, 1.0, 0.2])[:d]
+    return (Q * eigvals) @ Q.T, Q, eigvals
+
+
+def test_pca_directions_are_orthonormal():
+    from mech_interp_research.random_matched import pca_directions
+
+    Sigma, _, _ = _anisotropic_sigma()
+    D, _ = pca_directions(Sigma, k=6)
+
+    assert D.shape == (6, 6)
+    assert np.allclose(D.T @ D, np.eye(6), atol=1e-5)
+
+
+def test_pca_directions_are_ordered_by_descending_variance():
+    from mech_interp_research.random_matched import pca_directions
+
+    Sigma, _, eigvals = _anisotropic_sigma()
+    _, diag = pca_directions(Sigma, k=4)
+
+    got = diag["eigenvalues_kept"]
+    assert got == sorted(got, reverse=True)
+    assert np.allclose(got, eigvals[:4], atol=1e-6)
+
+
+def test_pca_directions_recover_the_true_principal_axes():
+    from mech_interp_research.random_matched import pca_directions
+
+    Sigma, Q, _ = _anisotropic_sigma()
+    D, _ = pca_directions(Sigma, k=2)
+
+    # Sign is arbitrary; compare on |cos| against the planted axes.
+    for j in range(2):
+        assert abs(float(D[:, j] @ Q[:, j])) > 0.999
+
+
+def test_pca_directions_report_explained_variance():
+    from mech_interp_research.random_matched import pca_directions
+
+    Sigma, _, eigvals = _anisotropic_sigma()
+    _, diag = pca_directions(Sigma, k=3)
+
+    expected = eigvals[:3].sum() / eigvals.sum()
+    assert diag["explained_variance_ratio"] == pytest.approx(expected, abs=1e-6)
+    assert diag["k"] == 3
+
+
+def test_pca_directions_reject_k_above_d_model():
+    from mech_interp_research.random_matched import pca_directions
+
+    Sigma, _, _ = _anisotropic_sigma()
+    with pytest.raises(ValueError, match="cannot exceed"):
+        pca_directions(Sigma, k=7)
+
+
+def test_pca_config_accepts_directions_mode():
+    from mech_interp_research.random_matched import RandomMatchedConfig
+
+    cfg = RandomMatchedConfig.from_dict(
+        {
+            "activations_dir": "/out/acts",
+            "icd_csv_path": "/data/icd.csv",
+            "output_dir": "/out/pca",
+            "k": 2304,
+            "directions_mode": "pca",
+        }
+    )
+    assert cfg.directions_mode == "pca"
+
+
+def test_pca_config_rejects_unknown_directions_mode():
+    from mech_interp_research.random_matched import RandomMatchedConfig
+
+    with pytest.raises(ValueError, match="directions_mode"):
+        RandomMatchedConfig.from_dict(
+            {
+                "activations_dir": "/out/acts",
+                "icd_csv_path": "/data/icd.csv",
+                "output_dir": "/out/pca",
+                "directions_mode": "ica",
+            }
+        )
+
+
+def test_source_prefix_tracks_directions_mode():
+    """A PCA run must not label its artefacts 'random_matched_*'.
+
+    source_name is written into audit_summary.json and is what the comparison
+    table keys on, so a stale prefix would silently mislabel a whole method.
+    """
+    from mech_interp_research.random_matched import RandomMatchedConfig
+
+    base = {
+        "activations_dir": "/out/acts",
+        "icd_csv_path": "/data/icd.csv",
+        "output_dir": "/out/x",
+    }
+    assert RandomMatchedConfig.from_dict(base).source_prefix == "random_matched"
+    assert (
+        RandomMatchedConfig.from_dict({**base, "directions_mode": "pca", "k": 2304}).source_prefix
+        == "pca"
+    )
