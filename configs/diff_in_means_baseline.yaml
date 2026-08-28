@@ -1,0 +1,53 @@
+# Difference-in-Means baseline — correlation-style off-target specificity (Baseline #1).
+#
+# CPU only. Reads already-pooled per-note vectors + labels off the volumes;
+# no Gemma, no SAE forward pass, no GPU. Runtime ≈ minutes.
+#
+# Run:
+#   modal run modal_app/diff_in_means_baseline.py --config-file configs/diff_in_means_baseline.yaml
+#
+# BEFORE RUNNING, fill in the <...> eval-ids. Confirm the paths exist with:
+#   modal volume ls sae-artifacts icd_eval/
+
+# --- diff-in-means feature space (raw pooled centered layer-16 acts) ------
+# The Baseline-3 raw_shard_ckpt (SAE-independent). Same max-pooling as the
+# SAE grounding. Directions are built on train shards, projected on held-out.
+raw_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+
+# --- labels (PHI; on the mimic-iv-raw volume) -----------------------------
+icd_csv_path: /data/sample_50k.csv
+
+# --- held-out audit split (matches the SAE test-split: last 31 of 312) -----
+held_out_shard_start: 281
+held_out_shard_end: null      # null → through the last shard
+
+# --- SAE comparator: vanilla ReLU only. One feature per code = top latent by |r|.
+# correlation_npz is the FULL-corpus grounding (used for latent SELECTION);
+# shard_ckpt is the per-note SAE latents (filtered to held-out for the AUDIT).
+# The c-negative off-target needs those per-note values, which is why the
+# vanilla SAE is read from the volume here rather than from the .tmp matrix
+# (the .tmp all-notes ratio ≈ 13.6 is the cross-check the run reproduces via
+# the *_allnotes fields).
+saes:
+  - name: vanilla
+    # vanilla SAE eval-id is the same dir that holds the raw_lr posthoc above
+    shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+    correlation_npz: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/correlation_matrices.npz
+    code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+
+# --- off-target specificity params ----------------------------------------
+r_threshold: 0.1        # |r| bar for counting a significant off-target association
+min_off_pos: 10         # min c-negative positives to test an off code
+bh_q: 0.05
+
+# --- label alignment (identical to icd_eval / other baselines) ------------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+# --- output ---------------------------------------------------------------
+output_dir: /out/diff_in_means
+
+logging_level: INFO
