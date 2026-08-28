@@ -1,0 +1,36 @@
+{
+  "ablation_output_dir": "/out/ablation/vanilla_section",
+  "n_targets": 32,
+  "n_grounded": 30,
+  "restrict_true_negative": true,
+  "off_target": {
+    "mean_on_target_delta": 0.22994461731588417,
+    "mean_abs_off_target_delta": 0.027064039498652895,
+    "median_specificity_ratio": 6.380309964627839,
+    "total_off_target_sig_q05": 2
+  },
+  "length_matched": {
+    "mean_delta_raw": 0.22994461731588417,
+    "mean_delta_adjusted": 0.16383909438003574,
+    "mean_attenuation": 0.06610552293584838,
+    "n_sig_after_adjust": 19
+  },
+  "calibration": {
+    "base_loss": 1.6347653633087866,
+    "recon_tax": 0.02921259478477955,
+    "mean_on_target_delta_nats": 0.0014033504636323713,
+    "mean_pct_of_base_loss": 0.08584415201897667,
+    "mean_ratio_to_recon_tax": 0.04803922670928053
+  },
+  "section_local": {
+    "n_notes_with_section": 4695,
+    "mean_section_delta": 0.04085608928795486,
+    "mean_rest_delta": 0.5369291559683133,
+    "mean_concentration": -0.4960730666803583,
+    "frac_features_section_gt_rest": 0.03333333333333333,
+    "mean_section_nats": 0.0007964371361946818,
+    "mean_rest_nats": 0.0014337368985325246,
+    "mean_nats_concentration": -0.0006372997623378427,
+    "frac_features_section_nats_gt_rest": 0.43333333333333335
+  }
+}

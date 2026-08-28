@@ -1,0 +1,25 @@
+{
+  "ablation_output_dir": "/out/ablation/vanilla_pilot_extended",
+  "n_targets": 20,
+  "n_grounded": 20,
+  "restrict_true_negative": true,
+  "off_target": {
+    "mean_on_target_delta": 0.1686837405106696,
+    "mean_abs_off_target_delta": 0.027907588189626076,
+    "median_specificity_ratio": 4.752714037561787,
+    "total_off_target_sig_q05": 2
+  },
+  "length_matched": {
+    "mean_delta_raw": 0.1686837405106696,
+    "mean_delta_adjusted": 0.09738552968270618,
+    "mean_attenuation": 0.07129821082796338,
+    "n_sig_after_adjust": 11
+  },
+  "calibration": {
+    "base_loss": 1.6347653633087866,
+    "recon_tax": 0.02921259478477955,
+    "mean_on_target_delta_nats": 0.0010927421678314174,
+    "mean_pct_of_base_loss": 0.0668439760443476,
+    "mean_ratio_to_recon_tax": 0.03740654248217491
+  }
+}

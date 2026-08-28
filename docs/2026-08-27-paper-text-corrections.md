@@ -901,3 +901,76 @@ cleanest evidence that the architecture rather than the search budget produces t
 - The bare specificity ratio as a cross-method headline. Report leakage; keep the ratio as a
   secondary column with its coupling stated.
 - That |r| > 0.1 grounded counts favour the SAE. They do not (T1).
+
+---
+
+## C7 — ablation post-hoc artifacts pulled and verified ✅ DONE (2 of 4 rebuttal figures need correction)
+
+**Status:** complete. Pulled to `results/ablation/{vanilla_pilot_extended,vanilla_section}/posthoc_specificity/`.
+Pure `modal volume get`; nothing recomputed, `ablation.py` and the ablation configs untouched.
+
+### C7-a. Two corrections to the code plan's premise
+
+1. **The directory is `posthoc_specificity/`, not `posthoc/`.** The plan says the outputs "are
+   still in the Modal `posthoc/` directories". There is no `posthoc/` on the volume for any run.
+2. **Post-hoc exists for only 2 of the 5 runs the plan lists.** `vanilla_pilot_extended` and
+   `vanilla_section` have it; **`vanilla_meanabl`, `jumprelu_pilot_extended` and
+   `gemma_scope_pilot_extended` have none at all** — only `ablation_summary.json`,
+   `ablation_results.csv` and `shard_results/`.
+
+   So R1's Concern 1.4 checklist (off-target #2, length/#codes #3, effect-size #4,
+   section-local #5) is satisfied **for the vanilla SAE only**. Running it for the other three
+   is a `modal run ablation_posthoc.py` away but is out of scope by the standing
+   instruction; flagging it as an open item rather than doing it.
+
+   The plan's claim that "all five are computed" is true only for vanilla.
+
+### C7-b. Verification of the four rebuttal figures
+
+| Rebuttal figure | Reproduces? | Regenerated value | Source run |
+|---|---|---|---|
+| on-target specificity **6.4×** | ✅ | **6.380** | `vanilla_section` |
+| **2 of ~1,350** off-target tests significant | ⚠️ **numerator yes, denominator no** | **2 of 1,470** | `vanilla_section` |
+| Cliff's δ **0.230 → 0.164**, **19/30** still significant | ✅ | **0.2299 → 0.1638, 19/30** | `vanilla_section` |
+| mean-ablation median δ **0.169** vs **0.162** zeroing | ✅ | **0.1687** vs **0.1622** | `vanilla_meanabl` / `vanilla_section` |
+
+Three of four reproduce exactly. **All the rebuttal's ablation numbers come from
+`vanilla_section` (30 grounded targets), not `vanilla_pilot_extended` (20)** — the two runs give
+materially different numbers (specificity 6.38 vs 4.75; δ 0.230 → 0.164 with 19/30 vs
+0.169 → 0.097 with 11/20), so **every ablation figure in the paper must name its run**.
+
+**The "~1,350" denominator is wrong; use 1,470.** It looks like a back-of-envelope 30 × 45
+(30 targets × 45 off-codes). The artifact tests a mean of 49 off-codes per target, giving
+1,470 grounded-target tests, of which 2 are BH-significant at q = 0.05. Note the correct
+restriction: `off_target_summary.csv` also carries a `low_r_control` and a `random_control`
+target; summing over *all* rows gives 3 of 1,568, and the random control accounts for the extra
+hit — which is the expected behaviour of a control, not a failure. Report the grounded-only
+figure, **2 of 1,470**, and say that the controls are excluded.
+
+### C7-c. ⚠️ **T6's effect-size range does not reproduce and must not be used**
+
+T6 states the per-target ablation effect is **"0.0075–0.011% of base loss"**, citing
+`posthoc_specificity.csv → pct_of_base_loss`. Regenerated from that exact column:
+
+| run | targets | min | median | max |
+|---|---|---|---|---|
+| `vanilla_pilot_extended` (grounded) | 20 | **−0.0095%** | **+0.0193%** | **+0.6030%** |
+| `vanilla_section` (grounded) | 30 | −0.0095% | **+0.0330%** | +0.6030% |
+
+The quoted 0.0075–0.011% appears nowhere in the artifact and I could not reconstruct it from
+any combination of the stored fields. **Replace it.** The reproducible statement is:
+
+> The per-target ablation effect has a median of **0.019%** of base loss
+> (`vanilla_pilot_extended`) / **0.033%** (`vanilla_section`), ranging from −0.010% to +0.60%
+> across targets, against a mean clean loss of **1.635 nats**. In absolute terms the mean
+> on-target effect is **0.0011–0.0014 nats**, which is **3.7–4.8% of the SAE's own
+> reconstruction tax** (0.029 nats).
+
+The reconstruction-tax ratio is the more informative framing and is stored directly
+(`mean_ratio_to_recon_tax`). It says the ablation effect is small *relative to the cost of
+using the SAE at all* — which is exactly the honest calibration R1 asked for, and stronger for
+being stated plainly.
+
+**Also note** the pre-existing local file `results/ablation/*/posthoc_specificity.csv` is a
+renamed copy of `effect_size_calibration.csv` (header verified identical); the real directory
+carries four to five files per run.
