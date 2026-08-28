@@ -1372,3 +1372,99 @@ def test_run_auto_interp_binds_shard_ckpt_dir_as_real_parameter():
     params = inspect.signature(run_auto_interp).parameters
     assert "shard_ckpt_dir" in params, "shard_ckpt_dir would be absorbed by **_kwargs"
     assert params["shard_ckpt_dir"].default is None
+
+
+def test_to_openrouter_model_maps_dash_to_dot():
+    """OpenRouter spells Anthropic versions with a dot, the Anthropic API with a dash.
+
+    Forwarding the config's model string unchanged would 404 on OpenRouter, so
+    the mapping is what makes the two backends interchangeable.
+    """
+    from mech_interp_research.auto_interp import to_openrouter_model
+
+    assert to_openrouter_model("claude-sonnet-4-6") == "anthropic/claude-sonnet-4.6"
+    # Already-qualified slugs pass through, which is how non-Anthropic panel
+    # models are named.
+    assert to_openrouter_model("openai/gpt-4o") == "openai/gpt-4o"
+
+
+def test_to_openrouter_model_rejects_unknown_rather_than_guessing():
+    """An unmapped model must raise, not be silently rewritten.
+
+    Guessing a slug would send the run to a model nobody chose and report the
+    results under the configured name.
+    """
+    import pytest
+
+    from mech_interp_research.auto_interp import to_openrouter_model
+
+    with pytest.raises(ValueError, match="No OpenRouter slug known"):
+        to_openrouter_model("claude-imaginary-9")
+
+
+def test_make_llm_client_rejects_unknown_backend():
+    import pytest
+
+    from mech_interp_research.auto_interp import make_llm_client
+
+    with pytest.raises(ValueError, match="Unknown llm_backend"):
+        make_llm_client("bedrock")
+
+
+def test_make_llm_client_openrouter_requires_key(monkeypatch):
+    """Missing key must fail loudly at construction, not mid-run on the first call."""
+    import pytest
+
+    from mech_interp_research.auto_interp import make_llm_client
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY is unset"):
+        make_llm_client("openrouter")
+
+
+def test_openrouter_adapter_matches_anthropic_response_shape():
+    """The adapter must expose response.content[0].text, the shape all six call sites read.
+
+    If it drifts, every call site breaks at once and only at run time.
+    """
+    from types import SimpleNamespace
+
+    from mech_interp_research.auto_interp import _OpenRouterMessages
+
+    captured = {}
+
+    class _FakeCompletions:
+        def create(self, **kw):
+            captured.update(kw)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="hello"))]
+            )
+
+    inner = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    resp = _OpenRouterMessages(inner).create(
+        model="claude-sonnet-4-6", max_tokens=64, messages=[{"role": "user", "content": "hi"}]
+    )
+
+    assert resp.content[0].text == "hello"
+    assert captured["model"] == "anthropic/claude-sonnet-4.6"
+    assert captured["max_tokens"] == 64
+
+
+def test_openrouter_adapter_raises_on_empty_choices():
+    """An empty choices list must raise rather than yield an empty explanation.
+
+    A silent "" would be scored and judged as though the model had written it.
+    """
+    from types import SimpleNamespace
+
+    import pytest
+
+    from mech_interp_research.auto_interp import _OpenRouterMessages
+
+    class _FakeCompletions:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[])
+
+    inner = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    with pytest.raises(RuntimeError, match="no choices"):
+        _OpenRouterMessages(inner).create(model="claude-sonnet-4-6", max_tokens=64, messages=[])

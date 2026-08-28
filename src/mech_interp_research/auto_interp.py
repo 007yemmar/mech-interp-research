@@ -633,6 +633,108 @@ EXPLANATION: <your explanation>
 CATEGORY: <category_name>"""
 
 
+# --- LLM backend selection -------------------------------------------------
+#
+# Every API call in this module goes through the same two-line shape:
+#     response = client.messages.create(model=..., max_tokens=..., messages=[...])
+#     text = response.content[0].text
+# Six call sites use it. Adapting the *client* to that surface, rather than
+# rewriting the call sites, keeps prompts, parsing and retry behaviour byte
+# identical across backends — so switching where a request is billed cannot
+# change what the judge is asked or how its reply is read.
+
+# OpenRouter spells Anthropic model versions with a dot where the Anthropic API
+# uses a dash, so a config's model string cannot be forwarded unchanged.
+_OPENROUTER_MODEL_ALIASES = {
+    "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
+    "claude-opus-4-6": "anthropic/claude-opus-4.6",
+    "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+}
+
+
+def to_openrouter_model(model: str) -> str:
+    """Map an Anthropic model id to its OpenRouter slug.
+
+    A string already containing "/" is taken as fully qualified and passed
+    through, which is how non-Anthropic panel models are named.
+    """
+    if "/" in model:
+        return model
+    try:
+        return _OPENROUTER_MODEL_ALIASES[model]
+    except KeyError:
+        raise ValueError(
+            f"No OpenRouter slug known for model {model!r}. Add it to "
+            "_OPENROUTER_MODEL_ALIASES, or give the fully qualified slug "
+            "(e.g. 'anthropic/claude-sonnet-4.6') in the config."
+        ) from None
+
+
+class _OpenRouterMessages:
+    """The ``.messages`` half of the Anthropic client surface, over OpenRouter."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def create(self, *, model: str, max_tokens: int, messages: list, **_ignored):
+        from types import SimpleNamespace
+
+        resp = self._inner.chat.completions.create(
+            model=to_openrouter_model(model),
+            max_tokens=max_tokens,
+            messages=messages,
+        )
+        # An empty choices list means the request failed in a way the SDK did not
+        # raise on. Surfacing it beats returning "" — a silent empty explanation
+        # would be scored and judged as though the model had produced it.
+        if not resp.choices:
+            raise RuntimeError(f"OpenRouter returned no choices for model {model!r}")
+        return SimpleNamespace(
+            content=[SimpleNamespace(text=resp.choices[0].message.content or "")]
+        )
+
+
+class OpenRouterClient:
+    """Presents ``anthropic.Anthropic``'s ``.messages.create`` surface over OpenRouter.
+
+    Routing an Anthropic model through OpenRouter is a billing change, not a
+    model change: ``claude-sonnet-4-6`` and ``anthropic/claude-sonnet-4.6`` are
+    the same weights, so explanations are unaffected by which backend produced
+    them.
+    """
+
+    def __init__(self, api_key: str, *, max_retries: int = 5) -> None:
+        from openai import OpenAI
+
+        self.messages = _OpenRouterMessages(
+            OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+                max_retries=max_retries,
+            )
+        )
+
+
+def make_llm_client(backend: str = "anthropic", *, max_retries: int = 5):
+    """Build the client for the configured backend.
+
+    Defaults to Anthropic so existing configs are unaffected.
+    """
+    if backend == "anthropic":
+        import anthropic
+
+        return anthropic.Anthropic(max_retries=max_retries)
+    if backend == "openrouter":
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            raise RuntimeError(
+                "llm_backend='openrouter' but OPENROUTER_API_KEY is unset. Attach "
+                "modal.Secret.from_name('openrouter-api-key') to the Modal function."
+            )
+        return OpenRouterClient(key, max_retries=max_retries)
+    raise ValueError(f"Unknown llm_backend {backend!r}; expected 'anthropic' or 'openrouter'.")
+
+
 def explain_feature(
     client,
     pos_contexts: list[dict],
@@ -1611,6 +1713,7 @@ def run_auto_interp(
     icd_csv_path: str,
     output_dir: str,
     shard_ckpt_dir: str | None = None,
+    llm_backend: str = "anthropic",
     n_strong_grounded: int = 280,
     n_weak_grounded: int = 100,
     n_non_grounded: int = 1000,
@@ -1722,9 +1825,7 @@ def run_auto_interp(
 
     client = _client
     if client is None:
-        import anthropic
-
-        client = anthropic.Anthropic(max_retries=5)
+        client = make_llm_client(llm_backend)
 
     models_to_run = [explainer_model]
     if comparison_model and comparison_model != explainer_model:

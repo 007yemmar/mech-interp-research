@@ -1,0 +1,86 @@
+<h2>Module 2 · SAE math — the gate, the shrinkage, the fix</h2>
+<p class="subtitle">The two diagrams below are <em>the</em> mental model for why JumpReLU exists.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">A · The activation function (gate)</div>
+    <div class="mockup-body" style="background:#0f0f10;padding:20px">
+      <svg viewBox="-110 -90 220 180" width="100%" height="320">
+        <!-- axes -->
+        <line x1="-100" y1="0" x2="100" y2="0" stroke="#333"/>
+        <line x1="0" y1="-80" x2="0" y2="80" stroke="#333"/>
+        <text x="92" y="14" fill="#666" font-size="9">π (pre-act)</text>
+        <text x="4" y="-72" fill="#666" font-size="9">z</text>
+
+        <!-- ReLU: z = max(0, π) -->
+        <polyline points="-100,0 0,0 80,-80" stroke="#7ad" stroke-width="2.5" fill="none"/>
+        <text x="-95" y="-50" fill="#7ad" font-size="10">ReLU: z = max(0, π)</text>
+
+        <!-- JumpReLU: zero below θ=30, then jumps to π -->
+        <polyline points="-100,0 30,0" stroke="#f97" stroke-width="2.5" fill="none" stroke-dasharray="4,2"/>
+        <line x1="30" y1="0" x2="30" y2="-30" stroke="#f97" stroke-width="2" stroke-dasharray="2,2"/>
+        <polyline points="30,-30 80,-80" stroke="#f97" stroke-width="2.5" fill="none" stroke-dasharray="4,2"/>
+        <circle cx="30" cy="0" r="2.5" fill="#0f0f10" stroke="#f97" stroke-width="1.5"/>
+        <circle cx="30" cy="-30" r="2.5" fill="#f97"/>
+        <text x="32" y="14" fill="#f97" font-size="10">θ</text>
+        <text x="-95" y="-30" fill="#f97" font-size="10">JumpReLU: z = π · H(π − θ)</text>
+      </svg>
+      <p style="color:#bbb;font-size:13px;margin-top:8px">
+        ReLU continuously ramps from 0 once π &gt; 0.<br>
+        JumpReLU stays at <em>exactly 0</em> until π crosses a learned threshold θ,
+        then <em>jumps</em> to the full pre-activation value.
+      </p>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">B · The shrinkage problem (why JumpReLU helps)</div>
+    <div class="mockup-body" style="background:#0f0f10;padding:20px">
+      <svg viewBox="-10 -10 320 220" width="100%" height="320">
+        <!-- axes -->
+        <line x1="20" y1="180" x2="280" y2="180" stroke="#333"/>
+        <line x1="20" y1="20" x2="20" y2="180" stroke="#333"/>
+        <text x="270" y="195" fill="#666" font-size="9">feature j</text>
+        <text x="-2" y="14" fill="#666" font-size="9">activation</text>
+
+        <!-- ideal "true" magnitudes -->
+        <rect x="35"  y="30"  width="20" height="150" fill="#7ad" opacity="0.85"/>
+        <rect x="65"  y="50"  width="20" height="130" fill="#7ad" opacity="0.85"/>
+        <rect x="95"  y="80"  width="20" height="100" fill="#7ad" opacity="0.85"/>
+        <rect x="125" y="110" width="20" height="70"  fill="#7ad" opacity="0.85"/>
+        <rect x="155" y="140" width="20" height="40"  fill="#7ad" opacity="0.85"/>
+
+        <!-- ReLU+L1: shrunk magnitudes (shorter bars, same positions shifted) -->
+        <rect x="185" y="65"  width="20" height="115" fill="#f97" opacity="0.85"/>
+        <rect x="215" y="85"  width="20" height="95"  fill="#f97" opacity="0.85"/>
+        <rect x="245" y="115" width="20" height="65"  fill="#f97" opacity="0.85"/>
+        <!-- features 4 and 5 die under L1 (would be in the next slots) -->
+
+        <text x="35"  y="200" fill="#7ad" font-size="10">true</text>
+        <text x="190" y="200" fill="#f97" font-size="10">ReLU+L1</text>
+
+        <!-- arrows showing shrinkage -->
+        <path d="M 45 50 Q 100 30 195 80" stroke="#888" stroke-width="0.8" fill="none" stroke-dasharray="2,2"/>
+        <text x="105" y="40" fill="#888" font-size="9">L1 shrinks magnitudes</text>
+        <text x="105" y="125" fill="#888" font-size="9">…and kills weak features</text>
+      </svg>
+      <p style="color:#bbb;font-size:13px;margin-top:8px">
+        <strong style="color:#7ad">Blue</strong> = the magnitudes a feature <em>should</em> have for perfect reconstruction.
+        <strong style="color:#f97">Orange</strong> = what ReLU+L1 actually outputs: every active feature is shrunk; weak ones die.
+        <br>JumpReLU pays a flat L0 cost per active feature, so <em>magnitudes stay correct</em> once a feature is over threshold.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>The decoder unit-norm constraint, geometrically</h3>
+  <p style="font-size:14px;line-height:1.6">
+    Every column of <code>W_dec</code> (i.e., every feature direction) lives on the unit sphere
+    in ℝ<sup>d_model</sup>. The optimizer is constrained to <em>only rotate</em> directions,
+    never grow or shrink them. This closes the loophole where the SAE could scale
+    <code>W_dec[j] → k·W_dec[j]</code> and <code>z_j → z_j/k</code> to satisfy L1 cheaply without
+    changing reconstruction. After unit-norming, <code>|z_j|</code> measures the feature's true magnitude
+    in input units — comparable across features.
+  </p>
+</div>
