@@ -722,3 +722,205 @@ def test_two_sources_share_identical_protocol():
     assert good.code_names == noise.code_names
     assert good.grounding.grounded_latent_count > noise.grounding.grounded_latent_count
     assert good.selected["abs_r_audit"].median() > noise.selected["abs_r_audit"].median()
+
+
+# ---------------------------------------------------------------------------
+# NecessityComparisonConfig / run_comparison — the multi-source driver
+#
+# The parity the meta-review asks for ("same audit protocol ... same
+# label-selection rule ... same off-target diagnostic") is a property of the
+# *config schema* here, not of three sibling files agreeing. These tests pin
+# that: the split and the panel live at the top level, and a source that tries
+# to carry its own is refused.
+# ---------------------------------------------------------------------------
+
+
+def _comparison_config_dict(tmp_path: Path, ckpt: Path, names=("alpha", "beta")) -> dict:
+    return {
+        "icd_csv_path": str(tmp_path / "icd.csv"),
+        "code_names_json": str(tmp_path / "code_names.json"),
+        "output_dir": str(tmp_path / "out"),
+        "select_shard_start": 0,
+        "select_shard_end": 2,
+        "audit_shard_start": 2,
+        "audit_shard_end": 4,
+        "min_notes": 10,
+        "sources": [{"name": n, "checkpoint_dir": str(ckpt)} for n in names],
+        "audit_config": {"r_threshold": 0.1, "selection": "top_per_code"},
+    }
+
+
+def _write_panel(tmp_path: Path) -> None:
+    (tmp_path / "code_names.json").write_text(json.dumps(CODE_NAMES))
+
+
+def test_comparison_config_rejects_unknown_key(tmp_path):
+    from mech_interp_research.necessity_audit import NecessityComparisonConfig
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    raw = _comparison_config_dict(tmp_path, ckpt)
+    raw["selct_shard_start"] = 0  # typo a reviewer would never catch by eye
+
+    with pytest.raises(ValueError, match="Unknown config keys"):
+        NecessityComparisonConfig.from_dict(raw)
+
+
+def test_comparison_config_rejects_per_source_split_override(tmp_path):
+    """A source must not be able to move its own split. That is the guarantee."""
+    from mech_interp_research.necessity_audit import NecessityComparisonConfig
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    raw = _comparison_config_dict(tmp_path, ckpt)
+    raw["sources"][0]["audit_shard_start"] = 0
+
+    with pytest.raises(ValueError, match="audit_shard_start"):
+        NecessityComparisonConfig.from_dict(raw)
+
+
+def test_comparison_config_rejects_duplicate_source_names(tmp_path):
+    from mech_interp_research.necessity_audit import NecessityComparisonConfig
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    raw = _comparison_config_dict(tmp_path, ckpt, names=("alpha", "alpha"))
+
+    with pytest.raises(ValueError, match="[Dd]uplicate"):
+        NecessityComparisonConfig.from_dict(raw)
+
+
+def test_comparison_config_rejects_overlapping_splits(tmp_path):
+    from mech_interp_research.necessity_audit import NecessityComparisonConfig
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    raw = _comparison_config_dict(tmp_path, ckpt)
+    raw["select_shard_end"] = 3  # now overlaps the audit range
+
+    with pytest.raises(ValueError, match="overlap"):
+        NecessityComparisonConfig.from_dict(raw)
+
+
+def test_run_comparison_writes_one_canonical_dir_per_source(tmp_path):
+    from mech_interp_research.necessity_audit import (
+        NecessityComparisonConfig,
+        run_comparison,
+    )
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    _write_panel(tmp_path)
+    cfg = NecessityComparisonConfig.from_dict(_comparison_config_dict(tmp_path, ckpt))
+
+    run_comparison(cfg)
+
+    out = tmp_path / "out"
+    for name in ("alpha", "beta"):
+        assert (out / name / "audit_summary.json").exists()
+        assert (out / name / "selected_features.csv").exists()
+        assert (out / name / "off_target_summary.csv").exists()
+        assert (out / name / "correlation_matrices.npz").exists()
+    assert (out / "comparison_summary.json").exists()
+
+
+def test_run_comparison_audits_every_source_out_of_sample(tmp_path):
+    from mech_interp_research.necessity_audit import (
+        NecessityComparisonConfig,
+        run_comparison,
+    )
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    _write_panel(tmp_path)
+    cfg = NecessityComparisonConfig.from_dict(_comparison_config_dict(tmp_path, ckpt))
+
+    summary = run_comparison(cfg)
+
+    for src in summary["sources"].values():
+        assert src["in_sample_selection"] is False
+        assert src["selection_mode"] == "top_per_code"
+        assert src["n_select_notes"] == 300
+        assert src["n_audit_notes"] == 300
+
+
+def test_run_comparison_holds_panel_and_config_identical_across_sources(tmp_path):
+    """The comparison is only meaningful if nothing but the matrix differs."""
+    from mech_interp_research.necessity_audit import (
+        NecessityComparisonConfig,
+        run_comparison,
+    )
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    _write_panel(tmp_path)
+    cfg = NecessityComparisonConfig.from_dict(_comparison_config_dict(tmp_path, ckpt))
+
+    run_comparison(cfg)
+
+    out = tmp_path / "out"
+    loaded = [json.loads((out / n / "audit_summary.json").read_text()) for n in ("alpha", "beta")]
+    assert loaded[0]["config"] == loaded[1]["config"]
+    assert loaded[0]["n_codes"] == loaded[1]["n_codes"] == len(CODE_NAMES)
+    panels = [json.loads((out / n / "code_names.json").read_text()) for n in ("alpha", "beta")]
+    assert panels[0] == panels[1] == CODE_NAMES
+
+
+def test_run_comparison_uses_the_pinned_panel_not_a_derived_one(tmp_path):
+    """Panel comes from code_names_json, never re-derived by prevalence.
+
+    Pinning a 2-code subset must produce a 2-code audit; if the runner fell
+    back to prevalence derivation it would silently pick up all three.
+    """
+    from mech_interp_research.necessity_audit import (
+        NecessityComparisonConfig,
+        run_comparison,
+    )
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    (tmp_path / "code_names.json").write_text(json.dumps(CODE_NAMES[:2]))
+    cfg = NecessityComparisonConfig.from_dict(_comparison_config_dict(tmp_path, ckpt))
+
+    summary = run_comparison(cfg)
+
+    assert summary["code_names"] == CODE_NAMES[:2]
+    for src in summary["sources"].values():
+        assert src["n_codes"] == 2
+
+
+def test_run_comparison_reports_out_of_sample_peak_r_per_source(tmp_path):
+    """The honest post-selection peak: max |r_audit| over the selected features.
+
+    Distinct from max_abs_r_any_feature, which is an argmax over the whole
+    k x n_codes matrix on the audit split and therefore still in-sample in the
+    selection sense. Both must be reported so the gap is visible.
+    """
+    from mech_interp_research.necessity_audit import (
+        NecessityComparisonConfig,
+        run_comparison,
+    )
+
+    ckpt = _build_checkpoint_source(tmp_path)
+    _write_panel(tmp_path)
+    cfg = NecessityComparisonConfig.from_dict(_comparison_config_dict(tmp_path, ckpt))
+
+    summary = run_comparison(cfg)
+
+    for name, src in summary["sources"].items():
+        selected = pd.read_csv(tmp_path / "out" / name / "selected_features.csv")
+        assert src["selected_max_abs_r_audit"] == pytest.approx(
+            float(selected["abs_r_audit"].max()), abs=1e-6
+        )
+        assert src["selected_max_abs_r_audit"] <= src["max_abs_r_any_feature"] + 1e-6
+
+
+def test_shipped_comparison_config_parses_into_a_valid_run_config():
+    """The YAML keys lining up is not enough -- the driver must accept it.
+
+    Catches a source key the schema rejects, an audit_config knob that no
+    longer exists, or a split that trips the overlap guard, without paying for
+    a Modal container to find out.
+    """
+    import yaml
+
+    from mech_interp_research.necessity_audit import NecessityComparisonConfig
+
+    path = Path(__file__).resolve().parents[1] / "configs" / "necessity_audit_sae.yaml"
+    cfg = NecessityComparisonConfig.from_dict(yaml.safe_load(path.read_text()))
+
+    assert [s.name for s in cfg.sources] == ["sae_vanilla", "sae_jumprelu", "gemmascope"]
+    assert cfg.audit_config == AuditConfig()  # protocol defaults, unmodified
+    assert cfg.code_names_json

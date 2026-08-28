@@ -136,6 +136,7 @@ modal_app/auto_interp.py           # LLM explanations + scoring + ICD concordanc
 modal_app/random_matched.py        # A4: 18,432 covariance-matched random directions → same audit
     ↓  (any source producing shard_ckpt-format pooled vectors)
 necessity_audit.audit()            # the shared audit: grounding + selection + off-target + monospec
+modal_app/necessity_audit.py       # run N sources through that audit under ONE split/panel/config
 # --- causal + additional-baseline branch (consume icd_eval shard_ckpt/ or the centered activations) ---
 modal_app/test_split_eval.py       # recompute grounding on held-out test shards (last 31 of 312)
 modal_app/raw_lr_baseline.py       # Baseline 3: LR on raw pooled centered acts (2304-dim) vs SAE (0.808 AUC)
@@ -254,6 +255,13 @@ GPU selection: set `MODAL_GPU=<tier>` in the shell before `modal run`. The value
         shuffled_control_summary.json     # per scorer x scheme x tier: mean_real, mean_shuffled, delta, CI, Wilcoxon p
         shuffled_control_per_feature.csv  # one row per feature with real + shuffled scores
         per_feature/<model>/              # resume checkpoints
+/out/necessity/sae_audit/                  # necessity_audit.py (C1) — one dir per source
+    comparison_summary.json                #   every source's headline numbers side by side
+    <source_name>/                         #   canonical AuditResult layout:
+                                           #     audit_summary.json, grounding_summary.json,
+                                           #     correlation_matrices.npz, monospecificity.json,
+                                           #     selected_features.csv,
+                                           #     off_target_{summary,long}.csv (+ *_allnotes)
 /out/necessity/random_matched/<run_id>/   # random_matched.py (necessity baseline A4)
     directions.npy                        # [2304, 18432] float32, unit-norm columns
     directions_manifest.json              # seed, method, ridge, eigen diagnostics, Σ provenance

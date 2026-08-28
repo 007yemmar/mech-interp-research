@@ -1,0 +1,94 @@
+# SAE sources through the shared necessity audit (code plan C1).
+#
+# WHY THIS RUN EXISTS
+# -------------------
+# The random-matched null (A4) was audited honestly: best-of-18,432 selected on
+# shards 0-30, scored on 281-311, `"in_sample_selection": false`. The SAEs'
+# published numbers come from icd_eval / test_split_eval, where the argmax over
+# 18,432 x 46 is taken on the *same* 4,911 notes it is reported on. The null was
+# therefore paying a selection penalty the SAE was not, and the meta-review's
+# requirement -- "the same audit protocol, same label-selection rule ... and same
+# off-target diagnostic" -- was asserted rather than enforced.
+#
+# This config runs all three SAEs through necessity_audit on the identical split,
+# panel and AuditConfig the random-matched arms used.
+#
+# WHY ONE CONFIG AND NOT THREE
+# ----------------------------
+# The split, the code panel and the audit knobs live at the TOP LEVEL, and
+# NecessityComparisonConfig refuses to let a `sources:` entry carry any of them.
+# Three sibling configs could only ever *agree*; this makes the parity a
+# property of the schema. Every later baseline (whitened diff-in-means, probe
+# directions, PCA, TF-IDF) is added as another entry here, not another file.
+#
+# Run:
+#   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_sae.yaml
+#
+# CPU, minutes. Reads existing shard_ckpt/ checkpoints -- no re-encode, no GPU.
+
+# --- shared inputs ---------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+
+# The fixed 46-code panel. Never re-derived per source: prevalence drift between
+# splits would change the code set silently, and the tables would still line up
+# while measuring different things. Verified byte-identical (md5 17ba24c1...)
+# across the vanilla, JumpReLU and GemmaScope eval dirs, so this path is a
+# provenance choice, not a numerical one. Same file configs/random_matched.yaml
+# pins, so the SAE rows and the random rows are on one panel.
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+
+output_dir: /out/necessity/sae_audit
+
+# --- the split, held for every source --------------------------------------
+# Selection: shards 0-30 (5,001 notes). Audit: shards 281-311 (4,911 notes) --
+# the held-out notes behind every section-4 number, and the same range the
+# random-matched arms were audited on.
+#
+# NOTE on what "held out" means per SAE: vanilla was trained with
+# eval_n_shards=31 so 281-311 are genuinely unseen; JumpReLU's 50k config did
+# not pass eval_n_shards, so it saw all 312 shards (see
+# configs/test_split_eval_jumprelu.yaml); GemmaScope saw none of them. That is
+# a pre-existing property of the checkpoints and is orthogonal to the bias this
+# split removes -- labels were never used in SAE training, so the selection
+# split is doing its job for all three regardless.
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+
+# --- label join (identical to icd_eval and every other baseline) -----------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+# --- audit protocol --------------------------------------------------------
+# Byte-identical to the audit_config block in configs/random_matched.yaml.
+audit_config:
+  r_threshold: 0.1
+  fdr_q: 0.05
+  mono_thresholds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+  min_off_pos: 10
+  min_pool: 10
+  restrict_c_negative: true
+  top_n_associations: 200
+  selection: top_per_code   # best-of-k per code, the same rule the null gets
+
+# --- sources ---------------------------------------------------------------
+# Each is an existing icd_eval shard_ckpt/ holding all 312 shards of pooled
+# per-note latents, so both splits come from the one directory.
+sources:
+  - name: sae_vanilla
+    checkpoint_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+
+  - name: sae_jumprelu
+    checkpoint_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+
+  # k = 16,384 rather than 18,432. The best-of-k selection advantage is
+  # therefore marginally smaller here; that is the real dictionary size and is
+  # not something to correct for, only to state.
+  - name: gemmascope
+    checkpoint_dir: /out/icd_eval/gemma_scope_16k/shard_ckpt
+
+logging_level: INFO

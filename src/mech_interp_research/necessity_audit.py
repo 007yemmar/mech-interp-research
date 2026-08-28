@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal
 
@@ -948,3 +948,239 @@ def audit_from_checkpoints(
         Y_select=Y_select,
         config=config,
     )
+
+
+# ---------------------------------------------------------------------------
+# 6.  Multi-source comparison driver
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SourceSpec:
+    """One feature source in a comparison run.
+
+    Deliberately carries no split, no code panel and no audit knobs. Those
+    live at the top level of ``NecessityComparisonConfig`` so that a source
+    physically cannot be audited on different notes, against a different code
+    panel, or under a different threshold than its rivals. Three sibling
+    configs would only ever *agree*; this makes the parity structural.
+    """
+
+    name: str
+    checkpoint_dir: str
+    select_checkpoint_dir: str | None = None
+
+
+# Keys that must never appear inside a `sources:` entry. Listed explicitly so
+# the error names the offending knob rather than saying "unknown key".
+_SPLIT_KEYS = (
+    "select_shard_start",
+    "select_shard_end",
+    "audit_shard_start",
+    "audit_shard_end",
+)
+_PANEL_KEYS = ("code_names_json", "icd_csv_path", "audit_config")
+
+
+@dataclass(frozen=True)
+class NecessityComparisonConfig:
+    """Audit N feature sources under one protocol, one split, one panel."""
+
+    icd_csv_path: str
+    output_dir: str
+    sources: tuple[SourceSpec, ...]
+
+    code_names_json: str | None = None
+
+    select_shard_start: int | None = None
+    select_shard_end: int | None = None
+    audit_shard_start: int | None = None
+    audit_shard_end: int | None = None
+
+    join_key: str = "admission_id"
+    icd_col_prefix: str = "icd9_"
+    min_prevalence: float = 0.02
+    max_codes: int = 50
+    min_notes: int = 100
+
+    audit_config: AuditConfig = field(default_factory=AuditConfig)
+
+    def __post_init__(self) -> None:
+        if not self.sources:
+            raise ValueError("At least one source is required.")
+
+        names = [s.name for s in self.sources]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise ValueError(
+                f"Duplicate source names: {dupes}. Each source writes to its own "
+                "output subdirectory, so names must be unique."
+            )
+
+        # The same refusal audit_from_checkpoints makes, hoisted to config
+        # parse time: a two-source run should fail in the first second, not
+        # after the first source has already been audited on a bad split.
+        select_requested = self.select_shard_start is not None or self.select_shard_end is not None
+        if select_requested:
+            a_lo = self.audit_shard_start if self.audit_shard_start is not None else -np.inf
+            a_hi = self.audit_shard_end if self.audit_shard_end is not None else np.inf
+            s_lo = self.select_shard_start if self.select_shard_start is not None else -np.inf
+            s_hi = self.select_shard_end if self.select_shard_end is not None else np.inf
+            shares_dir = any(
+                Path(s.select_checkpoint_dir or s.checkpoint_dir) == Path(s.checkpoint_dir)
+                for s in self.sources
+            )
+            if shares_dir and max(a_lo, s_lo) < min(a_hi, s_hi):
+                raise ValueError(
+                    f"Selection shards [{self.select_shard_start}, {self.select_shard_end}) "
+                    f"overlap audit shards [{self.audit_shard_start}, {self.audit_shard_end}). "
+                    "Overlapping splits reintroduce the selection bias the split removes."
+                )
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> NecessityComparisonConfig:
+        """Build from a YAML mapping. Unknown keys raise rather than default."""
+        cfg = dict(raw)
+        cfg.pop("logging_level", None)
+
+        audit_raw = cfg.pop("audit_config", None) or {}
+        unknown_audit = set(audit_raw) - {f.name for f in fields(AuditConfig)}
+        if unknown_audit:
+            raise ValueError(
+                f"Unknown audit_config keys: {sorted(unknown_audit)}. "
+                f"Valid keys: {sorted(f.name for f in fields(AuditConfig))}"
+            )
+        if "mono_thresholds" in audit_raw:
+            audit_raw["mono_thresholds"] = tuple(audit_raw["mono_thresholds"])
+
+        raw_sources = cfg.pop("sources", None) or []
+        if not isinstance(raw_sources, list):
+            raise ValueError("`sources` must be a list of mappings.")
+
+        specs: list[SourceSpec] = []
+        valid_source_keys = {f.name for f in fields(SourceSpec)}
+        for entry in raw_sources:
+            offending = [k for k in (*_SPLIT_KEYS, *_PANEL_KEYS) if k in entry]
+            if offending:
+                raise ValueError(
+                    f"Source {entry.get('name', '?')!r} sets {sorted(offending)}, which must "
+                    "stay at the top level. Per-source splits, panels or audit knobs would "
+                    "let two sources be compared under different protocols."
+                )
+            unknown_src = set(entry) - valid_source_keys
+            if unknown_src:
+                raise ValueError(
+                    f"Unknown keys in source {entry.get('name', '?')!r}: {sorted(unknown_src)}. "
+                    f"Valid keys: {sorted(valid_source_keys)}"
+                )
+            specs.append(SourceSpec(**entry))
+
+        unknown = set(cfg) - {f.name for f in fields(cls)}
+        if unknown:
+            raise ValueError(
+                f"Unknown config keys: {sorted(unknown)}. "
+                f"Valid keys: {sorted(f.name for f in fields(cls))}"
+            )
+
+        return cls(**cfg, sources=tuple(specs), audit_config=AuditConfig(**audit_raw))
+
+
+def run_comparison(
+    config: NecessityComparisonConfig,
+    on_source_complete: Any = None,
+) -> dict[str, Any]:
+    """Audit every source in ``config`` and write the canonical artefact set.
+
+    Each source lands in ``output_dir/<name>/`` with exactly the layout
+    ``AuditResult.write`` produces for every other source in the suite, and a
+    top-level ``comparison_summary.json`` collects the headline numbers.
+
+    Args:
+        config: the shared protocol plus the list of sources.
+        on_source_complete: optional callback taking the source name, invoked
+            after each source's artefacts are written. The Modal entrypoint
+            passes a volume commit so a preempted run keeps finished sources.
+
+    Returns:
+        The comparison summary dict (also written to disk).
+    """
+    out = Path(config.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    if config.code_names_json:
+        code_names = json.loads(Path(config.code_names_json).read_text())
+        logger.info(f"Fixed {len(code_names)}-code panel pinned from {config.code_names_json}")
+    else:
+        code_names = None
+        logger.warning(
+            "No code_names_json supplied: the panel will be derived by prevalence from the "
+            "first source's audit split and reused for the rest. Pin it instead -- a drifting "
+            "panel produces tables that line up while measuring different things."
+        )
+
+    source_summaries: dict[str, Any] = {}
+
+    for spec in config.sources:
+        logger.info(f"--- source '{spec.name}' from {spec.checkpoint_dir}")
+        result = audit_from_checkpoints(
+            checkpoint_dir=spec.checkpoint_dir,
+            icd_csv_path=config.icd_csv_path,
+            source_name=spec.name,
+            code_names=code_names,
+            audit_shard_start=config.audit_shard_start,
+            audit_shard_end=config.audit_shard_end,
+            select_shard_start=config.select_shard_start,
+            select_shard_end=config.select_shard_end,
+            select_checkpoint_dir=spec.select_checkpoint_dir,
+            config=config.audit_config,
+            join_key=config.join_key,
+            min_prevalence=config.min_prevalence,
+            max_codes=config.max_codes,
+            icd_col_prefix=config.icd_col_prefix,
+            min_notes=config.min_notes,
+        )
+
+        # First source defines the panel when none was pinned, so every later
+        # source is audited against the same columns rather than its own.
+        if code_names is None:
+            code_names = result.code_names
+
+        if result.code_names != code_names:
+            raise RuntimeError(
+                f"Source '{spec.name}' resolved a different code panel than its predecessors. "
+                "The comparison would be measuring different things per source."
+            )
+
+        result.write(out / spec.name)
+
+        summary = result.summary_dict()
+        # The honest post-selection peak. Distinct from max_abs_r_any_feature,
+        # which argmaxes the whole [k x n_codes] matrix on the audit split and
+        # is therefore still in-sample in the selection sense. Reporting both
+        # is what makes the selection gap visible instead of arguable.
+        summary["selected_max_abs_r_audit"] = float(result.selected["abs_r_audit"].max())
+        summary["checkpoint_dir"] = spec.checkpoint_dir
+        source_summaries[spec.name] = summary
+
+        if on_source_complete is not None:
+            on_source_complete(spec.name)
+
+    comparison = {
+        "config": {
+            **{
+                f.name: getattr(config, f.name)
+                for f in fields(config)
+                if f.name not in ("sources", "audit_config")
+            },
+            "sources": [asdict(s) for s in config.sources],
+            "audit_config": asdict(config.audit_config),
+        },
+        "code_names": list(code_names) if code_names else [],
+        "n_codes": len(code_names) if code_names else 0,
+        "select_shards": [config.select_shard_start, config.select_shard_end],
+        "audit_shards": [config.audit_shard_start, config.audit_shard_end],
+        "sources": source_summaries,
+    }
+    (out / "comparison_summary.json").write_text(json.dumps(comparison, indent=2, default=str))
+    logger.info(f"Comparison summary for {len(source_summaries)} sources written to {out}")
+    return comparison
