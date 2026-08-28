@@ -301,3 +301,342 @@ def test_run_end_to_end(tmp_path: Path) -> None:
     # code order = prevalence-sorted A,B,C).
     sae_pc = pd.read_csv(out / "sae_test_per_code.csv")
     assert list(sae_pc["top_latent"]) == [0, 1, 2]
+
+
+# ---------------------------------------------------------------------------
+# Whitened directions (code plan C2)
+#
+# The plain difference of class means is measured in raw activation units, so a
+# high-variance nuisance dimension with a modest mean shift outweighs a
+# low-variance dimension carrying the actual signal. Marks & Tegmark (2023),
+# "The Geometry of Truth", handle this by tilting the probe with the inverse
+# covariance -- p_mm^iid(x) = sigma(theta^T Sigma^-1 x) -- and prove that under
+# Gaussian assumptions the result coincides on average with the logistic
+# regression direction. Since theta^T Sigma^-1 x = (Sigma^-1 theta)^T x, all
+# three arms are one family: d_eff = M^-1 d, with M = I (none), diag(Sigma)
+# (diagonal), or Sigma (full).
+# ---------------------------------------------------------------------------
+
+
+def _anisotropic_source(n: int = 4000, seed: int = 0):
+    """One informative low-variance dim, one useless high-variance dim.
+
+    dim 0: small absolute mean shift (0.5), tiny noise (sd 0.1) -> the signal.
+    dim 1: larger absolute mean shift (2.0), huge noise (sd 10)  -> a decoy that
+           dominates an unwhitened mean difference while carrying almost no
+           discriminative information.
+    dim 2: pure noise.
+    """
+    rng = np.random.default_rng(seed)
+    y = (rng.random(n) < 0.3).astype(np.int8)
+    X = np.empty((n, 3), dtype=np.float64)
+    X[:, 0] = 0.5 * y + rng.normal(0, 0.1, n)
+    X[:, 1] = 2.0 * y + rng.normal(0, 10.0, n)
+    X[:, 2] = rng.normal(0, 1.0, n)
+    return X.astype(np.float32), y[:, None].astype(np.int8)
+
+
+def test_unwhitened_directions_are_dominated_by_the_high_variance_decoy() -> None:
+    """Characterises the defect C2 exists to fix."""
+    from mech_interp_research.diff_in_means_baseline import build_directions
+
+    X, Y = _anisotropic_source()
+    D = build_directions(X, Y)
+
+    assert abs(D[1, 0]) > abs(D[0, 0]), "expected the decoy dim to dominate"
+
+
+def test_full_whitening_recovers_the_informative_dimension() -> None:
+    from mech_interp_research.diff_in_means_baseline import build_directions
+
+    X, Y = _anisotropic_source()
+    D = build_directions(X, Y, whiten="full", shrinkage=0.0)
+
+    assert abs(D[0, 0]) > abs(D[1, 0]), "whitening must favour the signal dim"
+
+
+def test_whitening_lifts_the_projection_correlation() -> None:
+    """The outcome that matters: point-biserial r of the projected score.
+
+    This is the statistic the audit reports, so the test asserts on it rather
+    than on the geometry of the direction vector.
+    """
+    from mech_interp_research.diff_in_means_baseline import build_directions
+    from mech_interp_research.icd_eval import compute_point_biserial_vectorised
+
+    X, Y = _anisotropic_source()
+
+    def r_of(**kw) -> float:
+        D = build_directions(X, Y, **kw)
+        r, _ = compute_point_biserial_vectorised(X.astype(np.float32) @ D, Y)
+        return abs(float(r[0, 0]))
+
+    r_none = r_of()
+    r_diag = r_of(whiten="diagonal")
+    r_full = r_of(whiten="full", shrinkage=0.0)
+
+    assert r_diag > r_none + 0.2
+    assert r_full > r_none + 0.2
+
+
+def test_diagonal_whitening_equals_inverse_variance_scaling() -> None:
+    """diagonal must be exactly diag(Sigma)^-1 d, not a z-score of something else."""
+    from mech_interp_research.diff_in_means_baseline import build_directions
+
+    X, Y = _anisotropic_source()
+    d_raw = build_directions(X, Y)[:, 0].astype(np.float64)
+    d_diag = build_directions(X, Y, whiten="diagonal")[:, 0].astype(np.float64)
+
+    expected = d_raw / X.astype(np.float64).var(axis=0)
+    expected /= np.linalg.norm(expected)
+    assert np.allclose(np.abs(d_diag), np.abs(expected), atol=1e-5)
+
+
+def test_full_whitening_equals_solving_sigma_d() -> None:
+    from mech_interp_research.diff_in_means_baseline import build_directions
+
+    X, Y = _anisotropic_source()
+    d_raw = build_directions(X, Y)[:, 0].astype(np.float64)
+    d_full = build_directions(X, Y, whiten="full", shrinkage=0.0)[:, 0].astype(np.float64)
+
+    Xc = X.astype(np.float64) - X.astype(np.float64).mean(axis=0)
+    sigma = (Xc.T @ Xc) / len(Xc)
+    expected = np.linalg.solve(sigma, d_raw)
+    expected /= np.linalg.norm(expected)
+    assert np.allclose(np.abs(d_full), np.abs(expected), atol=1e-5)
+
+
+def test_shrinkage_is_reported_and_bounded() -> None:
+    from mech_interp_research.diff_in_means_baseline import estimate_pooled_covariance
+
+    X, _ = _anisotropic_source()
+    sigma, diag = estimate_pooled_covariance(X, shrinkage="ledoit_wolf")
+
+    assert sigma.shape == (3, 3)
+    assert 0.0 <= diag["shrinkage"] <= 1.0
+    # The anisotropy figure the code plan asks to measure in the POOLED space
+    # rather than assume from the token-level sigma_stats.
+    assert diag["var_max"] > diag["var_mean"]
+    assert diag["condition_number"] > 1.0
+
+
+def test_covariance_is_estimated_on_train_only() -> None:
+    """Eval notes must not shape the whitening. Same guard as the directions."""
+    from mech_interp_research.diff_in_means_baseline import build_directions
+
+    X, Y = _anisotropic_source(n=4000, seed=1)
+    D_a = build_directions(X[:2000], Y[:2000], whiten="full", shrinkage=0.0)
+    D_b = build_directions(X[:2000], Y[:2000], whiten="full", shrinkage=0.0)
+    D_c = build_directions(X, Y, whiten="full", shrinkage=0.0)
+
+    assert np.allclose(D_a, D_b)
+    assert not np.allclose(D_a, D_c), "more data must change the estimate"
+
+
+def test_build_directions_rejects_unknown_whiten_mode() -> None:
+    from mech_interp_research.diff_in_means_baseline import build_directions
+
+    X, Y = _anisotropic_source()
+    with __import__("pytest").raises(ValueError, match="whiten"):
+        build_directions(X, Y, whiten="sphere")
+
+
+# ---------------------------------------------------------------------------
+# Writing a shard_ckpt-format source so necessity_audit can consume it
+#
+# The harness's feature-source contract is the encode_and_pool checkpoint
+# format. A baseline that writes it needs no bespoke audit code at all, which
+# is the property the whole necessity suite depends on.
+# ---------------------------------------------------------------------------
+
+
+def _raw_ckpt(tmp_path: Path, n_shards: int = 4, per_shard: int = 50, d: int = 6) -> Path:
+    ckpt = tmp_path / "raw_shard_ckpt"
+    ckpt.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(3)
+    for s in range(n_shards):
+        lo = s * per_shard
+        np.save(
+            ckpt / f"shard_{s:04d}_vectors.npy",
+            rng.standard_normal((per_shard, d)).astype("float32"),
+        )
+        with open(ckpt / f"shard_{s:04d}_meta.jsonl", "w") as f:
+            for i in range(per_shard):
+                f.write(json.dumps({"note_idx": lo + i, "admission_id": lo + i, "shard": s}) + "\n")
+    return ckpt
+
+
+def test_write_direction_source_emits_a_readable_shard_ckpt(tmp_path: Path) -> None:
+    from mech_interp_research.diff_in_means_baseline import write_direction_source
+    from mech_interp_research.necessity_audit import load_feature_matrix
+
+    raw = _raw_ckpt(tmp_path)
+    D = np.eye(6, 3, dtype=np.float32)  # 6-dim space, 3 codes
+    out = tmp_path / "dm_source"
+
+    write_direction_source(raw_ckpt_dir=raw, D=D, output_dir=out, shard_start=2, shard_end=4)
+
+    F, meta = load_feature_matrix(out)
+    assert F.shape == (100, 3)
+    assert list(meta.columns) >= ["admission_id", "note_idx"]
+    assert meta["note_idx"].tolist() == list(range(100, 200))
+
+
+def test_write_direction_source_writes_only_the_requested_shards(tmp_path: Path) -> None:
+    from mech_interp_research.diff_in_means_baseline import write_direction_source
+
+    raw = _raw_ckpt(tmp_path)
+    out = tmp_path / "dm_source"
+    write_direction_source(
+        raw_ckpt_dir=raw,
+        D=np.eye(6, 3, dtype=np.float32),
+        output_dir=out,
+        shard_start=1,
+        shard_end=2,
+    )
+
+    assert sorted(p.name for p in out.glob("*_vectors.npy")) == ["shard_0001_vectors.npy"]
+
+
+def test_write_direction_source_projection_matches_a_direct_matmul(tmp_path: Path) -> None:
+    """No hidden centering or scaling between the raw vectors and the audit."""
+    from mech_interp_research.diff_in_means_baseline import write_direction_source
+
+    raw = _raw_ckpt(tmp_path)
+    rng = np.random.default_rng(11)
+    D = rng.standard_normal((6, 3)).astype(np.float32)
+    out = tmp_path / "dm_source"
+
+    write_direction_source(raw_ckpt_dir=raw, D=D, output_dir=out, shard_start=0, shard_end=1)
+
+    got = np.load(out / "shard_0000_vectors.npy")
+    expected = np.load(raw / "shard_0000_vectors.npy") @ D
+    assert np.allclose(got, expected, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# run_direction_sources — build every whitening arm and emit audit sources
+# ---------------------------------------------------------------------------
+
+
+def _direction_fixture(tmp_path: Path, n_shards: int = 8, per_shard: int = 60, d: int = 8) -> Path:
+    """raw_shard_ckpt + a label CSV where code 0's signal sits in a
+    low-variance dimension and a high-variance decoy carries a bigger raw
+    mean gap -- the pooled-space situation whitening exists to handle."""
+    ckpt = tmp_path / "raw_shard_ckpt"
+    ckpt.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(5)
+    n = n_shards * per_shard
+    Y = (rng.random((n, 3)) < 0.3).astype(np.int8)
+
+    X = rng.normal(0, 1.0, (n, d))
+    X[:, 0] = 0.4 * Y[:, 0] + rng.normal(0, 0.08, n)
+    X[:, 1] = 0.4 * Y[:, 1] + rng.normal(0, 0.08, n)
+    X[:, 2] = 0.4 * Y[:, 2] + rng.normal(0, 0.08, n)
+    X[:, 3] = 3.0 * Y[:, 0] + rng.normal(0, 20.0, n)  # decoy
+
+    for s in range(n_shards):
+        lo, hi = s * per_shard, (s + 1) * per_shard
+        np.save(ckpt / f"shard_{s:04d}_vectors.npy", X[lo:hi].astype("float32"))
+        with open(ckpt / f"shard_{s:04d}_meta.jsonl", "w") as f:
+            for i in range(lo, hi):
+                f.write(json.dumps({"note_idx": i, "admission_id": i, "shard": s}) + "\n")
+
+    df = pd.DataFrame(Y, columns=["icd9_4019", "icd9_25000", "icd9_4280"])
+    df.insert(0, "admission_id", range(n))
+    df.to_csv(tmp_path / "icd.csv", index=False)
+    (tmp_path / "code_names.json").write_text(json.dumps(list(df.columns[1:])))
+    return ckpt
+
+
+def _run_sources(tmp_path: Path, ckpt: Path, arms=("none", "diagonal", "full")):
+    from mech_interp_research.diff_in_means_baseline import run_direction_sources
+
+    return run_direction_sources(
+        raw_ckpt_dir=ckpt,
+        icd_csv_path=tmp_path / "icd.csv",
+        code_names_json=tmp_path / "code_names.json",
+        output_dir=tmp_path / "dm",
+        whiten_arms=list(arms),
+        train_shard_start=2,
+        train_shard_end=6,
+        select_shard_start=0,
+        select_shard_end=2,
+        audit_shard_start=6,
+        audit_shard_end=8,
+        min_notes=10,
+    )
+
+
+def test_run_direction_sources_emits_one_audit_source_per_arm(tmp_path: Path) -> None:
+    from mech_interp_research.necessity_audit import load_feature_matrix
+
+    ckpt = _direction_fixture(tmp_path)
+    summary = _run_sources(tmp_path, ckpt)
+
+    assert set(summary["arms"]) == {"none", "diagonal", "full"}
+    for arm in ("none", "diagonal", "full"):
+        src = tmp_path / "dm" / f"dm_{arm}" / "shard_ckpt"
+        F, meta = load_feature_matrix(src)
+        assert F.shape == (240, 3)  # select (120) + audit (120) notes, 3 codes
+        assert sorted(meta["shard"].unique()) == [0, 1, 6, 7]
+
+
+def test_run_direction_sources_excludes_the_selection_split_from_training(tmp_path: Path) -> None:
+    """Directions must not be fitted on the notes used to select or to audit.
+
+    With selection='identity' no choice is made on the selection split, but
+    keeping it unseen means every reported statistic is clean without a caveat.
+    """
+    ckpt = _direction_fixture(tmp_path)
+    summary = _run_sources(tmp_path, ckpt)
+
+    assert summary["train_shards"] == [2, 6]
+    assert summary["n_train_notes"] == 240
+    assert summary["select_shards"] == [0, 2]
+    assert summary["audit_shards"] == [6, 8]
+
+
+def test_run_direction_sources_reports_pooled_space_anisotropy(tmp_path: Path) -> None:
+    ckpt = _direction_fixture(tmp_path)
+    summary = _run_sources(tmp_path, ckpt)
+
+    cov = summary["covariance"]
+    assert cov["n_train"] == 240
+    assert cov["var_max_over_mean"] > 1.0
+    assert 0.0 <= cov["shrinkage"] <= 1.0
+
+
+def test_run_direction_sources_uses_the_pinned_panel(tmp_path: Path) -> None:
+    ckpt = _direction_fixture(tmp_path)
+    (tmp_path / "code_names.json").write_text(json.dumps(["icd9_4019", "icd9_4280"]))
+    summary = _run_sources(tmp_path, ckpt)
+
+    assert summary["code_names"] == ["icd9_4019", "icd9_4280"]
+    assert summary["arms"]["none"]["n_features"] == 2
+
+
+def test_whitened_arm_beats_unwhitened_on_held_out_grounding(tmp_path: Path) -> None:
+    """End to end, through the real audit harness: the outcome C2 is gated on."""
+    from mech_interp_research.necessity_audit import AuditConfig, audit_from_checkpoints
+
+    ckpt = _direction_fixture(tmp_path)
+    _run_sources(tmp_path, ckpt)
+
+    med = {}
+    for arm in ("none", "full"):
+        res = audit_from_checkpoints(
+            checkpoint_dir=tmp_path / "dm" / f"dm_{arm}" / "shard_ckpt",
+            icd_csv_path=tmp_path / "icd.csv",
+            source_name=f"dm_{arm}",
+            code_names=json.loads((tmp_path / "code_names.json").read_text()),
+            select_shard_start=0,
+            select_shard_end=2,
+            audit_shard_start=6,
+            audit_shard_end=8,
+            config=AuditConfig(selection="identity"),
+            min_notes=10,
+        )
+        med[arm] = float(res.selected["abs_r_audit"].median())
+
+    assert med["full"] > med["none"]

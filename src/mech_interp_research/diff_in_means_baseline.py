@@ -41,7 +41,7 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -58,6 +58,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "build_directions",
+    "estimate_pooled_covariance",
+    "write_direction_source",
+    "run_direction_sources",
     "off_target_specificity_corr",
     "sae_top_latent_per_code",
     "run_diff_in_means_baseline",
@@ -73,21 +76,127 @@ _EPS = 1e-9
 # ---------------------------------------------------------------------------
 
 
-def build_directions(X_train: np.ndarray, Y_train: np.ndarray) -> np.ndarray:
-    """One unit difference-in-means direction per code, built on train notes.
+WhitenMode = Literal["none", "diagonal", "full"]
 
-    ``d_c = mean(X_train[y_c == 1]) - mean(X_train[y_c == 0])``, then
-    normalized to unit length. A code with no positives (or no negatives) in
-    train gets a zero column (its downstream stats will be NaN and are
-    reported as such rather than silently dropped).
+
+def estimate_pooled_covariance(
+    X_train: np.ndarray,
+    shrinkage: str | float = "ledoit_wolf",
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Covariance of the *pooled* note vectors, with shrinkage, on train only.
+
+    The code plan asks for the anisotropy of the pooled space to be measured
+    rather than inferred from ``sigma_stats.json``, which is token-level while
+    the max-pooling confound acts after pooling. The returned diagnostics carry
+    that measurement.
+
+    Shrinkage toward the scaled identity, ``(1-a)*S + a*mu*I`` with
+    ``mu = trace(S)/d``, is the Ledoit-Wolf target. With ~40,000 train notes
+    against d=2,304 the sample covariance is invertible but poorly conditioned,
+    and inverting it unshrunk amplifies the smallest, noisiest eigendirections
+    -- exactly the directions a difference of class means is least able to
+    estimate. Ledoit & Wolf (2004), "A Well-Conditioned Estimator for
+    Large-Dimensional Covariance Matrices", give the analytic optimal ``a``
+    under Frobenius loss, so nothing has to be tuned on the audit split.
+
+    Args:
+        X_train: [n_train, d] pooled activations, train notes only.
+        shrinkage: ``"ledoit_wolf"`` for the analytic coefficient, or an
+            explicit float in [0, 1] (0.0 = plain sample covariance).
+
+    Returns:
+        sigma: [d, d] float64 shrunk covariance.
+        diagnostics: shrinkage coefficient, pooled-space anisotropy, condition
+            numbers before and after shrinkage.
+    """
+    X = np.asarray(X_train, dtype=np.float64)
+    n, d = X.shape
+    Xc = X - X.mean(axis=0, keepdims=True)
+    sample = (Xc.T @ Xc) / n
+
+    var = np.diag(sample)
+    if shrinkage == "ledoit_wolf":
+        from sklearn.covariance import ledoit_wolf_shrinkage
+
+        alpha = float(ledoit_wolf_shrinkage(X, assume_centered=False))
+    else:
+        alpha = float(shrinkage)
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f"shrinkage must be in [0, 1] or 'ledoit_wolf', got {shrinkage!r}")
+
+    mu = float(np.trace(sample) / d)
+    sigma = (1.0 - alpha) * sample + alpha * mu * np.eye(d)
+
+    def _cond(m: np.ndarray) -> float:
+        ev = np.linalg.eigvalsh(m)
+        lo, hi = float(ev.min()), float(ev.max())
+        return float(hi / lo) if lo > 0 else float("inf")
+
+    diagnostics = {
+        "n_train": int(n),
+        "d": int(d),
+        "shrinkage": alpha,
+        "shrinkage_target_mu": mu,
+        # Pooled-space anisotropy, measured not assumed.
+        "var_max": float(var.max()),
+        "var_min": float(var.min()),
+        "var_mean": float(var.mean()),
+        "var_max_over_mean": float(var.max() / var.mean()) if var.mean() > 0 else float("inf"),
+        "condition_number_raw": _cond(sample),
+        "condition_number": _cond(sigma),
+    }
+    return sigma, diagnostics
+
+
+def build_directions(
+    X_train: np.ndarray,
+    Y_train: np.ndarray,
+    whiten: WhitenMode = "none",
+    shrinkage: str | float = "ledoit_wolf",
+    sigma: np.ndarray | None = None,
+) -> np.ndarray:
+    """One unit concept direction per code, built on train notes.
+
+    All three modes are the same estimator with a different metric::
+
+        d_c = mean(X_train[y_c == 1]) - mean(X_train[y_c == 0])
+        d_eff = M^-1 d_c,   normalized
+
+    with ``M = I`` (``whiten="none"``, the plain difference of means),
+    ``M = diag(Sigma)`` (``"diagonal"``, per-dimension inverse-variance
+    scaling, algebraically identical to differencing z-scored features), or
+    ``M = Sigma`` (``"full"``).
+
+    The full form is the mass-mean probe of Marks & Tegmark (2023), "The
+    Geometry of Truth", whose IID variant is ``sigma(theta^T Sigma^-1 x)``;
+    since ``theta^T Sigma^-1 x = (Sigma^-1 theta)^T x`` the correction is
+    expressible as a direction, which is what the audit needs. They show it
+    coincides on average with the logistic-regression direction under Gaussian
+    assumptions -- the reason to expect it here, given that LR on these exact
+    pooled features reaches mean AUC-ROC 0.808 while the unwhitened difference
+    of means lands near 0.12 median |r|.
+
+    Note that ``"none"`` measures the mean gap in raw activation units, so a
+    high-variance dimension with a modest shift outranks a low-variance
+    dimension carrying the actual signal. In a space whose per-dimension
+    variance spans orders of magnitude that is not a tie-break, it is the whole
+    ranking.
 
     Args:
         X_train: [n_train, d_model] pooled activations (train notes).
         Y_train: [n_train, n_codes] binary labels (train notes).
+        whiten: metric to apply, see above.
+        shrinkage: passed to ``estimate_pooled_covariance`` when
+            ``whiten="full"``. Ignored otherwise.
+        sigma: precomputed covariance, to avoid re-estimating it per arm.
 
     Returns:
-        D: [d_model, n_codes] float32 matrix of unit directions.
+        D: [d_model, n_codes] float32 matrix of unit directions. A code with no
+        positives (or no negatives) in train gets a zero column.
     """
+    if whiten not in ("none", "diagonal", "full"):
+        raise ValueError(f"Unknown whiten mode {whiten!r}; expected none|diagonal|full.")
+
     n_codes = Y_train.shape[1]
     d_model = X_train.shape[1]
     Xtr = X_train.astype(np.float64)
@@ -112,7 +221,104 @@ def build_directions(X_train: np.ndarray, Y_train: np.ndarray) -> np.ndarray:
             continue
         D[:, c] = d / norm
 
+    if whiten == "diagonal":
+        # M = diag(Sigma). Train variance only -- audit notes must never shape
+        # the metric, exactly as they never shape the class means.
+        var = Xtr.var(axis=0)
+        var = np.where(var < 1e-12, 1.0, var)
+        D = D / var[:, None]
+    elif whiten == "full":
+        if sigma is None:
+            sigma, _ = estimate_pooled_covariance(Xtr, shrinkage=shrinkage)
+        # One solve for all codes: Sigma^-1 D, never an explicit inverse.
+        D = np.linalg.solve(sigma, D)
+
+    norms = np.linalg.norm(D, axis=0)
+    nonzero = norms > 1e-12
+    D[:, nonzero] /= norms[nonzero]
+    D[:, ~nonzero] = 0.0
+
     return D.astype(np.float32)
+
+
+def write_direction_source(
+    raw_ckpt_dir: str | Path,
+    D: np.ndarray,
+    output_dir: str | Path,
+    shard_start: int | None = None,
+    shard_end: int | None = None,
+) -> dict[str, Any]:
+    """Project pooled raw activations onto ``D`` and write a shard_ckpt source.
+
+    The necessity harness consumes any directory of
+    ``shard_NNNN_vectors.npy`` + ``shard_NNNN_meta.jsonl`` pairs, so emitting
+    that format is all a new baseline owes it -- no bespoke audit code, and no
+    opportunity for a per-method analysis path to creep back in.
+
+    Note metadata is copied verbatim so ``note_idx`` and the join key survive
+    unchanged; only the feature columns differ from the input.
+
+    Args:
+        raw_ckpt_dir: source ``raw_shard_ckpt/`` of pooled [n_notes, d_model]
+            vectors.
+        D: [d_model, n_codes] directions.
+        output_dir: destination, created if absent.
+        shard_start/shard_end: half-open shard range; None = unbounded.
+
+    Returns:
+        Structural summary: shards written, notes projected, feature count.
+    """
+    raw_ckpt_dir = Path(raw_ckpt_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    Dm = np.asarray(D, dtype=np.float32)
+    written: list[int] = []
+    n_notes = 0
+
+    for vec_path in sorted(raw_ckpt_dir.glob("shard_*_vectors.npy")):
+        shard_idx = int(vec_path.stem.split("_")[1])
+        if shard_start is not None and shard_idx < shard_start:
+            continue
+        if shard_end is not None and shard_idx >= shard_end:
+            continue
+        meta_path = raw_ckpt_dir / f"shard_{shard_idx:04d}_meta.jsonl"
+        if not meta_path.exists():
+            logger.warning("Shard %d: no meta file beside %s; skipping.", shard_idx, vec_path.name)
+            continue
+
+        X = np.load(vec_path)
+        if X.shape[1] != Dm.shape[0]:
+            raise ValueError(
+                f"{vec_path.name} has d_model={X.shape[1]} but D expects {Dm.shape[0]}."
+            )
+        F = (X.astype(np.float32) @ Dm).astype(np.float32)
+
+        np.save(output_dir / f"shard_{shard_idx:04d}_vectors.npy", F)
+        (output_dir / f"shard_{shard_idx:04d}_meta.jsonl").write_text(meta_path.read_text())
+        written.append(shard_idx)
+        n_notes += int(F.shape[0])
+
+    if not written:
+        raise RuntimeError(
+            f"No shards written from {raw_ckpt_dir} in range "
+            f"[{shard_start}, {shard_end}). Check the shard range and the source dir."
+        )
+
+    logger.info(
+        "Wrote %d shards / %d notes x %d directions to %s",
+        len(written),
+        n_notes,
+        Dm.shape[1],
+        output_dir,
+    )
+    return {
+        "output_dir": str(output_dir),
+        "n_shards": len(written),
+        "shard_range": [written[0], written[-1]],
+        "n_notes": n_notes,
+        "n_features": int(Dm.shape[1]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -614,3 +820,196 @@ def run_diff_in_means_baseline(
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     logger.info("Done. Wrote outputs to %s", output_dir)
     return summary
+
+
+# ---------------------------------------------------------------------------
+# 6. Direction sources for the necessity harness (code plan C2)
+# ---------------------------------------------------------------------------
+
+
+def run_direction_sources(
+    raw_ckpt_dir: str | Path,
+    icd_csv_path: str | Path,
+    output_dir: str | Path,
+    code_names_json: str | Path | None = None,
+    whiten_arms: list[str] | None = None,
+    shrinkage: str | float = "ledoit_wolf",
+    train_shard_start: int = 31,
+    train_shard_end: int = 281,
+    select_shard_start: int = 0,
+    select_shard_end: int = 31,
+    audit_shard_start: int = 281,
+    audit_shard_end: int = 312,
+    join_key: str = "admission_id",
+    icd_col_prefix: str = "icd9_",
+    min_prevalence: float = 0.02,
+    max_codes: int = 50,
+    min_notes: int = 100,
+) -> dict[str, Any]:
+    """Build one diff-in-means arm per whitening mode and emit audit sources.
+
+    Produces nothing but ``shard_ckpt``-format directories. The grounding,
+    off-target and monospecificity numbers are then computed by
+    ``necessity_audit`` on exactly the same code path as the SAEs, which is
+    what makes "same audit protocol" structural rather than asserted.
+
+    Three splits, all disjoint:
+
+    * **train** ``[train_shard_start, train_shard_end)`` -- the only notes the
+      class means and the covariance ever see.
+    * **selection** ``[select_shard_start, select_shard_end)`` -- written so
+      every source in the comparison reports the same
+      ``in_sample_selection: false`` / ``n_select_notes``. With
+      ``selection="identity"`` no choice is actually made here, but excluding
+      these notes from training keeps the statistic clean without a caveat.
+    * **audit** ``[audit_shard_start, audit_shard_end)`` -- the held-out notes
+      behind every reported number.
+
+    The default train range starts at 31, not 0, precisely so the selection
+    shards stay unseen.
+
+    Args:
+        raw_ckpt_dir: pooled raw centered activations (``raw_shard_ckpt/``).
+        icd_csv_path: label CSV.
+        output_dir: parent for ``dm_<arm>/shard_ckpt/`` plus the manifest.
+        code_names_json: the pinned 46-code panel. Strongly recommended --
+            re-deriving it per source is how two methods end up compared on
+            different code sets.
+        whiten_arms: subset of ``none``/``diagonal``/``full``.
+        shrinkage: covariance shrinkage for the ``full`` arm.
+
+    Returns:
+        Manifest dict (also written to ``output_dir/directions_manifest.json``).
+    """
+    from mech_interp_research.necessity_audit import (
+        align_features_to_labels,
+        build_label_matrix,
+    )
+
+    whiten_arms = list(whiten_arms or ["none", "diagonal", "full"])
+    unknown = set(whiten_arms) - {"none", "diagonal", "full"}
+    if unknown:
+        raise ValueError(f"Unknown whiten arms: {sorted(unknown)}")
+
+    raw_ckpt_dir = Path(raw_ckpt_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for lo, hi, name in (
+        (train_shard_start, train_shard_end, "train"),
+        (select_shard_start, select_shard_end, "selection"),
+        (audit_shard_start, audit_shard_end, "audit"),
+    ):
+        if lo >= hi:
+            raise ValueError(f"Empty {name} shard range [{lo}, {hi}).")
+    for (a_lo, a_hi, a), (b_lo, b_hi, b) in (
+        (
+            (train_shard_start, train_shard_end, "train"),
+            (select_shard_start, select_shard_end, "selection"),
+        ),
+        (
+            (train_shard_start, train_shard_end, "train"),
+            (audit_shard_start, audit_shard_end, "audit"),
+        ),
+        (
+            (select_shard_start, select_shard_end, "selection"),
+            (audit_shard_start, audit_shard_end, "audit"),
+        ),
+    ):
+        if max(a_lo, b_lo) < min(a_hi, b_hi):
+            raise ValueError(
+                f"{a} shards [{a_lo}, {a_hi}) overlap {b} shards [{b_lo}, {b_hi}). "
+                "Directions fitted on notes they are later selected or scored on are circular."
+            )
+
+    logger.info("Step 1: reassembling raw pooled activations from %s", raw_ckpt_dir)
+    note_vectors, note_meta = reassemble_note_vectors(raw_ckpt_dir)
+
+    code_names = None
+    if code_names_json is not None:
+        code_names = json.loads(Path(code_names_json).read_text())
+        logger.info("Fixed %d-code panel pinned from %s", len(code_names), code_names_json)
+    else:
+        logger.warning("No code_names_json: panel will be derived by prevalence.")
+
+    Y, code_names, matched_meta = build_label_matrix(
+        icd_csv_path=icd_csv_path,
+        note_meta=note_meta,
+        code_names=code_names,
+        min_prevalence=min_prevalence,
+        max_codes=max_codes,
+        icd_col_prefix=icd_col_prefix,
+        join_key=join_key,
+        min_notes=min_notes,
+    )
+    X = align_features_to_labels(note_vectors, note_meta, matched_meta)
+    if "shard" not in matched_meta.columns:
+        raise KeyError("matched_meta lacks a 'shard' column; cannot split by shard.")
+    shards = matched_meta["shard"].to_numpy()
+
+    train_mask = (shards >= train_shard_start) & (shards < train_shard_end)
+    n_train = int(train_mask.sum())
+    if n_train < min_notes:
+        raise RuntimeError(
+            f"Only {n_train} train notes in shards [{train_shard_start}, {train_shard_end}); "
+            f"min_notes={min_notes}."
+        )
+    X_train, Y_train = X[train_mask], Y[train_mask]
+    logger.info("  train: %d notes x %d dims, %d codes", n_train, X.shape[1], len(code_names))
+
+    # Estimated once and shared by every arm that needs it, so the arms differ
+    # only in the metric applied, never in the data behind it.
+    sigma = None
+    cov_diag: dict[str, Any] = {}
+    if "full" in whiten_arms:
+        logger.info("Step 2: estimating pooled-space covariance (shrinkage=%s)...", shrinkage)
+        sigma, cov_diag = estimate_pooled_covariance(X_train, shrinkage=shrinkage)
+        logger.info(
+            "  shrinkage=%.4f  var_max/mean=%.1f  cond(raw)=%.3g -> cond(shrunk)=%.3g",
+            cov_diag["shrinkage"],
+            cov_diag["var_max_over_mean"],
+            cov_diag["condition_number_raw"],
+            cov_diag["condition_number"],
+        )
+
+    arms: dict[str, Any] = {}
+    for arm in whiten_arms:
+        logger.info("Step 3: arm '%s' -- building %d directions", arm, len(code_names))
+        D = build_directions(X_train, Y_train, whiten=arm, shrinkage=shrinkage, sigma=sigma)
+        arm_dir = output_dir / f"dm_{arm}"
+        arm_dir.mkdir(parents=True, exist_ok=True)
+        np.save(arm_dir / "directions.npy", D)
+
+        ckpt_out = arm_dir / "shard_ckpt"
+        sel = write_direction_source(
+            raw_ckpt_dir, D, ckpt_out, select_shard_start, select_shard_end
+        )
+        aud = write_direction_source(raw_ckpt_dir, D, ckpt_out, audit_shard_start, audit_shard_end)
+
+        arms[arm] = {
+            "checkpoint_dir": str(ckpt_out),
+            "directions_npy": str(arm_dir / "directions.npy"),
+            "n_features": int(D.shape[1]),
+            "n_zero_columns": int((np.linalg.norm(D, axis=0) < 1e-12).sum()),
+            "select": sel,
+            "audit": aud,
+        }
+
+    manifest = {
+        "raw_ckpt_dir": str(raw_ckpt_dir),
+        "code_names": list(code_names),
+        "n_codes": len(code_names),
+        "whiten_arms": whiten_arms,
+        "shrinkage_setting": shrinkage,
+        "train_shards": [train_shard_start, train_shard_end],
+        "select_shards": [select_shard_start, select_shard_end],
+        "audit_shards": [audit_shard_start, audit_shard_end],
+        "n_train_notes": n_train,
+        "covariance": cov_diag,
+        "arms": arms,
+    }
+    (output_dir / "directions_manifest.json").write_text(
+        json.dumps(manifest, indent=2, default=str)
+    )
+    logger.info("Direction sources for %d arms written to %s", len(arms), output_dir)
+    return manifest

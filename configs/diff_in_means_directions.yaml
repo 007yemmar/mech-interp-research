@@ -1,0 +1,78 @@
+# Whitened difference-in-means direction sources (code plan C2).
+#
+# WHY THIS SUPERSEDES results/necessity/diff_in_means/
+# ---------------------------------------------------
+# The first run built the PLAIN mean difference, d = mean(X[y]) - mean(X[~y]),
+# measured in raw activation units. It reached a median on-target |r| of 0.121
+# with a flat off-target profile -- and its best code across all 46 (0.271) fell
+# below the SAE's worst (0.272). Two signs that the baseline, not the method,
+# was the cause: logistic regression on the SAME pooled 2,304-d features reaches
+# mean AUC-ROC 0.808, and mean_abs_off_r was 0.093 +/- 0.011 across all 46 codes,
+# the signature of one shared magnitude axis rather than 46 concept directions.
+#
+# THE FIX, AND WHY THIS FORM OF IT
+# --------------------------------
+# Marks & Tegmark (2023), "The Geometry of Truth", define mass-mean probing as
+# theta = mu+ - mu-, with an IID variant sigma(theta^T Sigma^-1 x) in which the
+# inverse covariance "tilts the decision boundary to accommodate interference"
+# from non-orthogonal features; they prove it coincides on average with the
+# logistic-regression direction under Gaussian assumptions. Since
+# theta^T Sigma^-1 x = (Sigma^-1 theta)^T x, the correction is expressible as a
+# direction, which is what an audit unit has to be. That LR reaches 0.808 on
+# these exact features is the empirical reason to expect the full arm to work.
+#
+# All three arms are one estimator under a different metric, d_eff = M^-1 d:
+#   none      M = I            -- the published, defective baseline (control)
+#   diagonal  M = diag(Sigma)  -- inverse-variance scaling, i.e. differencing
+#                                z-scored features
+#   full      M = Sigma        -- the mass-mean / LDA form
+# Reporting all three pre-empts "you picked the weak variant".
+#
+# Note the pool->project asymmetry flagged in the experiment plan is NOT the
+# suspected cause here: the 0.808 LR probe is computed on the same pooled
+# vectors in the same order, so pooling order cannot explain a gap between two
+# estimators that share it. If the full arm still lands near 0.12 that
+# hypothesis is back on the table.
+#
+# Run:
+#   modal run modal_app/diff_in_means_directions.py --config-file configs/diff_in_means_directions.yaml
+# Then audit the arms alongside the SAEs:
+#   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_comparison.yaml
+
+# --- inputs ----------------------------------------------------------------
+# Pooled raw centered layer-16 activations from the Baseline-3 run. SAE-independent.
+raw_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+
+# The same pinned 46-code panel every other source in the suite uses.
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+
+output_dir: /out/necessity/diff_in_means_whitened
+
+# --- arms ------------------------------------------------------------------
+whiten_arms: [none, diagonal, full]
+
+# Ledoit & Wolf (2004) analytic shrinkage toward the scaled identity. Chosen
+# over a hand-set ridge because it needs no tuning -- and anything tuned would
+# have to be tuned on data, which here would mean the audit split.
+shrinkage: ledoit_wolf
+
+# --- splits: train / selection / audit, all disjoint -----------------------
+# Train starts at 31, not 0, so the selection shards stay unseen by the class
+# means and the covariance. Costs ~5,000 of ~45,000 train notes and buys a
+# statistic that needs no caveat.
+train_shard_start: 31
+train_shard_end: 281
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+
+# --- label join (identical to icd_eval and every other baseline) -----------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+logging_level: INFO

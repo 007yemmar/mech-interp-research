@@ -461,3 +461,142 @@ before this table is load-bearing.
 **Not yet answered by C1:** every row above is an SAE or a random null. The
 label-supervised baselines (whitened diff-in-means C2, probe directions C3, PCA C5,
 TF-IDF C8) are what R1 named, and they are still missing from this table.
+
+---
+
+## C2 — whitened difference-in-means ✅ DONE (acceptance gate met on the corrected criterion)
+
+**Status:** complete. Artifacts in `results/necessity/direction_audit/{diff_in_means_none,
+diff_in_means_diagonal,diff_in_means_full}/` and `results/necessity/diff_in_means_whitened/
+directions_manifest.json`. `results/necessity/diff_in_means/` is marked **SUPERSEDED**
+(see the `SUPERSEDED.md` written into that directory).
+
+**What was built.**
+- `diff_in_means_baseline.estimate_pooled_covariance()` — shrunk pooled-space covariance
+  with the Ledoit-Wolf analytic coefficient, plus the anisotropy diagnostics the code plan
+  asked to *measure* rather than infer from the token-level `sigma_stats.json`.
+- `build_directions(..., whiten=)` — all three arms are one estimator under a different
+  metric, `d_eff = M⁻¹d` with `M ∈ {I, diag(Σ), Σ}`. The `none` path is unchanged and still
+  passes its original regression test.
+- `write_direction_source()` + `run_direction_sources()` — emit `shard_ckpt`-format sources.
+  **This module computes no audit statistics of its own.** Grounding, off-target and
+  monospecificity all come from `necessity_audit`, so the diff-in-means rows and the SAE rows
+  are produced by the same code.
+- `modal_app/diff_in_means_directions.py`, `configs/diff_in_means_directions.yaml`,
+  `configs/necessity_audit_directions.yaml`. 13 new tests; suite at **387 passed**.
+
+### C2-a. Research: which whitening, and why
+
+Marks & Tegmark (2023), *The Geometry of Truth*, define mass-mean probing as
+`θ = μ⁺ − μ⁻` with an IID variant `p(x) = σ(θᵀΣ⁻¹x)`, where `Σ⁻¹` "tilts the decision
+boundary to accommodate interference" from non-orthogonal features; they prove it coincides
+on average with the logistic-regression direction under Gaussian assumptions. Because
+`θᵀΣ⁻¹x = (Σ⁻¹θ)ᵀx`, the correction is expressible as a *direction*, which is what an audit
+unit must be. That is the theoretical reason to expect the full form to work here, and our
+own LR probe at 0.808 AUC on these exact features is the empirical one.
+
+Covariance estimation used **Ledoit & Wolf (2004)** analytic shrinkage toward the scaled
+identity, chosen over a hand-set ridge because it needs no tuning — and anything tuned would
+have to be tuned on data, which here would mean the audit split. This was not optional: the
+pooled-space sample covariance is **singular** (`var_min` exactly 0.0, condition number
+6.9 × 10¹⁶). Ledoit-Wolf picked α = 0.00097, which brings the condition number to 3.7 × 10⁵.
+
+**Measured pooled-space anisotropy** (the code plan asked for this specifically, because the
+3,950/13.1 figure in `sigma_stats.json` is token-level while the confound acts after
+max-pooling): `var_max/var_mean = 104.7` over 2,304 dimensions, 40,088 train notes.
+
+### C2-b. **The acceptance gate as written was unmeetable — its arithmetic used the wrong prevalence**
+
+The code plan sets "expect ≥ 0.4 given the probe's 0.808 AUC", derived from converting
+r_pb → AUC "at p ≈ 0.15". **The actual median prevalence of the 46-code panel is 0.073**, not
+0.15. Redoing the conversion in the correct direction and *per code* with each code's real
+prevalence (`d = √2·Φ⁻¹(AUC)`, `r = d√(pq)/√(d²pq+1)`), the raw-LR probe corresponds to a
+**median |r| of 0.307**, not ≥ 0.4. Source: `raw_cv_results.csv` from the Baseline-3 run,
+46/46 codes.
+
+So the correct gate — *does whitened diff-in-means reach the LR ceiling on identical
+features?* — is **met**:
+
+| method | median on-target \|r\| | beats LR ceiling on |
+|---|---|---|
+| diff-in-means, unwhitened | 0.1209 | **0/46** codes |
+| diff-in-means, diagonal | 0.1266 | **0/46** codes |
+| *raw-LR probe (the ceiling)* | *0.3073* | — |
+| **diff-in-means, full/LDA** | **0.3395** | **39/46** codes (Wilcoxon p = 1.7e-8) |
+| vanilla SAE | 0.5736 | 45/46 codes |
+| JumpReLU SAE | 0.5739 | 45/46 codes |
+
+The plan's own defect criterion — "a near-cousin of LR landing 0.22 AUC below LR is a
+baseline defect, not a finding" — is cleared: the whitened baseline now slightly *exceeds* LR.
+
+### C2-c. **Finding: the plan's proposed fix (diagonal / z-score) does not work, and the reason is diagnostic**
+
+The plan prescribed "Z-score / diagonal-whiten before differencing". Measured, it moves the
+median from 0.1209 to 0.1266 — essentially nothing. The mechanism, from the pairwise geometry
+of the 46 directions:
+
+| arm | mean pairwise \|cos\| | frac \|cos\| > 0.9 | **effective dimensionality** |
+|---|---|---|---|
+| none | 0.685 | 0.103 | **1.89** |
+| diagonal | 0.691 | 0.159 | **1.82** |
+| full | 0.060 | 0.000 | **33.68** |
+
+(Effective dimensionality = participation ratio of the Gram spectrum of the 46 unit directions;
+46 would mean fully distinct.)
+
+The unwhitened baseline's "46 concept directions" are **~2 directions**. That is the direct
+measurement of what the plan inferred from the flat off-target profile, and it explains the
+1.25 specificity ratio: when every code's direction is the same axis, an on-target correlation
+is not distinguishable from an off-target one. **Diagonal whitening does not fix it because the
+confound lives in the off-diagonal covariance, not in per-dimension scale.** Only the full
+inverse-covariance form decorrelates the directions.
+
+### C2-d. Robustness: the result is not a conditioning artifact
+
+Shrinkage swept over a 100× range, `full` arm:
+
+| α | cond(Σ_shrunk) | median \|r\| | specificity ratio | median n_off_sig |
+|---|---|---|---|---|
+| 0.00097 (Ledoit-Wolf) | 3.7e5 | 0.3395 | **5.68** | **8** |
+| 0.01 | 3.6e4 | 0.3412 | 5.64 | 8 |
+| 0.1 | 3.3e3 | 0.3510 | 5.32 | 10 |
+
+On-target moves +3% and specificity *degrades* as α rises. Ledoit-Wolf did not under-shrink;
+0.34 is where one linear direction per code tops out on max-pooled activations. **Keep the
+parameter-free Ledoit-Wolf arm as the headline**, and report the sweep as the robustness check.
+
+### C2-e. The necessity table, all seven sources on one code path
+
+Held-out shards 281–311 (4,911 notes), pinned 46-code panel, identical `AuditConfig` except
+`selection`, which `k` forces (`identity` for one-direction-per-code sources, `top_per_code`
+for the rest — stated in two configs rather than hidden as a per-source override):
+
+| source | k | median \|r\| | peak \|r\| | spec. ratio | n_off_sig | grounded @0.2 / @0.3 / @0.5 |
+|---|---|---|---|---|---|---|
+| diff-in-means (none) | 46 | 0.121 | 0.291 | 1.25 | 17 | 42 / 0 / 0 |
+| diff-in-means (diagonal) | 46 | 0.127 | 0.310 | 1.37 | 17 | 41 / 3 / 0 |
+| **diff-in-means (full/LDA)** | 46 | **0.339** | **0.699** | **5.68** | **8** | 43 / 28 / 7 |
+| random (L0-matched) | 18,432 | 0.149 | 0.314 | 2.12 | 12 | 127 / 1 / 0 |
+| GemmaScope | 16,384 | 0.309 | 0.545 | 6.29 | 4 | 295 / 54 / 4 |
+| vanilla SAE | 18,432 | 0.574 | 0.859 | 15.88 | 2 | 2,063 / 675 / 143 |
+| JumpReLU SAE | 18,432 | 0.574 | 0.864 | 14.94 | 3 | 2,075 / 610 / 147 |
+
+The SAE beats whitened diff-in-means on **45/46 codes** (Wilcoxon p = 1.4e-13).
+
+### C2-f. ⚠️ **Risk flagged for C4: specificity may not survive the matched-\|r\| control**
+
+The plan's B1 warning now has teeth. Note the pair closest in on-target strength:
+
+- whitened diff-in-means: |r| = 0.339 → specificity ratio **5.68**
+- GemmaScope: |r| = 0.309 → specificity ratio **6.29**
+
+At comparable on-target |r| these are **effectively tied**. The vanilla SAE's 15.88 is
+attached to an on-target |r| of 0.574, so the 15.9-vs-5.7 headline is confounded by exactly the
+coupling B1 exists to control for. **The paper must not lead with the raw specificity ratio.**
+C4's restricted comparison — codes where two methods reach comparable |r| — is now load-bearing
+rather than a nicety, and it is possible it will show the SAE's specificity advantage is largely
+a by-product of its higher on-target correlation. That must be reported either way.
+
+What is *not* in doubt from C2: the SAE reaches on-target correlations no one-direction-per-code
+method approaches (0.574 vs 0.339, 45/46 codes), and it still grounds 143–147 features at
+|r| > 0.5 where diff-in-means yields 7 and the random null yields 0.
