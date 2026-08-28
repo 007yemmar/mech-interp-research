@@ -792,3 +792,112 @@ ratio. GemmaScope reaches 6.29 at |r| = 0.309 and PCA reaches 2.88 at |r| = 0.14
 SAEs' 14.9–15.9 sits at |r| = 0.574. Specificity and on-target strength are coupled, so the
 ratio column cannot be read down the page. C4's matched-|r| restriction is the only thing that
 turns it into a claim.
+
+---
+
+## C4 — the necessity comparison assembled, and the B1 control run ✅ DONE
+
+**Status:** complete. `src/mech_interp_research/necessity_comparison.py` (9 tests, both
+coupling controls mutation-tested), `scripts/build_necessity_comparison.py`,
+outputs in `results/necessity/comparison/` + `figures/fig_necessity_specificity.png/.pdf`.
+Regenerable with `uv run python scripts/build_necessity_comparison.py`, no Modal. Suite at
+**415 passed**.
+
+### C4-a. ⚠️ **Correction to my own C2-f / C5 risk flag — I over-stated it**
+
+I flagged that the 15.9-vs-5.7 specificity headline was "confounded by the coupling B1 exists
+to control" and that the SAE's advantage might be "largely a by-product of its higher on-target
+correlation". **Measured, that flag was wrong in its strong form**, for a reason worth stating
+in the paper.
+
+`specificity_ratio = |on_target_r| / mean|off_target_r|` *is* arithmetically coupled. But
+`mean_abs_off_r` — off-target leakage on its own — is not, and on that uncoupled axis:
+
+| method | median \|on_r\| | **median mean\|off_r\|** ↓ | median spec. ratio |
+|---|---|---|---|
+| **vanilla SAE** | 0.574 | **0.0324** | 15.88 |
+| **JumpReLU SAE** | 0.574 | **0.0373** | 14.94 |
+| GemmaScope SAE | 0.309 | 0.0468 | 6.29 |
+| PCA | 0.141 | 0.0484 | 2.88 |
+| diff-in-means (LDA) | 0.339 | 0.0572 | 5.68 |
+| random (L0-matched) | 0.149 | 0.0751 | 2.12 |
+| random (dense) | 0.219 | 0.0786 | 3.00 |
+| probe LR (unweighted) | 0.333 | 0.0885 | 4.42 |
+| probe LR (balanced) | 0.327 | 0.0921 | 3.67 |
+| diff-in-means (diagonal) | 0.127 | 0.0938 | 1.37 |
+| diff-in-means (plain) | 0.121 | 0.0940 | 1.25 |
+
+**All three SAEs occupy the three lowest-leakage positions, and the two trained SAEs are also
+the two highest on on-target |r|. They dominate on both axes at once.** When one method is
+better on both axes there is no trade-off to control for, and the coupling objection does not
+arise. **This, not the specificity ratio, is how the paper should state the specificity result.**
+
+### C4-b. **Finding: B1's premise is empirically backwards between methods**
+
+[plan, B1] assumes "a direction that barely correlates with its own code cannot show much
+off-target leakage either" — i.e. positive coupling. Pooled across all 506 (method, code)
+points the OLS slope of leakage on on-target strength is **−0.0365 (r = −0.220, p = 5.5e-7)**:
+methods that ground *more* strongly leak *less*.
+
+The mechanism is C2's: the weak methods are weak *because* their directions collapse onto a
+shared axis (effective dimensionality 1.8–1.9 for plain/diagonal diff-in-means), and a shared
+axis correlates weakly with **everything**, which is high leakage, not low. So the failure mode
+is "correlates weakly with everything", not "correlates with nothing".
+
+**Report this honestly with its caveat**: *within* a method, across codes, the coupling is
+positive for most baselines (diff-in-means LDA ρ = +0.387, p = 0.008; probe LR ρ = +0.425,
+p = 0.003; random dense ρ = +0.346, p = 0.019) and negative but non-significant for all three
+SAEs (ρ = −0.16 to −0.22, p > 0.14). So B1's concern is real within the supervised baselines
+and does not transfer to the between-method ordering.
+
+### C4-c. **The matched-|r| control: underpowered for the trained SAEs, decisive for GemmaScope**
+
+Restricting to codes where two methods reach on-target |r| within 0.05, paired by code:
+
+| A | B | matched codes | median leak A | median leak B | A lower on | Wilcoxon p |
+|---|---|---|---|---|---|---|
+| vanilla SAE | diff-in-means (LDA) | **5** | 0.0825 | 0.0758 | 2/5 | 1.00 |
+| vanilla SAE | probe LR (unweighted) | **5** | 0.0843 | 0.0885 | 4/5 | 0.63 |
+| vanilla SAE | PCA | **0** | — | — | — | — |
+| vanilla SAE | random (L0-matched) | **0** | — | — | — | — |
+| JumpReLU SAE | diff-in-means (LDA) | **7** | 0.0775 | 0.0427 | 2/7 | 0.69 |
+| JumpReLU SAE | probe LR (unweighted) | **6** | 0.0574 | 0.0594 | 5/6 | 0.31 |
+| **GemmaScope SAE** | **diff-in-means (LDA)** | **15** | **0.0376** | **0.0441** | **11/15** | 0.107 |
+| **GemmaScope SAE** | **probe LR (unweighted)** | **14** | **0.0363** | **0.0742** | **13/14** | **0.0017** |
+
+**The trained SAEs cannot be compared this way and the paper must say so.** They are so much
+stronger than every baseline that only 5–7 codes overlap in on-target |r| — and against PCA and
+random, **zero** codes overlap. Every trained-SAE row is non-significant (p ≥ 0.31); those rows
+are *inconclusive*, not supportive, and must not be quoted as if they were.
+
+**GemmaScope is the only SAE for which the control has power, and it wins.** With 14–15
+overlapping codes it leaks less than a supervised probe direction on **13 of 14 codes
+(p = 0.0017)** and less than the LDA direction on 11 of 15 (p = 0.107, directional). Since
+GemmaScope was never trained on MIMIC, this isolates the contribution of the **SAE
+architecture** from the contribution of **domain training** — and the paper's separate claim
+that domain training adds more on top (leakage 0.0324 vs 0.0468) is untouched.
+
+**This reverses the concern in C2-f.** GemmaScope's mid-table position is not a liability for
+the necessity argument; it is the only place the matched-|r| test is estimable, and it is the
+cleanest evidence that the architecture rather than the search budget produces the specificity.
+
+### C4-d. What T2 should claim, and what it must not
+
+**Claim, in this order:**
+1. The trained SAEs are simultaneously the **strongest-grounding** and the **lowest-leaking**
+   sources. Dominance on both axes needs no coupling control.
+2. At |r| ≥ 0.3 the separation is categorical: 610–675 SAE features vs 28 (best baseline), 1
+   (PCA), 1–40 (random); at |r| ≥ 0.5, 143–147 vs 7, 0, 0.
+3. No non-SAE source exceeds |r| = 0.70 on any code, against the SAE's 0.86 peak — and the
+   three *label-supervised* methods, which see labels the SAE never does, all plateau near 0.33.
+4. At matched on-target strength, a **domain-mismatched** SAE still leaks significantly less
+   than a supervised probe direction (13/14 codes, p = 0.0017), which attributes the
+   specificity to the architecture.
+
+**Do not claim:**
+- That the matched-|r| control supports the *trained* SAEs. It is underpowered there (n = 5–7,
+  all p ≥ 0.31) and undefined against PCA and random (n = 0). Say so explicitly — a reviewer
+  who runs the restriction will find this immediately.
+- The bare specificity ratio as a cross-method headline. Report leakage; keep the ratio as a
+  secondary column with its coupling stated.
+- That |r| > 0.1 grounded counts favour the SAE. They do not (T1).
