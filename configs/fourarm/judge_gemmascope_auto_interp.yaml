@@ -8,7 +8,8 @@
 # arm's selected_features.csv / top_associations.csv before running.
 sae_checkpoint: /out/sources/gemmascope_16k
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-icd_eval_dir: /out/judgetest/gemmascope
+icd_eval_dir: /out/necessity/sae_audit/gemmascope
+shard_ckpt_dir: /out/icd_eval/gemma_scope_16k/shard_ckpt
 icd_csv_path: /data/sample_50k.csv
 output_dir: /out/auto_interp/judgetest/gemmascope
 

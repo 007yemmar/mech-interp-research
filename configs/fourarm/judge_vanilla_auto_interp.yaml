@@ -8,7 +8,8 @@
 # arm's selected_features.csv / top_associations.csv before running.
 sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-icd_eval_dir: /out/judgetest/vanilla
+icd_eval_dir: /out/necessity/sae_audit/sae_vanilla
+shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
 icd_csv_path: /data/sample_50k.csv
 output_dir: /out/auto_interp/judgetest/vanilla
 
