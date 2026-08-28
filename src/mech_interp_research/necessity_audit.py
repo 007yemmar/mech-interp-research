@@ -252,6 +252,86 @@ def load_feature_matrix(
     return F, note_meta
 
 
+def write_shard_checkpoints(
+    F: np.ndarray,
+    note_meta: pd.DataFrame,
+    output_dir: str | Path,
+    shard_col: str = "shard",
+) -> dict[str, Any]:
+    """Write an in-memory feature matrix as a ``shard_ckpt``-format source.
+
+    The writing counterpart of :func:`load_feature_matrix`. Sources that are not
+    projections of pooled activations -- TF-IDF n-grams, keyword indicators --
+    hold a matrix and note metadata rather than a directions matrix, so they
+    cannot reuse ``diff_in_means_baseline.write_direction_source``. This keeps
+    them on the same contract anyway, which is what lets the audit stay
+    source-agnostic.
+
+    Rows are grouped by ``note_meta[shard_col]`` and written in ascending shard
+    order; within a shard the original row order is preserved, and the metadata
+    written beside each shard is the matching slice of ``note_meta``, so the
+    positional correspondence ``load_feature_matrix`` relies on is maintained.
+
+    Args:
+        F: [n_notes, k] feature matrix, row-aligned with ``note_meta``.
+        note_meta: one row per note; must carry ``note_idx``, the join key and
+            ``shard_col``.
+        output_dir: destination, created if absent.
+        shard_col: column holding each note's shard index.
+
+    Returns:
+        Structural summary: shards written, notes, feature count.
+
+    Raises:
+        ValueError: ``F`` and ``note_meta`` disagree on row count.
+        KeyError: ``shard_col`` is absent.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if F.shape[0] != len(note_meta):
+        raise ValueError(
+            f"F has {F.shape[0]} rows but note_meta has {len(note_meta)}; they must be row-aligned."
+        )
+    if shard_col not in note_meta.columns:
+        raise KeyError(f"note_meta lacks the {shard_col!r} column; cannot group notes into shards.")
+
+    meta = note_meta.reset_index(drop=True)
+    F32 = np.asarray(F, dtype=np.float32)
+    written: list[int] = []
+
+    for shard_idx in sorted(meta[shard_col].unique()):
+        rows = np.flatnonzero((meta[shard_col] == shard_idx).to_numpy())
+        np.save(output_dir / f"shard_{int(shard_idx):04d}_vectors.npy", F32[rows])
+        with open(output_dir / f"shard_{int(shard_idx):04d}_meta.jsonl", "w") as fh:
+            for _, row in meta.iloc[rows].iterrows():
+                fh.write(json.dumps({k: _jsonable(v) for k, v in row.items()}) + "\n")
+        written.append(int(shard_idx))
+
+    logger.info(
+        f"Wrote {len(written)} shards / {F32.shape[0]} notes x {F32.shape[1]} features "
+        f"to {output_dir}"
+    )
+    return {
+        "output_dir": str(output_dir),
+        "n_shards": len(written),
+        "n_notes": int(F32.shape[0]),
+        "n_features": int(F32.shape[1]),
+        "shard_range": [written[0], written[-1]] if written else [],
+    }
+
+
+def _jsonable(v: Any) -> Any:
+    """numpy scalars are not JSON-serialisable; everything else passes through."""
+    if isinstance(v, np.integer):
+        return int(v)
+    if isinstance(v, np.floating):
+        return float(v)
+    if isinstance(v, np.bool_):
+        return bool(v)
+    return v
+
+
 def build_label_matrix(
     icd_csv_path: str | Path,
     note_meta: pd.DataFrame,

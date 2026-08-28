@@ -828,7 +828,12 @@ in the paper.
 | diff-in-means (plain) | 0.121 | 0.0940 | 1.25 |
 
 **All three SAEs occupy the three lowest-leakage positions, and the two trained SAEs are also
-the two highest on on-target |r|. They dominate on both axes at once.** When one method is
+the two highest on on-target |r|. They dominate on both axes at once.**
+
+> ⚠️ **AMENDED BY C8.** This table was computed before TF-IDF entered the comparison.
+> Audited on the same footing, TF-IDF leaks *less* than either SAE (0.0251/0.0273 vs
+> 0.0324/0.0373). The trained SAEs no longer dominate every axis; they retain the
+> highest on-target |r| and 2.3–2.7× the grounded yield. See section C8. When one method is
 better on both axes there is no trade-off to control for, and the coupling objection does not
 arise. **This, not the specificity ratio, is how the paper should state the specificity result.**
 
@@ -974,3 +979,91 @@ being stated plainly.
 **Also note** the pre-existing local file `results/ablation/*/posthoc_specificity.csv` is a
 renamed copy of `effect_size_calibration.csv` (header verified identical); the real directory
 carries four to five files per run.
+
+---
+
+## C8 — TF-IDF as an audited source ✅ DONE — ⚠️ **the most threatening result in the suite**
+
+**Status:** complete. `tfidf_lr_baseline.run_tfidf_direction_sources()`,
+`necessity_audit.write_shard_checkpoints()`, `modal_app/tfidf_directions.py`,
+`configs/{tfidf_directions,necessity_audit_tfidf}.yaml`. 11 new tests, suite at **426 passed**.
+Artifacts in `results/necessity/tfidf_audit/{tfidf_value,tfidf_binary}/`.
+
+### C8-a. Deviation from the plan, taken in the baseline's favour
+
+The plan proposed auditing `best_tfidf_feature` per code with `selection: identity`. **I emitted
+all 10,000 n-grams and used `top_per_code` instead.** Auditing one pre-picked winner would hide
+the search budget: TF-IDF choosing the best of 10,000 candidates per code is the same kind of
+search the SAE gets over 18,432 features, and the harness's `top_per_code` rule reproduces it
+honestly — selection on shards 0–30, scoring on 281–311. This makes TF-IDF a *stronger*
+baseline than the plan intended. It is the fair comparison and I stand by it, but the result
+below is partly a consequence of that choice and the paper must say so.
+
+The vectoriser is fitted on **train shards only** (31–280), so vocabulary and IDF weights never
+see the audit notes. Two arms: `value` (TF-IDF weight, what the published `best_r_tfidf` was
+computed on) and `binary` (presence/absence, the plan's "indicator").
+
+### C8-b. **The result: TF-IDF is competitive with the SAEs, and better on specificity**
+
+Sorted by off-target leakage — the uncoupled axis (C4):
+
+| method | k | median \|r\| | peak \|r\| | **leakage** | spec. ratio | n_off_sig | grounded @0.3 / @0.5 |
+|---|---|---|---|---|---|---|---|
+| **TF-IDF (value)** | 10,000 | 0.519 | 0.848 | **0.0251** | **17.02** | **0.5** | 250 / 58 |
+| **TF-IDF (binary)** | 10,000 | 0.531 | 0.831 | **0.0273** | **18.02** | 1.0 | 265 / 60 |
+| vanilla SAE | 18,432 | **0.574** | **0.859** | 0.0324 | 15.88 | 2.0 | **675** / **143** |
+| JumpReLU SAE | 18,432 | **0.574** | **0.864** | 0.0373 | 14.94 | 3.0 | **610** / **147** |
+| GemmaScope | 16,384 | 0.309 | 0.545 | 0.0468 | 6.29 | 4.0 | 54 / 4 |
+| diff-in-means (LDA) | 46 | 0.339 | 0.699 | 0.0572 | 5.68 | 8.0 | 28 / 7 |
+| random (L0-matched) | 18,432 | 0.149 | 0.314 | 0.0751 | 2.12 | 12.0 | 1 / 0 |
+| probe LR (unweighted) | 46 | 0.333 | 0.637 | 0.0885 | 4.42 | 17.0 | 31 / 5 |
+
+**TF-IDF leaks less than either SAE, has a higher specificity ratio, and has fewer significant
+off-target associations.** This overturns the C4 statement that "all three SAEs occupy the three
+lowest-leakage positions" — that ranking was computed before TF-IDF was in the table, and
+**C4-a must be amended**: the trained SAEs no longer dominate every axis.
+
+### C8-c. What the SAE retains, stated precisely
+
+1. **On-target strength**: 0.574 vs 0.519–0.531 median, and the peak is a tie (0.859/0.864 vs
+   0.848).
+2. **Yield**: **675 / 610 grounded features at |r| > 0.3 against TF-IDF's 250 / 265, and
+   143 / 147 at |r| > 0.5 against 58 / 60** — 2.3–2.7×. The SAE finds many more grounded audit
+   units, which is what T7's decomposition argument (one code → several distinct features)
+   actually rests on. Whether that is richness or redundancy is not settled by this table.
+
+### C8-d. Two caveats that are part of the result, not excuses
+
+1. **Low leakage is partly structural for sparse lexical features.** A TF-IDF n-gram is zero in
+   almost every note; a feature that is zero nearly everywhere cannot correlate with much, so
+   near-zero off-target correlation is partly a property of sparsity rather than of semantic
+   specificity. The SAE's pooled latents are far denser. This does not make the comparison
+   wrong — it makes it a statement about what the metric rewards, and the paper should say so.
+2. **The task is close to tautological for a lexical baseline.** ICD codes are assigned by human
+   coders reading the very text TF-IDF is fitted on, so an n-gram matching its own code is close
+   to measuring the coder's own evidence. That is the plan's framing and it is correct:
+   **TF-IDF with 10,000 supervised n-grams is a ceiling on how much surface signal exists in the
+   text, not a rival interpretability method.**
+
+### C8-e. **What this changes for the paper**
+
+This directly vindicates all three reviewers' reading of §4.3, and it means the necessity
+argument **cannot be carried by grounding statistics alone**. On the audit metrics, a bag of
+n-grams is as good an audit unit as an SAE feature.
+
+The distinguishing evidence has to be **semantic**, and only two things in the plan can supply it:
+
+- **C6 (category purity)** — do an audit unit's top contexts mix diagnosis mentions, drug names
+  and template tokens, or are they single-category? An n-gram is a string; it cannot separate a
+  disease mention from a medication mention that shares it. **C6 was scoped as the item that
+  answers the AC's semantic criterion; it is now also the item that answers TF-IDF.** Its
+  priority should rise above C9, and TF-IDF must be one of its sources.
+- **T7 (decomposition)** — one ICD code yielding several clinically distinct SAE features.
+  TF-IDF's 250 grounded features at |r| > 0.3 mean this is no longer trivially unavailable to
+  it, so the decomposition claim now needs the *category* of each feature, not just the count.
+
+**Prerequisite for C6 that does not currently exist:** the fitted vocabulary is not persisted
+(only a 50-item sample lands in the manifest), so TF-IDF feature indices cannot yet be mapped
+back to n-gram strings. `run_tfidf_direction_sources` needs to write the full vocabulary before
+C6 can categorise TF-IDF features. The published `tfidf_vocabulary.json` is not a substitute —
+it was fitted on all 50,000 notes, so its vocabulary differs from this train-only fit.

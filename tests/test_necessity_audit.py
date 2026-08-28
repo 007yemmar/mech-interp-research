@@ -924,3 +924,74 @@ def test_shipped_comparison_config_parses_into_a_valid_run_config():
     assert [s.name for s in cfg.sources] == ["sae_vanilla", "sae_jumprelu", "gemmascope"]
     assert cfg.audit_config == AuditConfig()  # protocol defaults, unmodified
     assert cfg.code_names_json
+
+
+# ---------------------------------------------------------------------------
+# write_shard_checkpoints — the writing counterpart of load_feature_matrix
+#
+# The module defines the feature-source contract, so it should be able to emit
+# it as well as read it. Sources that are not projections of pooled activations
+# (TF-IDF, keyword indicators) have an in-memory matrix and note metadata, not
+# a directions matrix, so they cannot reuse the projection writer.
+# ---------------------------------------------------------------------------
+
+
+def test_write_shard_checkpoints_roundtrips_through_load_feature_matrix(tmp_path):
+    from mech_interp_research.necessity_audit import write_shard_checkpoints
+
+    rng = np.random.default_rng(0)
+    F = rng.standard_normal((60, 4)).astype(np.float32)
+    meta = pd.DataFrame(
+        {
+            "note_idx": range(60),
+            "admission_id": range(60),
+            "shard": [0] * 20 + [1] * 20 + [7] * 20,
+        }
+    )
+    out = tmp_path / "src"
+
+    info = write_shard_checkpoints(F, meta, out)
+
+    F2, meta2 = load_feature_matrix(out)
+    assert info["n_shards"] == 3
+    assert F2.shape == (60, 4)
+    assert np.allclose(F2, F)
+    assert meta2["note_idx"].tolist() == list(range(60))
+
+
+def test_write_shard_checkpoints_groups_rows_by_shard(tmp_path):
+    from mech_interp_research.necessity_audit import write_shard_checkpoints
+
+    # Rows deliberately interleaved across shards.
+    F = np.arange(12, dtype=np.float32).reshape(6, 2)
+    meta = pd.DataFrame(
+        {"note_idx": range(6), "admission_id": range(6), "shard": [1, 0, 1, 0, 1, 0]}
+    )
+    out = tmp_path / "src"
+
+    write_shard_checkpoints(F, meta, out)
+
+    v0 = np.load(out / "shard_0000_vectors.npy")
+    assert v0.shape == (3, 2)
+    # Shard 0 holds original rows 1, 3, 5.
+    assert np.allclose(v0, F[[1, 3, 5]])
+
+
+def test_write_shard_checkpoints_rejects_row_mismatch(tmp_path):
+    from mech_interp_research.necessity_audit import write_shard_checkpoints
+
+    F = np.zeros((5, 2), dtype=np.float32)
+    meta = pd.DataFrame({"note_idx": range(4), "admission_id": range(4), "shard": [0] * 4})
+
+    with pytest.raises(ValueError, match="rows"):
+        write_shard_checkpoints(F, meta, tmp_path / "src")
+
+
+def test_write_shard_checkpoints_requires_shard_column(tmp_path):
+    from mech_interp_research.necessity_audit import write_shard_checkpoints
+
+    F = np.zeros((4, 2), dtype=np.float32)
+    meta = pd.DataFrame({"note_idx": range(4), "admission_id": range(4)})
+
+    with pytest.raises(KeyError, match="shard"):
+        write_shard_checkpoints(F, meta, tmp_path / "src")
