@@ -563,7 +563,13 @@ def _build_keyword_b1(config: dict[str, Any], held_out_start: int, log: Any):
     return m, meta
 
 
-def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[str, Any], log: Any):
+def _build_keyword_b2(
+    config: dict[str, Any],
+    held_out_start: int,
+    arm_c: dict[str, Any],
+    log: Any,
+    target_rates: Any,
+):
     """B1 diluted with an unrelated cross-chapter code's direction.
 
     Ruling 3: for every code, `p = X_tok @ m_c` and `q = X_tok @ m_other` are
@@ -689,19 +695,41 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
         mc_dot_mother = float(m[:, c] @ m[:, p_idx])
         y_c = Y_scan[:, c]
 
+        rate_c = float(target_rates[c])
+
         def score_fn(
             alpha: float,
             p=p,
             q=q,
             mc_dot_mother=mc_dot_mother,
             y_c=y_c,
+            rate_c=rate_c,
         ) -> float:
+            """|r| of the blend at `alpha`, measured POST-threshold.
+
+            The target is Arm C's JumpReLU-thresholded pooled correlation, so
+            scoring the raw projection compares two different estimators:
+            thresholding collapses non-firing notes to a point mass at zero,
+            which lifts |r| for a selective direction. Measuring raw made 44 of
+            46 codes look "unreachable" and left every alpha at 0, collapsing
+            B2 onto B1.
+
+            No chicken-and-egg here. A note fires iff its pooled max clears
+            theta, so the theta achieving note-level rate `rate_c` is exactly
+            the (1 - rate_c) quantile of the pooled maxima — computable from
+            this alpha's own pooled vector, with no calibration pass.
+            """
             denom = np.sqrt(1.0 + 2.0 * alpha * mc_dot_mother + alpha**2)
             blended = (p + alpha * q) / denom
             note_max = np.full(n_scan_notes, -np.inf, dtype=np.float64)
             np.maximum.at(note_max, note_id_tok, blended)
             note_max = np.where(np.isfinite(note_max), note_max, 0.0)
-            r_pb, _ = compute_point_biserial_vectorised(note_max[:, None], y_c[:, None])
+
+            theta = float(np.quantile(note_max, 1.0 - rate_c))
+            theta = max(theta, 0.0)  # contract: thresholds are non-negative
+            gated = np.where(note_max > theta, note_max, 0.0)
+
+            r_pb, _ = compute_point_biserial_vectorised(gated[:, None], y_c[:, None])
             return float(abs(r_pb[0, 0]))
 
         target = abs(float(arm_c["r_selection"][c]))
@@ -747,14 +775,19 @@ def _build_keyword_b2(config: dict[str, Any], held_out_start: int, arm_c: dict[s
 
 
 def _build_keyword(
-    config: dict[str, Any], arm: str, held_out_start: int, arm_c: dict[str, Any], log: Any
+    config: dict[str, Any],
+    arm: str,
+    held_out_start: int,
+    arm_c: dict[str, Any],
+    log: Any,
+    target_rates: Any,
 ):
     """Returns (W, meta, b2_aux) — b2_aux is None for every arm but keyword_b2."""
     if arm == "keyword_b1":
         W, meta = _build_keyword_b1(config, held_out_start, log)
         return W, meta, None
     if arm == "keyword_b2":
-        return _build_keyword_b2(config, held_out_start, arm_c, log)
+        return _build_keyword_b2(config, held_out_start, arm_c, log, target_rates)
     raise ValueError(f"unknown keyword arm {arm!r}")
 
 
@@ -879,11 +912,19 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     arm_c = _arm_c_selected_features(config, held_out_start, log)
     feature_ids = arm_c["feature_ids"]
 
+    # Ruling 1 — the reference SAE's NOTE-level detection rate per code. Computed
+    # BEFORE the arm dispatch because B2's dilution solve needs it: its score must
+    # be measured post-threshold, and the threshold is defined by this rate.
+    sae_shard_ckpt_dir = config["sae_shard_ckpt_dir"]
+    target_rates = sae_note_level_densities(
+        sae_shard_ckpt_dir, feature_ids, held_out_shard_start=held_out_start
+    )
+
     b2_aux: dict[str, Any] | None = None
     if arm == "diff_in_means":
         W, meta = _build_diff_in_means(config, held_out_start, log)
     elif arm.startswith("keyword"):
-        W, meta, b2_aux = _build_keyword(config, arm, held_out_start, arm_c, log)
+        W, meta, b2_aux = _build_keyword(config, arm, held_out_start, arm_c, log, target_rates)
     else:
         raise ValueError(f"unknown arm {arm!r}")
 
@@ -893,10 +934,6 @@ def build_source_remote(config: dict[str, Any]) -> dict[str, Any]:
 
     # Ruling 1 — calibrate on the reference SAE's NOTE-level detection rate,
     # not a token-level firing density. This is the threshold actually used.
-    sae_shard_ckpt_dir = config["sae_shard_ckpt_dir"]
-    target_rates = sae_note_level_densities(
-        sae_shard_ckpt_dir, feature_ids, held_out_shard_start=held_out_start
-    )
     # calibrate_thresholds_note_level returns the note-level rate it actually
     # achieved at `theta` (measured_note_rate below) — the audit number that
     # proves calibration worked. Used directly rather than recomputed via a
