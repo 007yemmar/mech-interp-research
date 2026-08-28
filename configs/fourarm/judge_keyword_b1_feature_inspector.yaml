@@ -1,0 +1,26 @@
+# Judge-validity CEILING arm: keyword directions, BOS projected out
+# (source_meta.bos_projected_out = true). 46 directions, one per code; 39 clear
+# the random null. Without this arm a low floor and a low instrument are
+# indistinguishable from a judge that simply says NO to everything.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/sources/keyword_b1
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/icd_eval/fourarm/keyword_b1_bosfix
+output_dir: /out/icd_eval/fourarm/keyword_b1_bosfix/feature_inspection
+shard_ckpt_dir: /out/icd_eval/fourarm/keyword_b1_bosfix/shard_ckpt
+
+model_name: google/gemma-2-2b
+max_length: 8192
+n_pairs: 46
+top_k: 50
+context_window: 5
+n_shards: 20
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+text_col: note_text
+rng_seed: 42
+logging_level: INFO
