@@ -600,3 +600,102 @@ a by-product of its higher on-target correlation. That must be reported either w
 What is *not* in doubt from C2: the SAE reaches on-target correlations no one-direction-per-code
 method approaches (0.574 vs 0.339, 45/46 codes), and it still grounds 143–147 features at
 |r| > 0.5 where diff-in-means yields 7 and the random null yields 0.
+
+---
+
+## C3 — supervised probe as a direction ✅ DONE
+
+**Status:** complete. Artifacts in `results/necessity/direction_audit/{probe_lr_balanced,
+probe_lr_unweighted}/` and `results/necessity/probe_directions/probe_manifest.json`.
+
+**What was built.** `raw_lr_baseline.build_probe_directions()` +
+`run_probe_direction_sources()`, `modal_app/probe_directions.py`,
+`configs/probe_directions.yaml`. 11 new tests, suite at **398 passed**. Like C2 the module
+emits only `shard_ckpt` sources; every statistic comes from `necessity_audit`.
+
+### C3-a. Two corrections to the published probe, both material
+
+1. **Circularity.** The 0.808 run cross-validated across all 50,000 notes
+   [`tfidf_lr_summary.json → n_notes: 50000, cv_folds: 5`], so its fits had already seen
+   shards 281–311. Refit here on shards [31, 281) only, disjoint from both the selection and
+   audit splits. **The fix costs nothing**: median CV AUC is 0.8085 (balanced) / 0.8073
+   (unweighted) against the published 0.808, so removing the leakage does not weaken the
+   baseline.
+2. **Unstandardized penalty.** That run fitted LR on raw features with an isotropic L2
+   penalty in a space whose per-dimension variance spans 104× (C2). That is not one penalty,
+   it is 2,304 different ones. Features are now standardized with train statistics and the
+   coefficient mapped back to raw space as `coef/σ`.
+
+**A hyperparameter defect caught and fixed before publishing.** The first fit used
+`C ∈ [1e-3, 1.0]` and selected `1e-3` — the grid's lower boundary — for all 46 codes in both
+arms, so the optimum lay outside the grid and the "selection" was not one. sklearn penalizes
+`1/C` against a *summed* loss (verified empirically: ‖coef‖ scales ~3× when n scales 10×), so
+effective strength is `1/(C·n)` and even `C = 1e-3` is weak at n = 40,088. Grid extended to
+`[1e-6 … 1e-1]`; the chosen C is now **interior** — balanced: 33 codes at 1e-4, 13 at 1e-3;
+unweighted: 40 at 1e-3, 6 at 1e-4.
+
+### C3-b. **Finding: the probe direction is in the LDA family, exactly as ridge theory predicts**
+
+For centered X, `β_ridge ∝ (Σ + (λ/n)I)⁻¹d` — the shrunk LDA form. So C3 and C2 should not be
+independent methods. Mean |cos| between matched per-code directions, 46 codes:
+
+| | dm_none | dm_diagonal | dm_full (LDA) | probe (bal.) | probe (unw.) |
+|---|---|---|---|---|---|
+| **dm_none** | 1.000 | 0.533 | 0.224 | 0.220 | 0.208 |
+| **dm_full (LDA)** | 0.224 | 0.281 | 1.000 | **0.714** | **0.756** |
+| **probe (bal.)** | 0.220 | 0.421 | 0.714 | 1.000 | 0.950 |
+
+The probe directions sit at 0.71–0.76 with the closed-form LDA direction and only 0.21–0.22
+with the plain mean difference. The two probe arms are 0.950 collinear with each other, so
+**class weighting barely moves the direction** — and where it does, unweighted is slightly
+better on both axes (0.333 vs 0.327 on-target; 4.42 vs 3.67 specificity). Report the
+unweighted arm; note class weighting was tested and did not matter.
+
+### C3-c. **Finding: a supervised probe is a WORSE audit unit than the closed-form LDA direction**
+
+| | median on-target \|r\| | specificity ratio | median n_off_sig | effective dims of the 46 directions |
+|---|---|---|---|---|
+| diff-in-means (full/LDA) | **0.339** | **5.68** | **8.0** | **33.68** |
+| probe LR (unweighted) | 0.333 | 4.42 | 17.0 | 9.41 |
+| probe LR (balanced) | 0.327 | 3.67 | 16.5 | 9.20 |
+
+On-target they are indistinguishable (0.327–0.339). On **specificity the probe is clearly
+worse** — ratio 3.7–4.4 vs 5.7, and roughly *twice* the off-target hits (16.5–17 vs 8).
+
+The mechanism is the effective dimensionality: the probe's 46 directions occupy ~9 dimensions,
+the LDA directions ~34. A set of 46 "concept directions" crammed into 9 dimensions must
+correlate with many codes at once, which is precisely what a specificity audit penalizes. The
+plausible reason is that the logistic objective is free to exploit a discriminative axis shared
+across codes (acuity / note length) because it helps classification, whereas `Σ⁻¹` explicitly
+divides that shared covariance out.
+
+**This is a usable result for the paper**: the best-classifying direction is not the
+best-auditing direction. It is direct evidence for the paper's framing that *classification
+performance and audit quality are different axes* — and it comes from the baseline the
+reviewers asked for, not from the SAE.
+
+### C3-d. The necessity table, nine sources, one code path
+
+Held-out shards 281–311 (4,911 notes), pinned 46-code panel, identical `AuditConfig` except
+`selection` (which `k` forces):
+
+| source | k | median \|r\| | peak \|r\| | spec. ratio | n_off_sig | grounded @0.3 / @0.5 |
+|---|---|---|---|---|---|---|
+| diff-in-means (none) | 46 | 0.121 | 0.291 | 1.25 | 17.0 | 0 / 0 |
+| diff-in-means (diagonal) | 46 | 0.127 | 0.310 | 1.37 | 17.0 | 3 / 0 |
+| **diff-in-means (full/LDA)** | 46 | 0.339 | 0.699 | 5.68 | 8.0 | 28 / 7 |
+| probe LR (balanced) | 46 | 0.327 | 0.630 | 3.67 | 16.5 | 32 / 5 |
+| probe LR (unweighted) | 46 | 0.333 | 0.637 | 4.42 | 17.0 | 31 / 5 |
+| random (L0-matched) | 18,432 | 0.149 | 0.314 | 2.12 | 12.0 | 1 / 0 |
+| GemmaScope | 16,384 | 0.309 | 0.545 | 6.29 | 4.0 | 54 / 4 |
+| vanilla SAE | 18,432 | 0.574 | 0.859 | 15.88 | 2.0 | 675 / 143 |
+| JumpReLU SAE | 18,432 | 0.574 | 0.864 | 14.94 | 3.0 | 610 / 147 |
+
+**Every non-SAE method tops out near |r| ≈ 0.34 and none exceeds 0.70 on any single code**,
+against the SAE's 0.574 median and 0.86 peak. All three label-supervised baselines — which see
+the labels, unlike the SAE — plateau together, which is a stronger statement than any one of
+them alone.
+
+**The C2-f risk is unchanged and still the main threat to the specificity claim:** GemmaScope
+reaches specificity 6.29 at |r| = 0.309, above every one-direction-per-code baseline at
+comparable |r|. C4's matched-|r| restriction remains load-bearing.
