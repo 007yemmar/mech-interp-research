@@ -439,6 +439,12 @@ def test_scan_keyword_directions_only_core_keyword_contributes(
         "scan_n_shards": 1,
         "seed": 0,
         "min_token_positions": 0,
+        # This test isolates KEYWORD SELECTION (finding 1). BOS projection is a
+        # separate, later correction that rotates the direction, so leaving it
+        # on would make the coordinate assertions below meaningless without
+        # testing anything about which keyword contributed. Covered separately
+        # by test_scan_keyword_directions_projects_out_bos.
+        "project_out_special_tokens": False,
     }
 
     m, scan = bfs._scan_keyword_directions(config, held_out_start=1, log=log)
@@ -455,3 +461,102 @@ def test_scan_keyword_directions_only_core_keyword_contributes(
         "direction is dominated by dim 1 (note B's huge 'otherkw' spike) rather "
         "than dim 0 (note A's 'corekw' spike)"
     )
+
+
+def test_scan_keyword_directions_projects_out_bos(tmp_path, monkeypatch):
+    """The BOS direction must not survive in a keyword direction.
+
+    Gemma's BOS carries a massive-norm activation, and a direction's score is a
+    dot product, so a direction with any BOS component can be captured by it:
+    BOS wins the top-k scan and dominates the max-pool, collapsing the
+    note-level correlation. Measured on the first real B1 build, 10 of 22
+    inspected directions had all 50 top tokens = <bos>, every one with |r| ~ 0.
+
+    Here BOS (row_start of each note) carries a huge spike in dim 2 while the
+    keyword token carries a small one in dim 0. With projection off the
+    direction retains a BOS component; with it on the component must vanish.
+    """
+    import transformers
+
+    import modal_app.build_feature_source as bfs
+
+    acts_dir = tmp_path / "activations"
+    acts_dir.mkdir()
+    d_model = 4
+
+    # BOS rows are 0 and 6; keyword "corekw" is token index 3 of each note.
+    arr = np.full((12, d_model), 0.01, dtype=np.float32)
+    arr[0] = [0.0, 0.0, 500.0, 0.0]
+    arr[6] = [0.0, 0.0, 500.0, 0.0]
+    arr[3] = [10.0, 0.0, 60.0, 0.0]  # keyword token, partly along BOS
+    arr[9] = [10.0, 0.0, 60.0, 0.0]
+    save_file({"activations": arr}, str(acts_dir / "shard_0000.safetensors"))
+
+    meta_rows = [
+        {
+            "note_idx": 0,
+            "shard": 0,
+            "row_start": 0,
+            "row_end": 6,
+            "n_tokens": 6,
+            "admission_id": "A0",
+        },
+        {
+            "note_idx": 1,
+            "shard": 0,
+            "row_start": 6,
+            "row_end": 12,
+            "n_tokens": 6,
+            "admission_id": "A1",
+        },
+    ]
+    with open(acts_dir / "metadata.jsonl", "w") as f:
+        for r in meta_rows:
+            f.write(json.dumps(r) + "\n")
+
+    icd_csv = tmp_path / "notes.csv"
+    pd.DataFrame(
+        {
+            "admission_id": ["A0", "A1"],
+            "note_text": ["patient reports corekw today", "patient reports corekw again"],
+            "icd9_test": [1, 1],
+        }
+    ).to_csv(icd_csv, index=False)
+
+    yaml_path = tmp_path / "keywords.yaml"
+    yaml_path.write_text("icd9_test:\n  description: test code\n  keywords:\n    - corekw\n")
+
+    monkeypatch.setattr(
+        transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: _StubTokenizer()
+    )
+
+    base = {
+        "activations_dir": str(acts_dir),
+        "icd_csv_path": str(icd_csv),
+        "icd_keywords_yaml_path": str(yaml_path),
+        "min_notes": 1,
+        "scan_n_shards": 1,
+        "seed": 0,
+        "min_token_positions": 0,
+    }
+    log = logging.getLogger("test")
+
+    m_off, scan_off = bfs._scan_keyword_directions(
+        {**base, "project_out_special_tokens": False}, held_out_start=1, log=log
+    )
+    m_on, scan_on = bfs._scan_keyword_directions(
+        {**base, "project_out_special_tokens": True}, held_out_start=1, log=log
+    )
+
+    c = scan_off["code_names"].index("icd9_test")
+    bos_unit = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float64)
+
+    assert (
+        abs(float(m_off[:, c] @ bos_unit)) > 0.5
+    ), "fixture is wrong: the unprojected direction should be BOS-dominated"
+    assert float(m_on[:, c] @ bos_unit) == pytest.approx(0.0, abs=1e-5), (
+        "BOS component survived projection -- the direction can still be "
+        "captured by the attention-sink token"
+    )
+    assert scan_on["bos_projected_out"] is True
+    assert scan_on["bos_cosine_before_projection"]["icd9_test"] is not None

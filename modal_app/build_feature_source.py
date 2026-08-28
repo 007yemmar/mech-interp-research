@@ -408,6 +408,17 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
     # decide which tokens enter the direction.
     kw_patterns = {code: _build_pattern(kw) for code, kw in core_keywords.items() if kw is not None}
     alignment_mismatches = 0
+    # Mean activation of the special first token (BOS). Gemma's BOS carries an
+    # enormous-norm residual-stream activation (the attention-sink / massive-
+    # activation effect), and the score of any direction is a dot product, so a
+    # direction whose keyword signal is weaker than BOS's sheer magnitude gets
+    # captured by it: BOS then wins the top-k scan AND dominates the max-pool,
+    # collapsing the note-level correlation to ~0. Measured on the first B1
+    # build, 10 of 22 inspected directions had all 50 top tokens = <bos>, every
+    # one with |r| ~ 0, while every direction that beat the random null had
+    # purity 1.00. Accumulated here so it can be projected out below.
+    bos_sum = None
+    bos_count = 0
 
     for shard_idx in scan_shards:
         shard_path = acts_dir / f"shard_{shard_idx:04d}.safetensors"
@@ -427,6 +438,13 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
             row_start, row_end = int(note_row["row_start"]), int(note_row["row_end"])
             n_note_tokens = row_end - row_start
             text_lower = text.lower()
+
+            # Position 0 of every note is the special token; accumulate before
+            # the keyword pre-filter so the estimate uses every scanned note.
+            if n_note_tokens > 0:
+                bos_row = shard_acts[row_start].astype(np.float64)
+                bos_sum = bos_row if bos_sum is None else bos_sum + bos_row
+                bos_count += 1
 
             # Cheap pre-filter: which codes' core keyword could possibly be
             # present at all? Skip tokenizing entirely if none.
@@ -492,8 +510,22 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
             alignment_mismatches,
         )
 
+    # Unit BOS direction, and the switch that removes it. Projecting at
+    # construction rather than masking at pooling keeps every downstream
+    # consumer (icd_eval, feature_inspector, auto_interp) untouched — the
+    # checkpoint simply contains a direction that is orthogonal to BOS, so
+    # BOS's dot product with it is ~0 and it can no longer win the max-pool.
+    project_bos = bool(config.get("project_out_special_tokens", True))
+    bos_unit = None
+    if bos_count and bos_sum is not None:
+        bos_mean = bos_sum / bos_count
+        bos_norm = float(np.linalg.norm(bos_mean))
+        if bos_norm > 1e-12:
+            bos_unit = bos_mean / bos_norm
+
     m = np.zeros((d_model, len(code_names)), dtype=np.float32)
     underpowered: list[str] = []
+    bos_cosine_before: dict[str, float | None] = dict.fromkeys(code_names)
     min_positions = int(config.get("min_token_positions", 200))
     for c, code in enumerate(code_names):
         if counts[code] == 0:
@@ -504,7 +536,20 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
         if norm < 1e-12:
             underpowered.append(code)
             continue
-        m[:, c] = (mean_vec / norm).astype(np.float32)
+        unit = mean_vec / norm
+        if bos_unit is not None:
+            # Recorded before projection: how much of this direction was BOS.
+            # A large value predicts the failure mode this fix removes.
+            bos_cosine_before[code] = float(unit @ bos_unit)
+            if project_bos:
+                unit = unit - float(unit @ bos_unit) * bos_unit
+                unit_norm = float(np.linalg.norm(unit))
+                if unit_norm < 1e-12:
+                    # Direction was essentially pure BOS; nothing survives.
+                    underpowered.append(code)
+                    continue
+                unit = unit / unit_norm
+        m[:, c] = unit.astype(np.float32)
         if token_positions[code] < min_positions:
             underpowered.append(code)
 
@@ -527,6 +572,9 @@ def _scan_keyword_directions(config: dict[str, Any], held_out_start: int, log: A
 
     scan = {
         "code_names": code_names,
+        "bos_projected_out": project_bos,
+        "bos_cosine_before_projection": bos_cosine_before,
+        "bos_n_notes_sampled": int(bos_count),
         "scan_meta": scan_meta,
         "Y_scan": Y_scan,
         "scan_shards": scan_shards,
