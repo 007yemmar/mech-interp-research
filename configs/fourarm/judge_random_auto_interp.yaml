@@ -1,0 +1,37 @@
+# LLM explanation + concordance for sae_jumprelu. THIS IS THE DELIVERABLE STAGE.
+#
+# explicit_features carries (feature_id, code_name) pairs, not bare ints, so
+# concordance judges each direction against the code it was BUILT for rather
+# than argmax|r|. Control arms need this: with argmax a keyword direction can
+# be judged against a comorbid code and earn a correct NO, which would read as
+# the judge failing rather than the pairing being wrong. Populate it from the
+# arm's selected_features.csv / top_associations.csv before running.
+sae_checkpoint: /out/sources/random_matched_note
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/judgetest/random
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/judgetest/random
+
+explicit_features: [[106, "icd9_4280"], [177, "icd9_5849"], [317, "icd9_4280"], [550, "icd9_4280"], [655, "icd9_41400"], [744, "icd9_V5866"], [972, "icd9_5990"], [1015, "icd9_5990"], [1174, "icd9_5849"], [1207, "icd9_4280"], [1486, "icd9_486"], [2084, "icd9_42731"], [2189, "icd9_4280"], [2235, "icd9_5849"], [2242, "icd9_V4986"], [2494, "icd9_4280"], [2554, "icd9_V4986"], [2863, "icd9_40390"], [2868, "icd9_4280"], [2870, "icd9_5849"], [3156, "icd9_5849"], [3392, "icd9_5990"], [3478, "icd9_V1582"], [3666, "icd9_5849"], [4147, "icd9_486"], [4513, "icd9_2762"], [4533, "icd9_4280"], [4611, "icd9_42731"], [4624, "icd9_41401"], [4781, "icd9_5849"], [4844, "icd9_5849"], [4860, "icd9_42731"], [4896, "icd9_25000"], [5103, "icd9_5849"], [5281, "icd9_4280"], [5547, "icd9_2762"], [5562, "icd9_4280"], [5623, "icd9_5856"], [5643, "icd9_311"], [5739, "icd9_4280"], [5947, "icd9_4280"], [6027, "icd9_5849"], [6107, "icd9_3051"], [6468, "icd9_4280"], [6494, "icd9_V1582"], [6657, "icd9_4280"], [6834, "icd9_25000"], [6852, "icd9_25000"], [7018, "icd9_4280"], [7072, "icd9_5849"], [7205, "icd9_40390"], [7561, "icd9_2875"], [7646, "icd9_5849"], [7692, "icd9_5849"], [7761, "icd9_4280"], [7789, "icd9_4280"], [8011, "icd9_V1582"], [8064, "icd9_V5861"], [8071, "icd9_27651"], [8115, "icd9_V1251"], [8311, "icd9_4280"], [8392, "icd9_5849"], [8407, "icd9_5849"], [8524, "icd9_2761"], [8551, "icd9_4280"], [8561, "icd9_5990"], [8752, "icd9_4280"], [8767, "icd9_5849"], [8785, "icd9_4280"], [8882, "icd9_41401"], [9089, "icd9_4280"], [9237, "icd9_V1582"], [9275, "icd9_V4986"], [9405, "icd9_5990"], [9432, "icd9_2762"], [9571, "icd9_5849"], [9983, "icd9_311"], [10042, "icd9_4280"], [10274, "icd9_4280"], [10414, "icd9_2724"], [10431, "icd9_5849"], [10512, "icd9_2724"], [10696, "icd9_V5866"], [10785, "icd9_4280"], [10921, "icd9_5849"], [11014, "icd9_5849"], [11299, "icd9_5849"], [11319, "icd9_4280"], [11437, "icd9_2859"], [11544, "icd9_33829"], [11594, "icd9_5849"], [11646, "icd9_5849"], [12134, "icd9_5990"], [12192, "icd9_4280"], [12297, "icd9_2761"], [12479, "icd9_V4986"], [12632, "icd9_4280"], [12677, "icd9_42731"], [12790, "icd9_5849"], [12890, "icd9_5849"], [12910, "icd9_4280"], [13375, "icd9_4280"], [13433, "icd9_42731"], [13518, "icd9_4280"], [13662, "icd9_4280"], [13860, "icd9_5849"], [13874, "icd9_5990"], [13956, "icd9_5849"], [14045, "icd9_4280"], [14071, "icd9_5849"], [14119, "icd9_4280"], [14172, "icd9_25000"], [14192, "icd9_4280"], [14582, "icd9_5849"], [14811, "icd9_5849"], [14889, "icd9_4280"], [15011, "icd9_V5861"], [15040, "icd9_2449"], [15156, "icd9_4280"], [15342, "icd9_41401"], [15363, "icd9_5849"], [15440, "icd9_V4986"], [15446, "icd9_5849"], [15481, "icd9_4280"], [15882, "icd9_4280"], [15883, "icd9_5849"], [16088, "icd9_5849"], [16121, "icd9_5849"], [16164, "icd9_V4986"], [16255, "icd9_41401"], [16400, "icd9_V1582"], [16489, "icd9_4280"], [16491, "icd9_4280"], [16507, "icd9_5849"], [16772, "icd9_4280"], [16859, "icd9_V4986"], [16877, "icd9_42731"], [16883, "icd9_4280"], [17070, "icd9_4280"], [17465, "icd9_53081"], [17562, "icd9_5990"], [17692, "icd9_4280"], [17769, "icd9_5849"], [17802, "icd9_2724"], [17872, "icd9_4280"], [17938, "icd9_42731"], [18355, "icd9_5990"], [18356, "icd9_4280"], [18388, "icd9_5849"], [18399, "icd9_4280"]]
+
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+scorers:
+  - fuzzing
+  - detection
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
+checkpoint_dir: null
+logging_level: INFO
