@@ -1,0 +1,22 @@
+{
+  "all_grounded(>0.1)": {
+    "n": 380,
+    "hit1_rate": 0.7421052631578947,
+    "none_rate": 0.23157894736842105,
+    "chance_floor": 0.11111111111111113
+  },
+  "r>0.3": {
+    "n": 280,
+    "hit1_rate": 0.9428571428571428,
+    "none_rate": 0.05357142857142857,
+    "chance_floor": 0.11111111111111113
+  },
+  "r>0.5": {
+    "n": 144,
+    "hit1_rate": 0.9861111111111112,
+    "none_rate": 0.013888888888888888,
+    "chance_floor": 0.11111111111111113
+  },
+  "n_distractors": 7,
+  "design": "1 correct + K unrelated cross-chapter distractors + none; hit@1 vs 1/(K+2)"
+}

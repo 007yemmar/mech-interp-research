@@ -1,0 +1,38 @@
+{
+  "global": {
+    "yes_count": 85,
+    "partial_count": 238,
+    "no_count": 46,
+    "unknown_count": 11,
+    "total": 380,
+    "concordance_rate": 0.85,
+    "exact_match_rate": 0.2236842105263158
+  },
+  "r>0.3": {
+    "yes_count": 85,
+    "partial_count": 180,
+    "no_count": 7,
+    "unknown_count": 8,
+    "total": 280,
+    "concordance_rate": 0.9464285714285714,
+    "exact_match_rate": 0.30357142857142855
+  },
+  "r>0.4": {
+    "yes_count": 85,
+    "partial_count": 180,
+    "no_count": 7,
+    "unknown_count": 8,
+    "total": 280,
+    "concordance_rate": 0.9464285714285714,
+    "exact_match_rate": 0.30357142857142855
+  },
+  "r>0.5": {
+    "yes_count": 61,
+    "partial_count": 81,
+    "no_count": 1,
+    "unknown_count": 1,
+    "total": 144,
+    "concordance_rate": 0.9861111111111112,
+    "exact_match_rate": 0.4236111111111111
+  }
+}

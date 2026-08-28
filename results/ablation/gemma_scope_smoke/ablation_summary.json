@@ -1,0 +1,69 @@
+{
+  "sae_name": "gemma_scope_smoke",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 250,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 4,
+  "n_features_distinct": 4,
+  "n_sig_q05": 1,
+  "median_cliffs_delta_grounded": 0.2603434165442976,
+  "median_cliffs_delta_controls": -0.29676353700943864,
+  "mean_loss_clean": 1.6155843715667724,
+  "mean_loss_recon": 2.2588471808433535,
+  "mean_recon_tax": 0.6432628092765809,
+  "config": {
+    "sae_name": "gemma_scope_smoke",
+    "sae_checkpoint_dir": null,
+    "sae_hf_repo_id": "google/gemma-scope-2b-pt-res",
+    "sae_hf_filename": "layer_16/width_16k/average_l0_42/params.npz",
+    "is_centered": false,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z",
+    "centered_activations_dir": null,
+    "mean_path": null,
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 2121,
+        "code": "icd9_V5867",
+        "kind": "grounded",
+        "r_pb": 0.545
+      },
+      {
+        "feature_idx": 1459,
+        "code": "icd9_V5861",
+        "kind": "grounded",
+        "r_pb": 0.538
+      },
+      {
+        "feature_idx": 16193,
+        "code": "icd9_2749",
+        "kind": "random_control",
+        "r_pb": null
+      },
+      {
+        "feature_idx": 11107,
+        "code": "icd9_5849",
+        "kind": "low_r_control",
+        "r_pb": -0.1002
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": 250,
+    "output_dir": "/out/ablation/gemma_scope_smoke",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}

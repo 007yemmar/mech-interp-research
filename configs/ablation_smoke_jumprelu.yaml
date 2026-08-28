@@ -1,0 +1,90 @@
+# Causal ablation SMOKE config — JumpReLU SAE, 250 held-out notes, 4 target features.
+#
+# Purpose: validate the splice hook, JumpReLU threshold handling (log_threshold →
+# exp), mean-centering, and the stats pipeline end-to-end on the JumpReLU
+# checkpoint before the full pilot. Mirrors ablation_smoke.yaml (vanilla) exactly
+# except for the SAE checkpoint and targets.
+#
+# Sanity checks to eyeball in the printed summary:
+#   - mean_recon_tax should be small (~0.02-0.05 nats) — confirms the centered
+#     splice path is correct for JumpReLU (EV≈0.906). A large tax would signal a
+#     centering/threshold bug (contrast: GemmaScope's tax is ~0.65).
+#   - the 2 grounded features should trend toward positive Cliff's δ; the 2
+#     controls should be near-null (n is tiny here, so this is directional only).
+#
+# Expected runtime: ~40 min on A100-40GB.
+#
+# If re-running after a schema change, clear stale shard checkpoints first:
+#   modal volume rm -r sae-artifacts ablation/jumprelu_smoke/shard_results
+#
+# Run:
+#   modal run modal_app/ablation.py --config-file configs/ablation_smoke_jumprelu.yaml
+
+# --- SAE identity ----------------------------------------------------------
+sae_name: jumprelu_smoke
+
+# JumpReLU SAE — best EV checkpoint (EV=0.899, L0=43.5), same as icd_eval/auto_interp
+sae_checkpoint_dir: "/out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000"
+sae_hf_repo_id: null
+sae_hf_filename: null
+
+# JumpReLU was trained on centered activations
+is_centered: true
+
+# --- Activations / model ---------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (top-2 JumpReLU grounded + the 2 pilot controls) --------------
+# From .tmp/evaluations/jumprelu/top_associations.csv:
+#   - feature 6701  ↔ icd9_42731 (atrial fibrillation)   r_pb = 0.8643
+#   - feature 15821 ↔ icd9_5856  (acute renal failure)   r_pb = 0.8571
+#   - feature 3921  ↔ icd9_25000 (random control)        r_pb = null
+#   - feature 7731  ↔ icd9_41401 (low-r control)         r_pb = 0.1001
+targets:
+  - feature_idx: 6701
+    code: icd9_42731
+    kind: grounded
+    r_pb: 0.8643
+  - feature_idx: 15821
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.8571
+  - feature_idx: 3921
+    code: icd9_25000
+    kind: random_control
+    r_pb: null
+  - feature_idx: 7731
+    code: icd9_41401
+    kind: low_r_control
+    r_pb: 0.1001
+
+# --- Forward / measurement -------------------------------------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: 250  # smoke: ~40 min on A100-40GB
+
+# --- Output ----------------------------------------------------------------
+output_dir: /out/ablation/jumprelu_smoke
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

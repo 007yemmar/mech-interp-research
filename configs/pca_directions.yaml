@@ -1,0 +1,139 @@
+# PCA directions — the non-learned unsupervised baseline (code plan C5, plan item A5).
+#
+#
+# WHY THIS IS NEARLY FREE
+# -----------------------
+# sample_matched_directions already runs eigh on this exact Sigma to draw the A4
+# null, and the principal components ARE that decomposition's eigenvectors. This
+# config changes one field -- directions_mode -- and reuses the identical
+# projection, threshold calibration, max-pooling and audit. Same Sigma, same
+# train shards, same splits, same 46-code panel, same AuditConfig as the random
+# null, so PCA and random are directly comparable rather than merely adjacent.
+#
+# THE CAVEAT THE PAPER MUST STATE
+# -------------------------------
+# PCA caps at k = d_model = 2,304, well below the SAE's 18,432. Only
+# random-matched and diff-in-means match the dictionary size. Learning an
+# OVERCOMPLETE dictionary is part of the SAE's case and should be argued
+# explicitly, not hidden by quietly comparing a 2,304-atom basis to an
+# 18,432-atom one.
+#
+# COST: ~11 minutes end to end (measured), against ~1h45 for the A4 run at
+# k = 18,432. I predicted 1-1.5 h on the assumption -- taken from the A4
+# docstring -- that the projection is I/O-bound on ~140 GB of shard reads. It is
+# not: cutting k by 8x cut the wall time by ~9x, so the matmul dominates at
+# k = 18,432 and the code plan's "minutes" estimate was right. Resumable per
+# shard regardless.
+#
+# Original A4 note: draws directions from N(0, Sigma) and runs them through the
+# identical pipeline an SAE goes through (project → threshold → max-pool →
+# select best per code → audit), and reports whether arbitrary directions
+# ground against ICD-9 codes as well as learned ones do.
+#
+# CPU only — the run is I/O-bound on shard reads, not FLOP-bound. ~1h 45.
+# Both projection phases checkpoint per shard; re-running resumes.
+#
+# Run:
+#   modal run modal_app/random_matched.py --config-file configs/random_matched.yaml
+#   modal run modal_app/random_matched.py --config-file configs/random_matched.yaml --detach
+#
+# Confirm the input paths first:
+#   modal volume ls sae-artifacts activations/
+#   modal volume ls sae-artifacts icd_eval/
+
+# --- inputs ----------------------------------------------------------------
+# CENTERED activations — the same dir the JumpReLU and vanilla SAEs were
+# evaluated on. GemmaScope's raw-activation path does not apply here.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+
+# The 46-code panel, read from the VANILLA eval. Pinning it here is what makes
+# the comparison legitimate: without it the panel is re-derived by prevalence on
+# the audit split and could differ from the one the SAE was audited against,
+# producing tables that line up while measuring different things.
+#
+# The vanilla and JumpReLU panels are byte-identical (same 46 codes, same order)
+# — both evals derived them by prevalence from sample_50k.csv at
+# min_prevalence=0.02, max_codes=50. So this path is a provenance choice, not a
+# numerical one; either produces the same audit.
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+
+output_dir: /out/necessity/pca/seed0
+
+# --- directions ------------------------------------------------------------
+k: 2304                    # = d_model; PCA cannot exceed it (the caveat for the paper)
+seed: 0                   # unused for PCA (no random draw); kept for Sigma-sample reproducibility
+directions_mode: pca      # top-k eigenvectors of Sigma, not a draw from N(0, Sigma)
+sampling: eigh            # unused for PCA; pca_directions runs its own eigh
+ridge: 1.0e-6
+normalize_directions: true  # no-op for PCA: eigenvectors are orthonormal already
+
+# --- Sigma + threshold calibration (TRAIN shards only) ---------------------
+# Estimated on train so the directions are not shaped by the notes they are
+# later audited on. Costs 4 shard reads we would otherwise not do.
+sigma_shard_start: 0
+sigma_shard_end: 4
+sigma_n_tokens: 2000000
+quantile_n_tokens: 250000   # retained in RAM: 250k x 2304 x 4 B ≈ 2.3 GB
+quantile_dir_chunk: 512
+
+# --- splits ----------------------------------------------------------------
+# Selection: 31 TRAIN shards (~4,900 notes) — same size as the held-out split,
+# so the picking set and the reporting set have comparable N.
+# Audit: shards 281–311, the 4,911 held-out notes behind every §4 number.
+# Selecting and auditing on the same notes would inflate on-target r via
+# best-of-18,432 selection — the exact artifact this baseline measures.
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+
+# --- projection + sparsity arms -------------------------------------------
+pooling: max              # only max is permitted (threshold/pool commutation)
+note_token_chunk: 4096    # 4096 x 18432 x 4 B ≈ 302 MB per matmul
+
+# TOKEN-level mean-L0 targets. Thresholding is applied post-hoc to the stored
+# dense pooled values, so each extra arm costs seconds, not another projection.
+# A dense (unthresholded) arm is always run alongside these.
+#   47.5655 = vanilla ReLU
+#   40.9157 = JumpReLU
+target_l0: [47.5655, 40.9157]
+
+# NOTE-level sparsity matching — the arm that actually matters.
+#
+# Measured on 4 held-out shards, the JumpReLU SAE's note-level density (the
+# fraction of pooled values that are non-zero) is 0.6096 — 11,236 of 18,432,
+# with per-feature densities spread p10=0.22 / p50=0.62 / p90=0.99.
+#
+# Random directions calibrated to the same TOKEN-level L0 land at 0.9997.
+# The reason is burstiness: if SAE features fired uniformly over tokens,
+# 40.92/18,432 density across ~3,089 tokens per note would give 0.999 — the
+# random figure. Real features instead concentrate in a minority of notes and
+# fire repeatedly within them. Random directions spread evenly, so essentially
+# every one of them clears the max-pool in essentially every note.
+#
+# Since the audit only ever sees pooled vectors, matching token-level L0 alone
+# leaves the sparsity match nominal. Pointing at an SAE's shard_ckpt/ adds a
+# `note_matched` arm calibrated to its per-feature note-level distribution.
+# Read on the SELECTION shards only, so audit data never shapes the thresholds.
+sae_shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+
+# --- label join (identical to icd_eval and every other baseline) -----------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+# --- audit protocol (shared with every other necessity-suite source) -------
+audit_config:
+  r_threshold: 0.1
+  fdr_q: 0.05
+  mono_thresholds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+  min_off_pos: 10
+  min_pool: 10
+  restrict_c_negative: true
+  top_n_associations: 200
+  selection: top_per_code   # best-of-k per code, same rule the SAE gets
+
+logging_level: INFO

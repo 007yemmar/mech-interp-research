@@ -698,3 +698,229 @@ def test_run_raw_lr_baseline_solo_mode(centered_run_dir, tmp_path):
     assert set(raw_df["code"]) == {"icd9_4019", "icd9_25000"}
     assert "auc_roc_mean" in raw_df.columns
     assert "auc_pr_mean" in raw_df.columns
+
+
+# ---------------------------------------------------------------------------
+# Probe directions (code plan C3)
+#
+# The plan asks whether a *supervised probe direction* is a good audit unit,
+# where the existing 0.808 result used LR only as a classifier. Two things the
+# probing literature settles and this suite pins:
+#
+#  1. The coefficient vector of an L2-regularized LR is a standard concept
+#     direction (it is what activation-steering work reuses), but the direction
+#     depends on the regularization strength, so C must be selected -- and
+#     selected on train, never on the split the direction is later scored on.
+#  2. Ridge and the difference of class means are the same family. For centered
+#     X, beta_ridge is proportional to (Sigma + (lambda/n) I)^-1 d, so strong
+#     regularization drives the probe toward the plain mean difference and weak
+#     regularization toward the Sigma^-1 d / LDA form. That is a prediction, and
+#     it is tested below rather than asserted.
+# ---------------------------------------------------------------------------
+
+
+def _probe_source(n: int = 3000, d: int = 12, n_codes: int = 3, seed: int = 0):
+    """Anisotropic pooled-activation stand-in with a decoy dimension."""
+    rng = np.random.default_rng(seed)
+    Y = (rng.random((n, n_codes)) < 0.3).astype(np.int8)
+    X = rng.normal(0, 1.0, (n, d))
+    for c in range(n_codes):
+        X[:, c] = 0.5 * Y[:, c] + rng.normal(0, 0.1, n)
+    X[:, n_codes] = 4.0 * Y[:, 0] + rng.normal(0, 25.0, n)  # high-variance decoy
+    return X.astype(np.float32), Y
+
+
+def test_build_probe_directions_shape_and_unit_norm() -> None:
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    D, info = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2)
+
+    assert D.shape == (12, 3)
+    assert np.allclose(np.linalg.norm(D, axis=0), 1.0, atol=1e-5)
+    assert len(info["per_code"]) == 3
+
+
+def test_build_probe_directions_recovers_signal_over_decoy() -> None:
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    D, _ = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2)
+
+    # Code 0's direction must load on dim 0 (signal), not dim 3 (decoy).
+    assert abs(D[0, 0]) > abs(D[3, 0])
+
+
+def test_probe_direction_lives_in_raw_space() -> None:
+    """Standardization happens internally; the direction must still be usable
+    on raw held-out vectors, or the emitted audit source would be wrong."""
+    from mech_interp_research.icd_eval import compute_point_biserial_vectorised
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    D, _ = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2)
+
+    r, _ = compute_point_biserial_vectorised(X @ D, Y)
+    assert abs(r[0, 0]) > 0.5, "projecting RAW X onto the direction must recover the signal"
+
+
+def test_strong_regularization_approaches_the_mean_difference_direction() -> None:
+    """The ridge-family prediction: as C -> 0 the probe direction collapses onto
+    the inverse-variance-scaled mean difference (diff-in-means, diagonal arm)."""
+    from mech_interp_research.diff_in_means_baseline import build_directions
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    D_weak, _ = build_probe_directions(X, Y, c_grid=[1e-5], cv_folds=2)
+    d_diag = build_directions(X, Y, whiten="diagonal")[:, 0]
+
+    cos = abs(float(D_weak[:, 0] @ d_diag))
+    assert cos > 0.9, f"expected near-collinearity under strong shrinkage, got cos={cos:.3f}"
+
+
+def test_c_is_selected_per_code_and_recorded() -> None:
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    _, info = build_probe_directions(X, Y, c_grid=[1e-4, 1.0], cv_folds=2)
+
+    for row in info["per_code"]:
+        assert row["C"] in (1e-4, 1.0)
+        assert "cv_auc" in row
+
+
+def test_class_weight_balanced_is_supported() -> None:
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    D_b, info = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2, class_weight="balanced")
+    D_n, _ = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2, class_weight=None)
+
+    assert info["class_weight"] == "balanced"
+    assert not np.allclose(D_b, D_n)
+
+
+def test_zero_variance_dimensions_do_not_produce_nan() -> None:
+    """The real pooled space has dimensions with exactly zero variance."""
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    X[:, 5] = 0.0
+    D, _ = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2)
+
+    assert np.isfinite(D).all()
+    assert np.allclose(D[5, :], 0.0)
+
+
+def test_code_with_no_positives_gets_a_zero_column() -> None:
+    from mech_interp_research.raw_lr_baseline import build_probe_directions
+
+    X, Y = _probe_source()
+    Y[:, 2] = 0
+    D, info = build_probe_directions(X, Y, c_grid=[1.0], cv_folds=2)
+
+    assert np.allclose(D[:, 2], 0.0)
+    assert info["per_code"][2]["status"] != "ok"
+
+
+def _probe_fixture(tmp_path, n_shards: int = 8, per_shard: int = 80, d: int = 10):
+    """raw_shard_ckpt + labels, laid out like the real splits."""
+    import json
+
+    import pandas as pd
+
+    ckpt = tmp_path / "raw_shard_ckpt"
+    ckpt.mkdir(parents=True, exist_ok=True)
+    n = n_shards * per_shard
+    X, Y = _probe_source(n=n, d=d, seed=4)
+    for s in range(n_shards):
+        lo, hi = s * per_shard, (s + 1) * per_shard
+        np.save(ckpt / f"shard_{s:04d}_vectors.npy", X[lo:hi])
+        with open(ckpt / f"shard_{s:04d}_meta.jsonl", "w") as f:
+            for i in range(lo, hi):
+                f.write(json.dumps({"note_idx": i, "admission_id": i, "shard": s}) + "\n")
+    names = ["icd9_4019", "icd9_25000", "icd9_4280"]
+    df = pd.DataFrame(Y, columns=names)
+    df.insert(0, "admission_id", range(n))
+    df.to_csv(tmp_path / "icd.csv", index=False)
+    (tmp_path / "code_names.json").write_text(json.dumps(names))
+    return ckpt
+
+
+def test_run_probe_direction_sources_emits_an_auditable_source(tmp_path) -> None:
+    from mech_interp_research.necessity_audit import load_feature_matrix
+    from mech_interp_research.raw_lr_baseline import run_probe_direction_sources
+
+    ckpt = _probe_fixture(tmp_path)
+    manifest = run_probe_direction_sources(
+        raw_ckpt_dir=ckpt,
+        icd_csv_path=tmp_path / "icd.csv",
+        code_names_json=tmp_path / "code_names.json",
+        output_dir=tmp_path / "probe",
+        arms=[{"name": "balanced", "class_weight": "balanced"}],
+        c_grid=[1.0],
+        cv_folds=2,
+        train_shard_start=2,
+        train_shard_end=6,
+        select_shard_start=0,
+        select_shard_end=2,
+        audit_shard_start=6,
+        audit_shard_end=8,
+        min_notes=10,
+    )
+
+    F, meta = load_feature_matrix(tmp_path / "probe" / "probe_balanced" / "shard_ckpt")
+    assert F.shape == (320, 3)
+    assert sorted(meta["shard"].unique()) == [0, 1, 6, 7]
+    assert manifest["n_train_notes"] == 320
+    assert manifest["train_shards"] == [2, 6]
+
+
+def test_run_probe_direction_sources_refuses_overlapping_splits(tmp_path) -> None:
+    from mech_interp_research.raw_lr_baseline import run_probe_direction_sources
+
+    ckpt = _probe_fixture(tmp_path)
+    with pytest.raises(ValueError, match="overlap"):
+        run_probe_direction_sources(
+            raw_ckpt_dir=ckpt,
+            icd_csv_path=tmp_path / "icd.csv",
+            code_names_json=tmp_path / "code_names.json",
+            output_dir=tmp_path / "probe",
+            arms=[{"name": "b", "class_weight": None}],
+            c_grid=[1.0],
+            cv_folds=2,
+            train_shard_start=0,
+            train_shard_end=6,  # swallows the selection split
+            select_shard_start=0,
+            select_shard_end=2,
+            audit_shard_start=6,
+            audit_shard_end=8,
+            min_notes=10,
+        )
+
+
+def test_run_probe_direction_sources_records_selected_c_per_arm(tmp_path) -> None:
+    from mech_interp_research.raw_lr_baseline import run_probe_direction_sources
+
+    ckpt = _probe_fixture(tmp_path)
+    manifest = run_probe_direction_sources(
+        raw_ckpt_dir=ckpt,
+        icd_csv_path=tmp_path / "icd.csv",
+        code_names_json=tmp_path / "code_names.json",
+        output_dir=tmp_path / "probe",
+        arms=[{"name": "a", "class_weight": "balanced"}, {"name": "b", "class_weight": None}],
+        c_grid=[1e-3, 1.0],
+        cv_folds=2,
+        train_shard_start=2,
+        train_shard_end=6,
+        select_shard_start=0,
+        select_shard_end=2,
+        audit_shard_start=6,
+        audit_shard_end=8,
+        min_notes=10,
+    )
+
+    assert set(manifest["arms"]) == {"a", "b"}
+    for arm in manifest["arms"].values():
+        assert len(arm["probe"]["per_code"]) == 3
+        assert all(r["C"] in (1e-3, 1.0) for r in arm["probe"]["per_code"] if r["status"] == "ok")

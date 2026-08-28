@@ -1,0 +1,165 @@
+{
+  "sae_name": "jumprelu_pilot_extended",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 4911,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 20,
+  "n_features_distinct": 20,
+  "n_sig_q05": 15,
+  "median_cliffs_delta_grounded": 0.0897186105357215,
+  "median_cliffs_delta_controls": NaN,
+  "mean_loss_clean": 1.6347653633087866,
+  "mean_loss_recon": 1.643557387307617,
+  "mean_recon_tax": 0.008792023998830254,
+  "config": {
+    "sae_name": "jumprelu_pilot_extended",
+    "sae_checkpoint_dir": "/out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000",
+    "sae_hf_repo_id": null,
+    "sae_hf_filename": null,
+    "is_centered": true,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "centered_activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "mean_path": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt",
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 175,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.7921
+      },
+      {
+        "feature_idx": 3405,
+        "code": "icd9_73300",
+        "kind": "grounded",
+        "r_pb": 0.7907
+      },
+      {
+        "feature_idx": 8650,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.7819
+      },
+      {
+        "feature_idx": 9334,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.776
+      },
+      {
+        "feature_idx": 12284,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.7645
+      },
+      {
+        "feature_idx": 16515,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.7616
+      },
+      {
+        "feature_idx": 17082,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7548
+      },
+      {
+        "feature_idx": 1557,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7547
+      },
+      {
+        "feature_idx": 12251,
+        "code": "icd9_53081",
+        "kind": "grounded",
+        "r_pb": 0.7482
+      },
+      {
+        "feature_idx": 7492,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.746
+      },
+      {
+        "feature_idx": 7861,
+        "code": "icd9_32723",
+        "kind": "grounded",
+        "r_pb": 0.7417
+      },
+      {
+        "feature_idx": 10179,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.7381
+      },
+      {
+        "feature_idx": 9833,
+        "code": "icd9_2749",
+        "kind": "grounded",
+        "r_pb": 0.7367
+      },
+      {
+        "feature_idx": 8668,
+        "code": "icd9_60000",
+        "kind": "grounded",
+        "r_pb": 0.7351
+      },
+      {
+        "feature_idx": 16342,
+        "code": "icd9_53081",
+        "kind": "grounded",
+        "r_pb": 0.7289
+      },
+      {
+        "feature_idx": 9694,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.7166
+      },
+      {
+        "feature_idx": 18177,
+        "code": "icd9_V4581",
+        "kind": "grounded",
+        "r_pb": 0.7061
+      },
+      {
+        "feature_idx": 4414,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7025
+      },
+      {
+        "feature_idx": 843,
+        "code": "icd9_32723",
+        "kind": "grounded",
+        "r_pb": 0.6999
+      },
+      {
+        "feature_idx": 13319,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.6864
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": null,
+    "output_dir": "/out/ablation/jumprelu_pilot_extended",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}

@@ -604,3 +604,304 @@ def run_raw_lr_baseline(
     logger.info("=" * 60)
 
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Probe directions for the necessity harness (code plan C3)
+# ---------------------------------------------------------------------------
+
+
+def build_probe_directions(
+    X_train: np.ndarray,
+    Y_train: np.ndarray,
+    c_grid: list[float] | None = None,
+    cv_folds: int = 3,
+    class_weight: str | None = "balanced",
+    max_iter: int = 2000,
+    random_state: int = 0,
+    cv_subsample: int | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """One L2 logistic-probe direction per code, fitted on train notes only.
+
+    The existing Baseline-3 result used logistic regression purely as a
+    *classifier* (mean AUC-ROC 0.808). The meta-review asked for supervised
+    probes compared on **audit properties**, which needs the fitted weight
+    vector treated as a concept direction -- the same reuse that underlies
+    activation-steering work.
+
+    Three choices the probing literature does not leave to taste:
+
+    * **Standardize before penalizing.** An isotropic L2 penalty on features
+      whose variance spans 104x is not one penalty, it is 2,304 different ones.
+      Statistics come from train only. The coefficient is converted back to raw
+      space as ``coef / sigma`` so the emitted source can be projected from the
+      unmodified pooled vectors -- point-biserial r is shift- and positive-scale
+      invariant, so only that direction matters.
+    * **Select C by cross-validation, on train.** C is not a nuisance here: for
+      centered X, ``beta_ridge`` is proportional to
+      ``(Sigma + (lambda/n) I)^-1 d``, so C interpolates between the plain mean
+      difference (strong penalty) and the Sigma^-1 d / LDA form (weak penalty).
+      Selecting it on the audit split would be selection on the reported
+      statistic.
+    * **Class weighting is an arm, not a default.** Panel prevalence runs
+      0.043-0.386, so it plausibly matters; it is exposed and reported rather
+      than assumed.
+
+    Args:
+        X_train: [n_train, d] pooled activations, train notes only.
+        Y_train: [n_train, n_codes] binary labels.
+        c_grid: inverse-regularization values to search. Default
+            ``[1e-3, 1e-2, 1e-1, 1.0]``.
+        cv_folds: stratified folds for selecting C.
+        class_weight: ``"balanced"`` or None.
+        cv_subsample: cap on notes used for the C search only; the refit at the
+            chosen C always uses the full train split. Selecting a scalar does
+            not need 40,000 notes, and this is what keeps the run in minutes.
+
+    Returns:
+        D: [d, n_codes] float32 unit directions in RAW feature space. Codes
+            with no positives (or no negatives) get a zero column.
+        info: per-code chosen C, CV AUC and status, plus the settings used.
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import StratifiedKFold
+
+    c_grid = list(c_grid if c_grid is not None else [1e-3, 1e-2, 1e-1, 1.0])
+    X = np.asarray(X_train, dtype=np.float64)
+    n, d = X.shape
+    n_codes = Y_train.shape[1]
+
+    # Train-only standardization. Zero-variance dimensions are real in the
+    # pooled space; scaling them by 1.0 leaves their (constant) column at zero
+    # after centering, so they contribute nothing rather than infinity.
+    mu = X.mean(axis=0)
+    sd = X.std(axis=0)
+    sd_safe = np.where(sd < 1e-12, 1.0, sd)
+    Z = (X - mu) / sd_safe
+
+    rng = np.random.default_rng(random_state)
+    if cv_subsample is not None and cv_subsample < n:
+        sub = rng.choice(n, size=cv_subsample, replace=False)
+    else:
+        sub = np.arange(n)
+
+    D = np.zeros((d, n_codes), dtype=np.float64)
+    per_code: list[dict[str, Any]] = []
+
+    for c in range(n_codes):
+        y = Y_train[:, c].astype(int)
+        n_pos = int(y.sum())
+        if n_pos == 0 or n_pos == n:
+            logger.warning("Code column %d has n_pos=%d/%d; zero direction.", c, n_pos, n)
+            per_code.append({"code_col": c, "status": "degenerate", "C": None, "cv_auc": None})
+            continue
+
+        best_c, best_auc = c_grid[0], -np.inf
+        if len(c_grid) > 1:
+            y_sub = y[sub]
+            if len(np.unique(y_sub)) < 2:
+                y_sub = y
+                sub_idx = np.arange(n)
+            else:
+                sub_idx = sub
+            skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+            for cand in c_grid:
+                aucs = []
+                for tr, te in skf.split(np.zeros(len(sub_idx)), y_sub):
+                    if len(np.unique(y_sub[te])) < 2:
+                        continue
+                    clf = LogisticRegression(
+                        C=cand,
+                        max_iter=max_iter,
+                        class_weight=class_weight,
+                        solver="lbfgs",
+                        random_state=random_state,
+                    )
+                    clf.fit(Z[sub_idx][tr], y_sub[tr])
+                    aucs.append(roc_auc_score(y_sub[te], clf.decision_function(Z[sub_idx][te])))
+                mean_auc = float(np.mean(aucs)) if aucs else -np.inf
+                if mean_auc > best_auc:
+                    best_auc, best_c = mean_auc, cand
+
+        clf = LogisticRegression(
+            C=best_c,
+            max_iter=max_iter,
+            class_weight=class_weight,
+            solver="lbfgs",
+            random_state=random_state,
+        )
+        clf.fit(Z, y)
+
+        # Back to raw space: score = ((x - mu)/sd) . coef = x . (coef/sd) - const,
+        # and point-biserial r is invariant to the dropped constant.
+        w = clf.coef_.ravel() / sd_safe
+        w[sd < 1e-12] = 0.0
+        norm = float(np.linalg.norm(w))
+        if norm < 1e-12:
+            per_code.append({"code_col": c, "status": "zero_norm", "C": best_c, "cv_auc": best_auc})
+            continue
+        D[:, c] = w / norm
+        per_code.append(
+            {
+                "code_col": c,
+                "status": "ok",
+                "C": best_c,
+                "cv_auc": None if best_auc == -np.inf else round(float(best_auc), 4),
+                "n_pos": n_pos,
+            }
+        )
+
+    info = {
+        "c_grid": c_grid,
+        "cv_folds": cv_folds,
+        "class_weight": class_weight,
+        "max_iter": max_iter,
+        "standardized": True,
+        "n_train": int(n),
+        "cv_subsample": int(len(sub)),
+        "n_zero_columns": int((np.linalg.norm(D, axis=0) < 1e-12).sum()),
+        "per_code": per_code,
+    }
+    return D.astype(np.float32), info
+
+
+def run_probe_direction_sources(
+    raw_ckpt_dir: str | Path,
+    icd_csv_path: str | Path,
+    output_dir: str | Path,
+    code_names_json: str | Path | None = None,
+    arms: list[dict[str, Any]] | None = None,
+    c_grid: list[float] | None = None,
+    cv_folds: int = 3,
+    cv_subsample: int | None = 15000,
+    max_iter: int = 2000,
+    random_state: int = 0,
+    train_shard_start: int = 31,
+    train_shard_end: int = 281,
+    select_shard_start: int = 0,
+    select_shard_end: int = 31,
+    audit_shard_start: int = 281,
+    audit_shard_end: int = 312,
+    join_key: str = "admission_id",
+    icd_col_prefix: str = "icd9_",
+    min_prevalence: float = 0.02,
+    max_codes: int = 50,
+    min_notes: int = 100,
+) -> dict[str, Any]:
+    """Fit probe directions per arm and emit ``shard_ckpt``-format sources.
+
+    Produces no audit statistics: grounding, off-target and monospecificity all
+    come from ``necessity_audit``, the same code path the SAEs and the
+    diff-in-means arms go through.
+
+    The split discipline matches the diff-in-means baseline exactly -- train on
+    ``[train_shard_start, train_shard_end)``, never touching the selection or
+    audit shards -- which is the fix for the circularity the code plan flags:
+    the published 0.808 run cross-validated across all 50,000 notes, so its
+    fitted probes had already seen the held-out split.
+    """
+    from mech_interp_research.diff_in_means_baseline import write_direction_source
+    from mech_interp_research.necessity_audit import (
+        align_features_to_labels,
+        build_label_matrix,
+    )
+
+    arms = list(arms if arms is not None else [{"name": "balanced", "class_weight": "balanced"}])
+    raw_ckpt_dir = Path(raw_ckpt_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for (a_lo, a_hi, a), (b_lo, b_hi, b) in (
+        (
+            (train_shard_start, train_shard_end, "train"),
+            (select_shard_start, select_shard_end, "selection"),
+        ),
+        (
+            (train_shard_start, train_shard_end, "train"),
+            (audit_shard_start, audit_shard_end, "audit"),
+        ),
+        (
+            (select_shard_start, select_shard_end, "selection"),
+            (audit_shard_start, audit_shard_end, "audit"),
+        ),
+    ):
+        if max(a_lo, b_lo) < min(a_hi, b_hi):
+            raise ValueError(
+                f"{a} shards [{a_lo}, {a_hi}) overlap {b} shards [{b_lo}, {b_hi}). "
+                "A probe fitted on notes it is later scored on is circular."
+            )
+
+    note_vectors, note_meta = reassemble_note_vectors(raw_ckpt_dir)
+
+    code_names = None
+    if code_names_json is not None:
+        code_names = json.loads(Path(code_names_json).read_text())
+        logger.info("Fixed %d-code panel pinned from %s", len(code_names), code_names_json)
+
+    Y, code_names, matched_meta = build_label_matrix(
+        icd_csv_path=icd_csv_path,
+        note_meta=note_meta,
+        code_names=code_names,
+        min_prevalence=min_prevalence,
+        max_codes=max_codes,
+        icd_col_prefix=icd_col_prefix,
+        join_key=join_key,
+        min_notes=min_notes,
+    )
+    X = align_features_to_labels(note_vectors, note_meta, matched_meta)
+    shards = matched_meta["shard"].to_numpy()
+
+    train_mask = (shards >= train_shard_start) & (shards < train_shard_end)
+    n_train = int(train_mask.sum())
+    if n_train < min_notes:
+        raise RuntimeError(f"Only {n_train} train notes; min_notes={min_notes}.")
+    X_train, Y_train = X[train_mask], Y[train_mask]
+    logger.info(
+        "Probe train split: %d notes x %d dims, %d codes", n_train, X.shape[1], len(code_names)
+    )
+
+    out_arms: dict[str, Any] = {}
+    for spec in arms:
+        name = spec["name"]
+        logger.info("Fitting probe arm '%s' (class_weight=%s)", name, spec.get("class_weight"))
+        D, info = build_probe_directions(
+            X_train,
+            Y_train,
+            c_grid=c_grid,
+            cv_folds=cv_folds,
+            class_weight=spec.get("class_weight", "balanced"),
+            max_iter=max_iter,
+            random_state=random_state,
+            cv_subsample=cv_subsample,
+        )
+        arm_dir = output_dir / f"probe_{name}"
+        arm_dir.mkdir(parents=True, exist_ok=True)
+        np.save(arm_dir / "directions.npy", D)
+        ckpt_out = arm_dir / "shard_ckpt"
+        sel = write_direction_source(
+            raw_ckpt_dir, D, ckpt_out, select_shard_start, select_shard_end
+        )
+        aud = write_direction_source(raw_ckpt_dir, D, ckpt_out, audit_shard_start, audit_shard_end)
+        out_arms[name] = {
+            "checkpoint_dir": str(ckpt_out),
+            "directions_npy": str(arm_dir / "directions.npy"),
+            "n_features": int(D.shape[1]),
+            "probe": info,
+            "select": sel,
+            "audit": aud,
+        }
+
+    manifest = {
+        "raw_ckpt_dir": str(raw_ckpt_dir),
+        "code_names": list(code_names),
+        "n_codes": len(code_names),
+        "train_shards": [train_shard_start, train_shard_end],
+        "select_shards": [select_shard_start, select_shard_end],
+        "audit_shards": [audit_shard_start, audit_shard_end],
+        "n_train_notes": n_train,
+        "arms": out_arms,
+    }
+    (output_dir / "probe_manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    logger.info("Probe direction sources for %d arms written to %s", len(out_arms), output_dir)
+    return manifest

@@ -1,0 +1,45 @@
+# TF-IDF sources through the shared necessity audit (code plan C8).
+#
+# selection: top_per_code, NOT identity. TF-IDF searching 10,000 n-grams per
+# code is the same kind of search the SAE gets over 18,432 features, so it is
+# given the same rule -- best-of-k chosen on the selection split (shards 0-30),
+# scored on the held-out split (281-311). Auditing a pre-picked winner instead
+# would hide the search budget and flatter the baseline.
+#
+# Everything else is byte-identical to configs/necessity_audit_sae.yaml.
+#
+# Run (after modal_app/tfidf_directions.py):
+#   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_tfidf.yaml
+icd_csv_path: /data/sample_50k.csv
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+output_dir: /out/necessity/tfidf_audit
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+join_key: admission_id
+icd_col_prefix: icd9_
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+audit_config:
+  r_threshold: 0.1
+  fdr_q: 0.05
+  mono_thresholds:
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  - 0.5
+  - 0.6
+  min_off_pos: 10
+  min_pool: 10
+  restrict_c_negative: true
+  top_n_associations: 200
+  selection: top_per_code
+sources:
+- name: tfidf_value
+  checkpoint_dir: /out/necessity/tfidf_sources/tfidf_value/shard_ckpt
+- name: tfidf_binary
+  checkpoint_dir: /out/necessity/tfidf_sources/tfidf_binary/shard_ckpt
+logging_level: INFO

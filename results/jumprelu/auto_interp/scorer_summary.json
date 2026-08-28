@@ -1,0 +1,52 @@
+{
+  "global": {
+    "mean_fuzzing": 0.9378711052322165,
+    "median_fuzzing": 1.0,
+    "std_fuzzing": 0.1442908040959409,
+    "mean_detection": 0.9620171525400284,
+    "median_detection": 1.0,
+    "std_detection": 0.11460624929003257,
+    "n_valid_fuzzing": 432,
+    "n_valid_detection": 459
+  },
+  "dead": {
+    "mean_fuzzing": 0.9323901541292846,
+    "median_fuzzing": 1.0,
+    "std_fuzzing": 0.11250254539163611,
+    "mean_detection": 0.9748591909882233,
+    "median_detection": 1.0,
+    "std_detection": 0.07322691245815174,
+    "n_valid_fuzzing": 69,
+    "n_valid_detection": 93
+  },
+  "non_grounded": {
+    "mean_fuzzing": 1.0,
+    "median_fuzzing": 1.0,
+    "std_fuzzing": 0.0,
+    "mean_detection": 1.0,
+    "median_detection": 1.0,
+    "std_detection": 0.0,
+    "n_valid_fuzzing": 1,
+    "n_valid_detection": 1
+  },
+  "strong_grounded": {
+    "mean_fuzzing": 0.9378227908078655,
+    "median_fuzzing": 1.0,
+    "std_fuzzing": 0.15429229452482449,
+    "mean_detection": 0.9596796536796538,
+    "median_detection": 1.0,
+    "std_detection": 0.12720228731358244,
+    "n_valid_fuzzing": 268,
+    "n_valid_detection": 275
+  },
+  "weak_grounded": {
+    "mean_fuzzing": 0.941371158392435,
+    "median_fuzzing": 1.0,
+    "std_fuzzing": 0.13580827437407766,
+    "mean_detection": 0.9554673721340389,
+    "median_detection": 1.0,
+    "std_detection": 0.10844022766954403,
+    "n_valid_fuzzing": 94,
+    "n_valid_detection": 90
+  }
+}

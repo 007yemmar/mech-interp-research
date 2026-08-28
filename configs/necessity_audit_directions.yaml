@@ -1,0 +1,71 @@
+# One-direction-per-code sources through the shared necessity audit (C2, C3, C8).
+#
+# WHY THIS IS A SECOND CONFIG RATHER THAN MORE SOURCES IN necessity_audit_sae.yaml
+# -------------------------------------------------------------------------------
+# Everything here is byte-identical to configs/necessity_audit_sae.yaml -- same
+# pinned panel, same select/audit shards, same r_threshold, fdr_q,
+# mono_thresholds, min_off_pos, min_pool, restrict_c_negative -- except for one
+# knob that the sources' shape forces:
+#
+#     selection: identity     (here)   vs   selection: top_per_code   (SAEs)
+#
+# `identity` maps feature i to code i and requires k == n_codes. A source with
+# exactly one direction per code has no selection to make; a source with 18,432
+# features does. That difference is real and is the thing being measured -- the
+# SAE gets to search 18,432 candidates per code and these baselines get one shot
+# -- so it is stated in a separate config rather than hidden as a per-source
+# override, which NecessityComparisonConfig refuses on purpose.
+#
+# Run (after modal_app/diff_in_means_directions.py and modal_app/probe_directions.py):
+#   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_directions.yaml
+
+icd_csv_path: /data/sample_50k.csv
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+output_dir: /out/necessity/direction_audit
+
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+audit_config:
+  r_threshold: 0.1
+  fdr_q: 0.05
+  mono_thresholds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+  min_off_pos: 10
+  min_pool: 10
+  restrict_c_negative: true
+  top_n_associations: 200
+  selection: identity
+
+sources:
+  # C2. The published, unwhitened baseline -- kept as the control so the effect
+  # of the metric is visible rather than asserted.
+  - name: diff_in_means_none
+    checkpoint_dir: /out/necessity/diff_in_means_whitened/dm_none/shard_ckpt
+
+  # M = diag(Sigma): inverse-variance scaling, i.e. differencing z-scored features.
+  - name: diff_in_means_diagonal
+    checkpoint_dir: /out/necessity/diff_in_means_whitened/dm_diagonal/shard_ckpt
+
+  # M = Sigma: the mass-mean / LDA form (Marks & Tegmark 2023).
+  - name: diff_in_means_full
+    checkpoint_dir: /out/necessity/diff_in_means_whitened/dm_full/shard_ckpt
+
+  # C3. Supervised probe directions -- the L2 logistic coefficient vector per
+  # code, refit on train shards only (the published 0.808 run cross-validated
+  # across all 50,000 notes, so its fits had seen the audit split). Two arms so
+  # class weighting is reported rather than assumed.
+  - name: probe_lr_balanced
+    checkpoint_dir: /out/necessity/probe_directions/probe_balanced/shard_ckpt
+
+  - name: probe_lr_unweighted
+    checkpoint_dir: /out/necessity/probe_directions/probe_unweighted/shard_ckpt
+
+logging_level: INFO
