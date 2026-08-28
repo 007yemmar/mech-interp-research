@@ -30,3 +30,9 @@ provenance_note: >
   the eval_output_dir for feature_inspector rather than re-running icd_eval.
 
 logging_level: INFO
+
+# 271/18432 thresholds are non-finite (directions whose pooled maxima were
+# degenerate, so no quantile exists). Verified: NONE of the 46 selected features
+# is among them, so making them inert cannot affect any audited result. k stays
+# 18,432, which the best-of-k selection rule depends on.
+nonfinite_threshold_policy: inert

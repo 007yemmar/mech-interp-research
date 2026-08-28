@@ -73,6 +73,32 @@ def import_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     if theta.shape != (W.shape[1],):
         raise ValueError(f"thresholds {theta.shape} do not match direction count k={W.shape[1]}")
 
+    # Non-finite thresholds are a real hazard, not a formality: `pre > NaN` is
+    # always False, so a NaN theta yields a permanently dead direction that is
+    # indistinguishable from a legitimately selective one. write_pseudo_sae
+    # rejects them outright. A source may still legitimately carry some — a
+    # direction whose pooled maxima are degenerate has no calibratable
+    # threshold — so `inert` makes those directions provably never fire while
+    # preserving k, which the best-of-k selection rule depends on.
+    n_nonfinite = int((~np.isfinite(theta)).sum())
+    policy = str(config.get("nonfinite_threshold_policy", "reject"))
+    if n_nonfinite and policy == "inert":
+        inert = float(np.finfo(np.float32).max)
+        log.warning(
+            "%d/%d thresholds are non-finite; setting them to %.3g so those "
+            "directions never fire (k preserved).",
+            n_nonfinite,
+            theta.size,
+            inert,
+        )
+        theta = np.where(np.isfinite(theta), theta, inert).astype(np.float32)
+    elif n_nonfinite:
+        raise ValueError(
+            f"{n_nonfinite}/{theta.size} thresholds are non-finite. Set "
+            "nonfinite_threshold_policy: inert to make those directions never "
+            "fire, after confirming none of them is a selected feature."
+        )
+
     # The contract requires theta >= 0: encoding is z = pre * (pre > theta), so a
     # negative threshold passes negative pre-activations through unchanged.
     n_negative = int((theta < 0).sum())
@@ -85,6 +111,7 @@ def import_source_remote(config: dict[str, Any]) -> dict[str, Any]:
         "imported_from": str(directions_path),
         "thresholds_from": str(thresholds_path),
         "n_negative_thresholds_clamped": n_negative,
+        "n_nonfinite_thresholds_made_inert": n_nonfinite if policy == "inert" else 0,
         "provenance_note": config.get("provenance_note", ""),
     }
 
