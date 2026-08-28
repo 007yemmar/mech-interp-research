@@ -6,13 +6,13 @@
 # be judged against a comorbid code and earn a correct NO, which would read as
 # the judge failing rather than the pairing being wrong. Populate it from the
 # arm's selected_features.csv / top_associations.csv before running.
-sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+sae_checkpoint: /out/sources/keyword_b1
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-icd_eval_dir: /out/necessity/sae_audit/sae_jumprelu
+icd_eval_dir: /out/icd_eval/fourarm/keyword_b1_bosfix
 icd_csv_path: /data/sample_50k.csv
-output_dir: /out/auto_interp/fourarm/sae_jumprelu
+output_dir: /out/auto_interp/fourarm/keyword_b1_bosfix
 
-explicit_features: [[16195, "icd9_4019"], [13591, "icd9_2724"], [12251, "icd9_53081"], [12284, "icd9_4280"], [8212, "icd9_25000"], [6701, "icd9_42731"], [5491, "icd9_41401"], [7066, "icd9_V1582"], [113, "icd9_5849"], [14278, "icd9_311"], [15873, "icd9_2449"], [1423, "icd9_40390"], [13029, "icd9_2859"], [16999, "icd9_V5861"], [13804, "icd9_3051"], [15843, "icd9_2720"], [12093, "icd9_5990"], [7861, "icd9_32723"], [8936, "icd9_V5867"], [1423, "icd9_5859"], [16427, "icd9_30000"], [14383, "icd9_V4582"], [14763, "icd9_412"], [8383, "icd9_V5866"], [15760, "icd9_49390"], [3143, "icd9_496"], [2428, "icd9_27800"], [18177, "icd9_V4581"], [9913, "icd9_2761"], [3405, "icd9_73300"], [2085, "icd9_486"], [6067, "icd9_V4986"], [9833, "icd9_2749"], [18177, "icd9_41400"], [15381, "icd9_V1251"], [5029, "icd9_2851"], [17687, "icd9_33829"], [8891, "icd9_V1254"], [3879, "icd9_27651"], [6390, "icd9_2762"], [8668, "icd9_60000"], [15103, "icd9_56400"], [9400, "icd9_3572"], [15821, "icd9_5856"], [1000, "icd9_42789"], [5750, "icd9_2875"]]    # <- fill with [[feature_id, "icd9_XXXX"], ...]
+explicit_features: [[0, "icd9_4019"], [1, "icd9_2724"], [2, "icd9_53081"], [3, "icd9_4280"], [4, "icd9_25000"], [5, "icd9_42731"], [8, "icd9_5849"], [9, "icd9_311"], [10, "icd9_2449"], [12, "icd9_2859"], [13, "icd9_V5861"], [14, "icd9_3051"], [15, "icd9_2720"], [16, "icd9_5990"], [17, "icd9_32723"], [18, "icd9_V5867"], [19, "icd9_5859"], [20, "icd9_30000"], [21, "icd9_V4582"], [22, "icd9_412"], [23, "icd9_V5866"], [24, "icd9_49390"], [25, "icd9_496"], [26, "icd9_27800"], [27, "icd9_V4581"], [28, "icd9_2761"], [29, "icd9_73300"], [30, "icd9_486"], [32, "icd9_2749"], [34, "icd9_V1251"], [35, "icd9_2851"], [37, "icd9_V1254"], [38, "icd9_27651"], [39, "icd9_2762"], [40, "icd9_60000"], [41, "icd9_56400"], [42, "icd9_3572"], [44, "icd9_42789"], [45, "icd9_2875"]]
 
 explainer_model: claude-sonnet-4-6
 comparison_model: null

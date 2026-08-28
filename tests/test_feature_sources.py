@@ -537,3 +537,39 @@ def test_blend_directions_normalisation_matches_solve_dilution_alpha_analytic_de
             err_msg=f"alpha={alpha}: score_fn's analytic projection disagrees with "
             "the actual W_enc column blend_directions writes",
         )
+
+
+def test_write_pseudo_sae_preserves_a_supplied_b_enc(tmp_path: Path) -> None:
+    """An externally trained SAE's encoder bias must survive the round trip.
+
+    Directions built in this module absorb any constant offset into the
+    calibrated threshold, so b_enc=0 is right for them. An imported SAE
+    (GemmaScope) carries a real b_enc: drop it and every pre-activation shifts,
+    so a different set of tokens clears the threshold.
+    """
+    from mech_interp_research.feature_sources import write_pseudo_sae
+    from mech_interp_research.icd_eval import JumpReLUSAE
+
+    rng = np.random.default_rng(21)
+    d_model, k = 12, 4
+    W = rng.normal(size=(d_model, k)).astype(np.float32)
+    theta = np.zeros(k, dtype=np.float32)
+    b = rng.normal(size=k).astype(np.float32)
+
+    out = write_pseudo_sae(W, theta, tmp_path / "hf", {"arm": "imported"}, b_enc=b)
+    sae = JumpReLUSAE.from_checkpoint(out)
+    np.testing.assert_allclose(sae.b_enc, b, rtol=1e-6)
+
+    x = rng.normal(size=(7, d_model)).astype(np.float32)
+    pre = x @ W + b
+    np.testing.assert_allclose(sae.encode(x), pre * (pre > theta), rtol=1e-5, atol=1e-6)
+
+
+def test_write_pseudo_sae_defaults_b_enc_to_zeros(tmp_path: Path) -> None:
+    """Omitting b_enc must keep the original zero-bias behaviour exactly."""
+    from mech_interp_research.feature_sources import write_pseudo_sae
+    from mech_interp_research.icd_eval import JumpReLUSAE
+
+    W = np.eye(6, 3, dtype=np.float32)
+    out = write_pseudo_sae(W, np.zeros(3, np.float32), tmp_path / "z", {})
+    np.testing.assert_allclose(JumpReLUSAE.from_checkpoint(out).b_enc, np.zeros(3))

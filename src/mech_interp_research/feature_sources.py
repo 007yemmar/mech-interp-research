@@ -36,6 +36,7 @@ def write_pseudo_sae(
     threshold: np.ndarray,
     out_dir: str | Path,
     meta: dict,
+    b_enc: np.ndarray | None = None,
 ) -> Path:
     """Write a feature source as a checkpoint JumpReLUSAE.from_checkpoint can load.
 
@@ -44,6 +45,11 @@ def write_pseudo_sae(
         threshold: [k] per-direction firing threshold, all >= 0.
         out_dir:   Destination directory; created if absent.
         meta:      Provenance dict, written verbatim to source_meta.json.
+        b_enc:     [k] encoder bias. None (the default) writes zeros, which is
+            correct for directions built here — any constant pre-activation
+            offset is absorbed by the calibrated threshold. An externally
+            trained SAE carries a real b_enc that must be preserved, or every
+            pre-activation is shifted and different tokens fire.
 
     Returns:
         The output directory as a Path.
@@ -75,9 +81,18 @@ def write_pseudo_sae(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    if b_enc is None:
+        b_enc_arr = np.zeros(k, dtype=np.float32)
+    else:
+        b_enc_arr = np.asarray(b_enc, dtype=np.float32)
+        if b_enc_arr.shape != (k,):
+            raise ValueError(f"b_enc must have shape ({k},), got {b_enc_arr.shape}")
+        if not np.all(np.isfinite(b_enc_arr)):
+            raise ValueError("b_enc contains non-finite values")
+
     tensors = {
         "W_enc": np.ascontiguousarray(W_enc),
-        "b_enc": np.zeros(k, dtype=np.float32),
+        "b_enc": np.ascontiguousarray(b_enc_arr),
         "b_dec": np.zeros(d_model, dtype=np.float32),
         "threshold": np.ascontiguousarray(threshold),
         "W_dec": np.ascontiguousarray(W_enc.T),

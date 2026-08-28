@@ -53,12 +53,52 @@ def import_source_remote(config: dict[str, Any]) -> dict[str, Any]:
     logging.basicConfig(level=config.get("logging_level", "INFO"))
     log = logging.getLogger("import_direction_source")
 
-    directions_path = Path(config["directions_npy"])
-    thresholds_path = Path(config["thresholds_npy"])
     out_dir = Path(config["output_dir"])
 
-    W = np.load(directions_path).astype(np.float32)
-    theta = np.load(thresholds_path).astype(np.float32)
+    if config.get("hf_repo_id"):
+        # An externally-trained SAE (GemmaScope) lives on the Hub, not on the
+        # volume, so feature_inspector cannot load it directly. Re-expressing it
+        # through the pseudo-SAE contract makes it just another local checkpoint
+        # and every downstream stage works unmodified.
+        #
+        # Encoder convention matters here. GemmaScope was trained WITHOUT the
+        # b_dec subtraction: its encode is `x @ W_enc + b_enc`. Our loader
+        # defaults to `(x - b_dec) @ W_enc + b_enc`, so writing b_dec = 0 makes
+        # the two identical and reproduces GemmaScope's encoder exactly. The
+        # cost is that decode() and explained variance become meaningless, which
+        # source_meta.json already flags — and the explainer path only encodes.
+        from mech_interp_research.icd_eval import JumpReLUSAE
+
+        src = JumpReLUSAE.from_huggingface(
+            config["hf_repo_id"], config["hf_filename"], token=os.environ.get("HF_TOKEN")
+        )
+        W = np.asarray(src.W_enc, dtype=np.float32)
+        theta = np.asarray(src.threshold, dtype=np.float32)
+        b_enc = np.asarray(src.b_enc, dtype=np.float32)
+        provenance = {
+            "hf_repo_id": config["hf_repo_id"],
+            "hf_filename": config["hf_filename"],
+            "subtract_b_dec_original": bool(src.subtract_b_dec),
+            "b_dec_norm_discarded": float(np.linalg.norm(src.b_dec)),
+        }
+        log.info(
+            "Loaded %s/%s: W_enc %s, discarding b_dec (norm %.3f) to preserve its "
+            "no-subtraction encoder",
+            config["hf_repo_id"],
+            config["hf_filename"],
+            W.shape,
+            provenance["b_dec_norm_discarded"],
+        )
+    else:
+        directions_path = Path(config["directions_npy"])
+        thresholds_path = Path(config["thresholds_npy"])
+        W = np.load(directions_path).astype(np.float32)
+        theta = np.load(thresholds_path).astype(np.float32)
+        b_enc = None
+        provenance = {
+            "imported_from": str(directions_path),
+            "thresholds_from": str(thresholds_path),
+        }
 
     # A [k, d_model] matrix is the transpose of what the contract wants; accept
     # it rather than silently writing a mis-shaped encoder.
@@ -108,8 +148,7 @@ def import_source_remote(config: dict[str, Any]) -> dict[str, Any]:
 
     meta: dict[str, Any] = {
         "arm": config.get("arm", "imported"),
-        "imported_from": str(directions_path),
-        "thresholds_from": str(thresholds_path),
+        **provenance,
         "n_negative_thresholds_clamped": n_negative,
         "n_nonfinite_thresholds_made_inert": n_nonfinite if policy == "inert" else 0,
         "provenance_note": config.get("provenance_note", ""),
@@ -122,7 +161,7 @@ def import_source_remote(config: dict[str, Any]) -> dict[str, Any]:
         with open(manifest_path) as f:
             meta["source_manifest"] = json.load(f)
 
-    write_pseudo_sae(W, theta, out_dir, meta)
+    write_pseudo_sae(W, theta, out_dir, meta, b_enc=b_enc)
     artifacts_volume.commit()
 
     log.info("Imported source written: %s (d_model=%d, k=%d)", out_dir, *W.shape)
