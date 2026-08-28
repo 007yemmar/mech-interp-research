@@ -603,6 +603,11 @@ def _build_keyword_b1(config: dict[str, Any], held_out_start: int, log: Any):
         "keyword_occurrence_counts": scan["occurrence_counts"],
         "keyword_mean_span_len": scan["mean_span_len"],
         "keyword_alignment_mismatches": scan["alignment_mismatches"],
+        # BOS audit trail: how much of each raw direction lay along the
+        # attention-sink token before it was projected out.
+        "bos_projected_out": scan["bos_projected_out"],
+        "bos_cosine_before_projection": scan["bos_cosine_before_projection"],
+        "bos_n_notes_sampled": scan["bos_n_notes_sampled"],
         "underpowered_codes": scan["underpowered_codes"],
         "scan_shards": scan["scan_shards"],
         "n_selection_notes_scanned": int(len(scan["scan_meta"])),
@@ -801,6 +806,11 @@ def _build_keyword_b2(
         "keyword_occurrence_counts": scan["occurrence_counts"],
         "keyword_mean_span_len": scan["mean_span_len"],
         "keyword_alignment_mismatches": scan["alignment_mismatches"],
+        # BOS audit trail: how much of each raw direction lay along the
+        # attention-sink token before it was projected out.
+        "bos_projected_out": scan["bos_projected_out"],
+        "bos_cosine_before_projection": scan["bos_cosine_before_projection"],
+        "bos_n_notes_sampled": scan["bos_n_notes_sampled"],
         "underpowered_codes": scan["underpowered_codes"],
         "scan_shards": scan_shards,
         "n_selection_notes_scanned": int(len(scan_meta)),
