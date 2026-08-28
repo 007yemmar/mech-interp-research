@@ -20,5 +20,9 @@ max_codes: 50
 min_notes: 100
 text_col: note_text
 
+# Audit-split pooled vectors (31 shards, 281-311). The necessity suite writes
+# these beside the run rather than inside the eval dir, hence the override.
+shard_ckpt_dir: /out/necessity/random_matched/seed0/shard_ckpt_audit
+
 rng_seed: 42
 logging_level: INFO

@@ -20,5 +20,13 @@ max_codes: 50
 min_notes: 100
 text_col: note_text
 
+# KNOWN ASYMMETRY: this ckpt holds all 312 shards while Arm A's holds only the
+# 31 audit shards, so with n_shards: 20 Arm C selects its context shards from a
+# 10x larger pool and may draw better-activating examples. Contexts feed the
+# explainer only -- no scored statistic is computed from them -- but if the two
+# arms' explanation quality diverges, write an audit-only shard_ckpt for C
+# before drawing conclusions from the gap.
+shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+
 rng_seed: 42
 logging_level: INFO

@@ -650,6 +650,7 @@ def run_feature_inspection(
     min_prevalence: float = 0.02,
     max_codes: int = 50,
     min_notes: int = 100,
+    shard_ckpt_dir: str | Path | None = None,
     rng_seed: int = 42,
     hf_token: str | None = None,
     on_shard_complete: Any = None,
@@ -678,7 +679,11 @@ def run_feature_inspection(
     metadata = load_metadata(activations_dir)
 
     # 4. Select target shards
-    shard_ckpt_dir = eval_output_dir / "shard_ckpt"
+    # Sources audited outside icd_eval keep their pooled vectors elsewhere (the
+    # necessity suite writes shard_ckpt_audit/ beside the run, not inside the
+    # eval dir), so allow an explicit override. None preserves the original
+    # eval_output_dir/shard_ckpt layout exactly.
+    shard_ckpt_dir = Path(shard_ckpt_dir) if shard_ckpt_dir else eval_output_dir / "shard_ckpt"
     selected_shards = select_target_shards(shard_ckpt_dir, target_latent_indices, n_shards)
     logger.info(f"Selected {len(selected_shards)} shards for scanning")
 
