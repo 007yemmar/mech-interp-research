@@ -21,9 +21,13 @@ n_contexts_train: 20
 n_contexts_test: 10
 max_tokens_context: 30
 
-scorers:
-  - fuzzing
-  - detection
+# Fuzzing/Detection measure explanation QUALITY (Paulo et al.), not whether
+# the judge discriminates, which is the only question this suite asks. They
+# are two of the four calls per feature; dropping them halves the spend and
+# costs nothing here. The remaining two are load bearing: explain produces the
+# explanation, concordance writes the concordance_results.csv that
+# concordance_multi_judge re-judges with the panel.
+scorers: []
 
 concordance_model: claude-sonnet-4-6
 concordance_thresholds: [0.3, 0.4, 0.5]
