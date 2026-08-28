@@ -43,7 +43,7 @@ def select_features(
     p_adjusted: np.ndarray,
     significant: np.ndarray,
     code_names: list[str],
-    note_vectors: np.ndarray | None,
+    note_vectors: np.ndarray,
     n_strong_grounded: int = 280,
     n_weak_grounded: int = 100,
     n_non_grounded: int = 1000,
@@ -61,9 +61,7 @@ def select_features(
         p_adjusted: [d_sae, n_codes] BH-adjusted p-values.
         significant: [d_sae, n_codes] boolean significance mask.
         code_names: List of ICD code column names.
-        note_vectors: [n_notes, d_sae] note-level SAE activations. May be None
-            when explicit_features is given — the only consumer is the
-            dead-neuron tier, which that path never reaches.
+        note_vectors: [n_notes, d_sae] note-level SAE activations
             (for dead-feature detection via mean activation).
         n_strong_grounded: Max features with max|r| > strong_threshold.
         n_weak_grounded: Random sample from weak_lo < max|r| <= weak_hi.
@@ -1612,6 +1610,7 @@ def run_auto_interp(
     icd_eval_dir: str,
     icd_csv_path: str,
     output_dir: str,
+    shard_ckpt_dir: str | None = None,
     n_strong_grounded: int = 280,
     n_weak_grounded: int = 100,
     n_non_grounded: int = 1000,
@@ -1663,16 +1662,18 @@ def run_auto_interp(
     code_names = corr_data["code_names"]
     code_descriptions = _load_code_descriptions(icd_descriptions_path, icd_keywords_yaml_path)
 
-    # note_vectors feeds only the dead-neuron tier inside select_features, and
-    # that tier is unreachable when explicit_features pins the list. Reassembling
-    # it anyway costs a full pass over shard_ckpt/ and — worse — forces every arm
-    # to keep its pooled vectors at exactly icd_eval_dir/shard_ckpt. The control
-    # arms keep theirs elsewhere (the random arm's live in the seed directory,
-    # beside the audit rather than inside it), so the unconditional read made
-    # those arms unrunnable for a value nothing reads.
-    note_vectors = None
-    if explicit_features is None:
-        note_vectors, _ = reassemble_note_vectors(Path(icd_eval_dir) / "shard_ckpt")
+    # Defaults to icd_eval_dir/shard_ckpt, which is where a standard icd_eval run
+    # leaves its pooled vectors. The judge-validity control arms keep theirs
+    # elsewhere — the random arm's sit in the seed directory beside
+    # audit_note_matched rather than inside it — so the location has to be
+    # overridable or those arms cannot run at all.
+    #
+    # Whatever it points at must cover the same notes the correlation matrices in
+    # icd_eval_dir were computed over: note_vectors is what picks which shards to
+    # scan for a feature's top-activating contexts, so a mismatched population
+    # silently pulls contexts for the wrong notes.
+    resolved_ckpt = Path(shard_ckpt_dir) if shard_ckpt_dir else Path(icd_eval_dir) / "shard_ckpt"
+    note_vectors, _ = reassemble_note_vectors(resolved_ckpt)
 
     tiers = select_features(
         r_pb=r_pb,

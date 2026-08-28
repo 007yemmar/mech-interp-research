@@ -1353,32 +1353,22 @@ def test_select_features_accepts_feature_code_tuples() -> None:
     )
 
 
-def test_select_features_explicit_accepts_none_note_vectors():
-    """explicit_features must not require note_vectors.
+def test_run_auto_interp_binds_shard_ckpt_dir_as_real_parameter():
+    """shard_ckpt_dir must be a named parameter, not swallowed by **_kwargs.
 
-    run_auto_interp skips reassembling note_vectors when the caller pins the
-    feature list, because the only consumer is the dead-neuron tier that path
-    never reaches. That skip is what lets an arm keep its pooled vectors
-    somewhere other than icd_eval_dir/shard_ckpt, so the contract is load
-    bearing rather than an optimisation: if select_features ever starts
-    touching note_vectors before the explicit_features branch returns, every
-    control arm breaks at run time and this test is the tripwire.
+    run_auto_interp's signature ends in **_kwargs, so an unrecognised config key
+    is silently absorbed instead of raising — that is exactly how max_workers sat
+    inert in production configs while appearing to be honoured.
+
+    The judge-validity control arms depend on this key actually binding: their
+    pooled vectors live outside icd_eval_dir/shard_ckpt, so if the parameter were
+    ever removed the arms would not fail loudly, they would quietly fall back to
+    the default path and pull contexts for the wrong note population.
     """
-    import numpy as np
+    import inspect
 
-    from mech_interp_research.auto_interp import select_features
+    from mech_interp_research.auto_interp import run_auto_interp
 
-    d_sae, n_codes = 40, 4
-    args = (
-        np.zeros((d_sae, n_codes)),
-        np.full((d_sae, n_codes), 0.5),
-        np.zeros((d_sae, n_codes), dtype=bool),
-        [f"icd9_{i}" for i in range(n_codes)],
-        None,
-    )
-
-    out = select_features(*args, explicit_features=[3, 11, 29])
-    assert out["strong_grounded"] == [3, 11, 29]
-
-    pairs = select_features(*args, explicit_features=[(3, "icd9_0"), (11, "icd9_1")])
-    assert pairs["strong_grounded"] == [3, 11]
+    params = inspect.signature(run_auto_interp).parameters
+    assert "shard_ckpt_dir" in params, "shard_ckpt_dir would be absorbed by **_kwargs"
+    assert params["shard_ckpt_dir"].default is None
