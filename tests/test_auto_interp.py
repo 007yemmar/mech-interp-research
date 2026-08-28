@@ -1468,3 +1468,26 @@ def test_openrouter_adapter_raises_on_empty_choices():
     inner = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
     with pytest.raises(RuntimeError, match="no choices"):
         _OpenRouterMessages(inner).create(model="claude-sonnet-4-6", max_tokens=64, messages=[])
+
+
+def test_anthropic_client_sends_workspace_header_when_set(monkeypatch):
+    """An identity-linked key needs anthropic-workspace-id or the API 400s.
+
+    The header is read from the environment so it can live beside the key in the
+    same Modal secret. Classic keys carry their workspace implicitly, so the
+    header must be omitted entirely when the variable is absent rather than sent
+    empty.
+    """
+    import anthropic
+
+    from mech_interp_research.auto_interp import make_llm_client
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_test123")
+    client = make_llm_client("anthropic")
+    assert isinstance(client, anthropic.Anthropic)
+    assert client.default_headers.get("anthropic-workspace-id") == "wrkspc_test123"
+
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID")
+    plain = make_llm_client("anthropic")
+    assert "anthropic-workspace-id" not in plain.default_headers

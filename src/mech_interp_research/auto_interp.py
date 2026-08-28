@@ -723,7 +723,13 @@ def make_llm_client(backend: str = "anthropic", *, max_retries: int = 5):
     if backend == "anthropic":
         import anthropic
 
-        return anthropic.Anthropic(max_retries=max_retries)
+        # Identity-linked API keys must name the workspace a request acts in, or
+        # the API rejects them with 400 "anthropic-workspace-id is required".
+        # Classic keys carry their workspace implicitly and need no header, so
+        # this is set only when the variable is present.
+        workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID")
+        headers = {"anthropic-workspace-id": workspace} if workspace else None
+        return anthropic.Anthropic(max_retries=max_retries, default_headers=headers)
     if backend == "openrouter":
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key:
