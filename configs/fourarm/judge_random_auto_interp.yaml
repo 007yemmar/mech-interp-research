@@ -8,7 +8,7 @@
 # arm's selected_features.csv / top_associations.csv before running.
 sae_checkpoint: /out/sources/random_matched_note
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-icd_eval_dir: /out/judgetest/random
+icd_eval_dir: /out/necessity/random_matched/seed0/audit_note_matched
 icd_csv_path: /data/sample_50k.csv
 output_dir: /out/auto_interp/judgetest/random
 
