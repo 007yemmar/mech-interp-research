@@ -1,0 +1,29 @@
+{
+  "global": {
+    "yes_count": 86,
+    "partial_count": 239,
+    "no_count": 44,
+    "unknown_count": 11,
+    "total": 380,
+    "concordance_rate": 0.8552631578947368,
+    "exact_match_rate": 0.22631578947368422
+  },
+  "r>0.3": {
+    "yes_count": 86,
+    "partial_count": 180,
+    "no_count": 5,
+    "unknown_count": 9,
+    "total": 280,
+    "concordance_rate": 0.95,
+    "exact_match_rate": 0.30714285714285716
+  },
+  "r>0.5": {
+    "yes_count": 62,
+    "partial_count": 80,
+    "no_count": 0,
+    "unknown_count": 2,
+    "total": 144,
+    "concordance_rate": 0.9861111111111112,
+    "exact_match_rate": 0.4305555555555556
+  }
+}

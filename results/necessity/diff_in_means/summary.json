@@ -1,0 +1,29 @@
+{
+  "n_train": 45089,
+  "n_eval": 4911,
+  "n_codes": 46,
+  "held_out_shard_start": 281,
+  "held_out_shard_end": null,
+  "r_threshold": 0.1,
+  "min_off_pos": 10,
+  "bh_q": 0.05,
+  "diff_in_means": {
+    "median_on_target_r": 0.12131065875291824,
+    "median_specificity_ratio_cneg": 1.226413513776308,
+    "median_n_off_sig_cneg": 17.0,
+    "median_specificity_ratio_allnotes": 1.2466569975891284,
+    "median_n_off_sig_allnotes": 18.0
+  },
+  "saes": {
+    "vanilla": {
+      "median_on_target_r": 0.5736416876316071,
+      "median_specificity_ratio_cneg": 15.88273905111124,
+      "median_n_off_sig_cneg": 2.0,
+      "median_specificity_ratio_allnotes": 13.576326498703683,
+      "median_n_off_sig_allnotes": 4.0,
+      "n_codes_missing_in_npz": 0,
+      "n_eval_notes": 4911
+    }
+  },
+  "verdict_hint": "Primary metric is c-negative (co-occurrence-controlled). SAE wins specificity if, at comparable median_on_target_r, its median_specificity_ratio_cneg > diff_in_means and its median_n_off_sig_cneg < diff_in_means. The *_allnotes fields are the confounded cross-check that should reconcile with a plain correlation matrix (e.g. the .tmp vanilla all-notes ratio)."
+}

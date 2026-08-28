@@ -27,6 +27,10 @@ outputs/
 *.pt
 *.safetensors
 *.npy
+*.npz
+
+# results/ — only aggregate summary JSONs are tracked; row-level CSV / npz /
+# per-note artifacts pulled from Modal stay local (see results/README.md).
 
 # Modal local state
 .modal/

@@ -1,0 +1,117 @@
+{
+  "sae_name": "vanilla_pilot",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 4911,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 12,
+  "n_features_distinct": 12,
+  "n_sig_q05": 10,
+  "median_cliffs_delta_grounded": 0.29986690165033775,
+  "median_cliffs_delta_controls": -0.03556507879199666,
+  "mean_loss_clean": 1.6347653633087866,
+  "mean_loss_recon": 1.6639779580935663,
+  "mean_recon_tax": 0.029212594784779552,
+  "config": {
+    "sae_name": "vanilla_pilot",
+    "sae_checkpoint_dir": "/out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best",
+    "sae_hf_repo_id": null,
+    "sae_hf_filename": null,
+    "is_centered": true,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "centered_activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "mean_path": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt",
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 10520,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.8595
+      },
+      {
+        "feature_idx": 8823,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8581
+      },
+      {
+        "feature_idx": 11055,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.8513
+      },
+      {
+        "feature_idx": 3485,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8309
+      },
+      {
+        "feature_idx": 12655,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8309
+      },
+      {
+        "feature_idx": 3569,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.8305
+      },
+      {
+        "feature_idx": 10471,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.8297
+      },
+      {
+        "feature_idx": 9546,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8289
+      },
+      {
+        "feature_idx": 2868,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8256
+      },
+      {
+        "feature_idx": 13748,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.822
+      },
+      {
+        "feature_idx": 3593,
+        "code": "icd9_25000",
+        "kind": "random_control",
+        "r_pb": null
+      },
+      {
+        "feature_idx": 16773,
+        "code": "icd9_5849",
+        "kind": "low_r_control",
+        "r_pb": -0.1002
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": null,
+    "output_dir": "/out/ablation/vanilla_pilot",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}
