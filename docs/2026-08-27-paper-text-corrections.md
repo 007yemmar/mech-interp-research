@@ -699,3 +699,96 @@ them alone.
 **The C2-f risk is unchanged and still the main threat to the specificity claim:** GemmaScope
 reaches specificity 6.29 at |r| = 0.309, above every one-direction-per-code baseline at
 comparable |r|. C4's matched-|r| restriction remains load-bearing.
+
+---
+
+## C5 — PCA directions ✅ DONE
+
+**Status:** complete. Artifacts in `results/necessity/pca/seed0/` (four arms: dense,
+L0-matched ×2, note-matched), plus `directions_manifest.json`.
+
+**What was built.** `random_matched.pca_directions()` + a `directions_mode: random|pca`
+field on `RandomMatchedConfig`, so PCA runs the **identical** pipeline as the A4 null —
+same Σ, same train shards, same ridge, same projection, same threshold calibration, same
+max-pooling, same splits, same panel, same `AuditConfig`. Only the dictionary differs.
+7 new tests, suite at **406 passed**.
+
+**A labelling bug the tests caught.** `source_name` is written into `audit_summary.json` and
+keys the comparison table; without a fix a PCA run would have been written as
+`random_matched_dense` and silently mislabelled an entire method in the necessity table.
+Added `RandomMatchedConfig.source_prefix`, pinned by test.
+
+### C5-a. **Finding: PCA grounds no better than arbitrary directions in the same geometry**
+
+| | k | median on-target \|r\| | peak \|r\| | spec. ratio | grounded @0.2 / @0.3 / @0.5 |
+|---|---|---|---|---|---|
+| PCA (dense) | 2,304 | **0.141** | **0.441** | 2.88 | 18 / 1 / 0 |
+| random (L0-matched) | 18,432 | 0.149 | 0.314 | 2.12 | 127 / 1 / 0 |
+| random (dense) | 18,432 | 0.219 | 0.431 | 3.00 | 538 / 40 / 0 |
+| vanilla SAE | 18,432 | 0.574 | 0.859 | 15.88 | 2,063 / 675 / 143 |
+
+The principal components of the clinical activation space — the canonical unsupervised linear
+decomposition — reach a median on-target |r| of **0.141**, statistically indistinguishable from
+covariance-matched *random* directions (0.149), and produce **1** grounded direction at
+|r| > 0.3 and **zero** at |r| > 0.5.
+
+**State the search-budget difference honestly**: PCA has 2,304 candidates against random's
+18,432, an 8× smaller search. Per candidate PCA is somewhat better — its peak |r| of 0.441
+exceeds L0-matched random's 0.314 and matches dense random's 0.431 with 8× fewer tries. But the
+conclusion is unchanged: **variance-ordered directions are not clinically grounded directions.**
+This is the cleanest available answer to "preferably PCA or ICA" [AC], and it argues that ICA is
+not worth the spend (see Deferred).
+
+### C5-b. Thresholding is inert for PCA
+
+All three sparsity arms (dense, L0 = 47.57, L0 = 40.92) give **identical** numbers to three
+decimals. Same mechanism already documented for random directions: after max-pooling over
+thousands of tokens, essentially every direction has some token above its threshold, so the
+sparsity match is nominal. Report the dense arm; note the others as a null result rather than
+padding the table with three identical rows.
+
+### C5-c. Correction to the code plan's cost estimate — in the plan's favour
+
+I predicted ~1–1.5 h from the A4 docstring's claim that the projection is I/O-bound on ~140 GB
+of shard reads. **Measured: ~11 minutes**, against ~1h45 for A4 at k = 18,432. Cutting k by 8×
+cut wall time ~9×, so the matmul dominates at k = 18,432 and the run is *not* I/O-bound. The
+code plan's "minutes" estimate was right and the A4 docstring's characterisation is misleading
+for anyone sizing a future run.
+
+---
+
+## Necessity table — twelve sources, one enforced code path
+
+Held-out shards 281–311 (4,911 notes), pinned 46-code panel, identical `AuditConfig` except
+`selection` (which `k` forces: `identity` where k = 46, `top_per_code` otherwise).
+**This is the table for T1/T2.**
+
+| source | k | median \|r\| | peak \|r\| | spec. ratio | n_off_sig | @0.1 | @0.2 | @0.3 | @0.5 |
+|---|---|---|---|---|---|---|---|---|---|
+| diff-in-means (none) | 46 | 0.121 | 0.291 | 1.25 | 17.0 | 46 | 42 | 0 | 0 |
+| diff-in-means (diagonal) | 46 | 0.127 | 0.310 | 1.37 | 17.0 | 46 | 41 | 3 | 0 |
+| diff-in-means (full/LDA) | 46 | 0.339 | 0.699 | 5.68 | 8.0 | 46 | 43 | 28 | 7 |
+| probe LR (balanced) | 46 | 0.327 | 0.630 | 3.67 | 16.5 | 46 | 46 | 32 | 5 |
+| probe LR (unweighted) | 46 | 0.333 | 0.637 | 4.42 | 17.0 | 46 | 46 | 31 | 5 |
+| PCA (dense) | 2,304 | 0.141 | 0.441 | 2.88 | 4.0 | 256 | 18 | 1 | 0 |
+| random (dense) | 18,432 | 0.219 | 0.431 | 3.00 | 13.0 | 10,988 | 538 | 40 | 0 |
+| random (L0-matched) | 18,432 | 0.149 | 0.314 | 2.12 | 12.0 | 9,132 | 127 | 1 | 0 |
+| GemmaScope | 16,384 | 0.309 | 0.545 | 6.29 | 4.0 | 5,790 | 295 | 54 | 4 |
+| **vanilla SAE** | 18,432 | **0.574** | **0.859** | **15.88** | **2.0** | 8,985 | 2,063 | 675 | 143 |
+| **JumpReLU SAE** | 18,432 | **0.574** | **0.864** | **14.94** | **3.0** | 9,721 | 2,075 | 610 | 147 |
+
+**What the table supports, safely:**
+
+1. **No non-SAE source exceeds |r| = 0.70 on any single code**, against the SAE's 0.86 peak and
+   0.574 median. Three label-supervised methods (which see the labels the SAE never does) all
+   plateau together near 0.33.
+2. **At |r| ≥ 0.3 the separation is categorical**: 610–675 SAE features against 28 (best
+   baseline), 1 (PCA), 1–40 (random). At |r| ≥ 0.5: 143–147 against 7, 0, 0.
+3. **The |r| > 0.1 row remains the SAE's weakest**, exactly as T1 says — dense random directions
+   ground *more* latents (10,988) than either SAE.
+
+**What the table does NOT yet support — and must not be claimed until C4:** the raw specificity
+ratio. GemmaScope reaches 6.29 at |r| = 0.309 and PCA reaches 2.88 at |r| = 0.141, while the
+SAEs' 14.9–15.9 sits at |r| = 0.574. Specificity and on-target strength are coupled, so the
+ratio column cannot be read down the page. C4's matched-|r| restriction is the only thing that
+turns it into a claim.

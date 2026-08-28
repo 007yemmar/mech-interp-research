@@ -18,10 +18,12 @@
 # explicitly, not hidden by quietly comparing a 2,304-atom basis to an
 # 18,432-atom one.
 #
-# COST: dominated by shard I/O, not FLOPs -- the projection reads the same
-# ~140 GB the A4 run did, so expect ~1-1.5 h even at 8x fewer directions. The
-# code plan's "minutes" estimate counted only the eigendecomposition. Resumable
-# per shard.
+# COST: ~11 minutes end to end (measured), against ~1h45 for the A4 run at
+# k = 18,432. I predicted 1-1.5 h on the assumption -- taken from the A4
+# docstring -- that the projection is I/O-bound on ~140 GB of shard reads. It is
+# not: cutting k by 8x cut the wall time by ~9x, so the matmul dominates at
+# k = 18,432 and the code plan's "minutes" estimate was right. Resumable per
+# shard regardless.
 #
 # Original A4 note: draws directions from N(0, Sigma) and runs them through the
 # identical pipeline an SAE goes through (project → threshold → max-pool →
