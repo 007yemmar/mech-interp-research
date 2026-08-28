@@ -1278,3 +1278,76 @@ def test_select_features_default_is_unchanged_by_the_new_parameter() -> None:
     a = select_features(*args, seed=42)
     b = select_features(*args, seed=42, explicit_features=None)
     assert a == b
+
+
+def test_get_strongest_icd_uses_argmax_by_default() -> None:
+    """Without an override the code is chosen by argmax|r| — the SAE's rule."""
+    import numpy as np
+    import pytest
+
+    from mech_interp_research.auto_interp import _get_strongest_icd
+
+    r_pb = np.array([[0.2, -0.7, 0.5]])
+    code, r = _get_strongest_icd(0, r_pb, ["icd9_a", "icd9_b", "icd9_c"])
+    assert code == "icd9_b"
+    assert r == pytest.approx(-0.7)
+
+
+def test_get_strongest_icd_honours_by_construction_pairing() -> None:
+    """An override pins the code AND returns that code's r, not the argmax r."""
+    import numpy as np
+    import pytest
+
+    from mech_interp_research.auto_interp import _get_strongest_icd
+
+    r_pb = np.array([[0.2, -0.7, 0.5]])
+    code, r = _get_strongest_icd(
+        0, r_pb, ["icd9_a", "icd9_b", "icd9_c"], pairing_override={0: "icd9_c"}
+    )
+    assert code == "icd9_c"
+    assert r == pytest.approx(0.5)
+
+
+def test_get_strongest_icd_falls_back_when_override_code_is_absent() -> None:
+    """An override naming a code outside the panel must not crash the run."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import _get_strongest_icd
+
+    r_pb = np.array([[0.2, -0.7, 0.5]])
+    code, _ = _get_strongest_icd(
+        0, r_pb, ["icd9_a", "icd9_b", "icd9_c"], pairing_override={0: "icd9_zzz"}
+    )
+    assert code == "icd9_b"
+
+
+def test_select_features_accepts_feature_code_tuples() -> None:
+    """(feature_id, code_name) pairs select the same ids as bare ints."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import select_features
+
+    rng = np.random.default_rng(3)
+    d_sae, n_codes = 40, 4
+    args = (
+        rng.normal(scale=0.2, size=(d_sae, n_codes)),
+        np.full((d_sae, n_codes), 0.5),
+        np.zeros((d_sae, n_codes), dtype=bool),
+        [f"icd9_{i}" for i in range(n_codes)],
+        rng.random(size=(50, d_sae)),
+    )
+
+    bare = select_features(*args, explicit_features=[3, 11, 29])
+    tupled = select_features(
+        *args, explicit_features=[(3, "icd9_0"), (11, "icd9_1"), (29, "icd9_2")]
+    )
+    assert (
+        bare
+        == tupled
+        == {
+            "strong_grounded": [3, 11, 29],
+            "weak_grounded": [],
+            "non_grounded": [],
+            "dead": [],
+        }
+    )

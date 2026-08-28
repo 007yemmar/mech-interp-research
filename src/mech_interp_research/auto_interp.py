@@ -52,7 +52,7 @@ def select_features(
     weak_lo: float = 0.1,
     weak_hi: float = 0.3,
     seed: int = 42,
-    explicit_features: list[int] | None = None,
+    explicit_features: list[int] | list[tuple[int, str]] | None = None,
 ) -> dict[str, list[int]]:
     """Select features in four tiers for auto-interp.
 
@@ -82,7 +82,7 @@ def select_features(
         'dead', each mapping to a list of feature indices.
     """
     if explicit_features is not None:
-        ids = [int(i) for i in explicit_features]
+        ids = [int(f[0]) if isinstance(f, tuple | list) else int(f) for f in explicit_features]
         logger.info("Explicit feature list supplied (%d features); skipping tiering.", len(ids))
         return {
             "strong_grounded": ids,
@@ -1259,9 +1259,33 @@ def _get_strongest_icd(
     feature_idx: int,
     r_pb: np.ndarray,
     code_names: list[str],
+    pairing_override: dict[int, str] | None = None,
 ) -> tuple[str, float]:
-    """Return (code_name, r_pb) for the feature's strongest ICD correlation."""
+    """Return (code_name, r_pb) for the code this feature is judged against.
+
+    By default the code is chosen by ``argmax|r|`` — the selection rule the SAE
+    arms are under test for. ``pairing_override`` supplies a **by-construction**
+    pairing instead, for sources where the direction for code *c* was built from
+    code *c* and the correct answer is therefore known in advance. Control arms
+    need this: with argmax a keyword direction can be judged against a comorbid
+    code and earn a correct NO, which would be read as the judge failing rather
+    than the pairing being wrong.
+
+    The returned r is always this feature's correlation with the *returned*
+    code, not the argmax one, so the reported value matches what was judged.
+    """
     row = r_pb[feature_idx]
+    if pairing_override is not None and feature_idx in pairing_override:
+        code = pairing_override[feature_idx]
+        if code in code_names:
+            idx = code_names.index(code)
+            return code, float(row[idx])
+        logger.warning(
+            "pairing_override names %r for feature %d, which is not in the code "
+            "panel; falling back to argmax",
+            code,
+            feature_idx,
+        )
     best_idx = int(np.argmax(np.abs(row)))
     return code_names[best_idx], float(row[best_idx])
 
@@ -1331,6 +1355,7 @@ def _fill_missing_scores(
     n_contexts_train: int,
     n_contexts_test: int,
     context_window: int,
+    pairing_override: dict[int, str] | None = None,
 ) -> dict:
     """Re-run only the null/failed scored fields from an existing checkpoint.
 
@@ -1417,7 +1442,7 @@ def _fill_missing_scores(
         "strong_grounded",
         "weak_grounded",
     ):
-        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names)
+        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names, pairing_override)
         icd_code_clean = icd_code.replace("icd9_", "")
         icd_desc = code_descriptions.get(icd_code_clean, icd_code_clean)
         conc_verdict, conc_rationale = check_concordance(
@@ -1452,6 +1477,7 @@ def _process_one_feature(
     n_contexts_train: int,
     n_contexts_test: int,
     context_window: int,
+    pairing_override: dict[int, str] | None = None,
     min_contexts: int = 5,
 ) -> dict:
     """Process a single feature: explain → score → categorize → concordance.
@@ -1504,7 +1530,7 @@ def _process_one_feature(
     conc_r_pb_val = None
 
     if tier in ("strong_grounded", "weak_grounded") and explanation:
-        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names)
+        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names, pairing_override)
         icd_code_clean = icd_code.replace("icd9_", "")
         icd_desc = code_descriptions.get(icd_code_clean, icd_code_clean)
 
@@ -1597,7 +1623,7 @@ def run_auto_interp(
     scorers: list[str] | None = None,
     concordance_thresholds: list[float] | None = None,
     random_seed: int = 42,
-    explicit_features: list[int] | None = None,
+    explicit_features: list[int] | list[tuple[int, str]] | None = None,
     icd_descriptions_path: str | None = None,
     icd_keywords_yaml_path: str | None = None,
     model_name: str = "google/gemma-2-2b",
@@ -1659,6 +1685,18 @@ def run_auto_interp(
     logger.info(f"Total features to process: {len(feature_list)}")
 
     metadata = load_metadata(Path(activations_dir))
+
+    # A (feature_id, code_name) list means the caller knows which code each
+    # direction was built for, so concordance must judge against that code
+    # rather than argmax|r|. Bare ints keep the argmax rule unchanged.
+    pairing_override: dict[int, str] | None = None
+    if explicit_features and isinstance(explicit_features[0], tuple | list):
+        pairing_override = {int(f[0]): str(f[1]) for f in explicit_features}
+        logger.info(
+            "By-construction pairing supplied for %d features; concordance will "
+            "not use argmax|r| for them.",
+            len(pairing_override),
+        )
 
     all_feature_ids = [fid for fid, _ in feature_list]
     shard_map = select_shards_for_features(note_vectors, metadata, all_feature_ids)
@@ -1775,6 +1813,7 @@ def run_auto_interp(
                             n_contexts_train=n_contexts_train,
                             n_contexts_test=n_contexts_test,
                             context_window=max_tokens_context,
+                            pairing_override=pairing_override,
                         )
                         _write_json(existing, ckpt_path)
                     except Exception:
@@ -1803,6 +1842,7 @@ def run_auto_interp(
                     n_contexts_train=n_contexts_train,
                     n_contexts_test=n_contexts_test,
                     context_window=max_tokens_context,
+                    pairing_override=pairing_override,
                 )
                 _write_json(result, ckpt_path)
                 feature_results.append(result)

@@ -1,0 +1,34 @@
+# LLM explanation + concordance for dim_full. THIS IS THE DELIVERABLE STAGE.
+#
+# explicit_features carries (feature_id, code_name) pairs, not bare ints, so
+# concordance judges each direction against the code it was BUILT for rather
+# than argmax|r|. Control arms need this: with argmax a keyword direction can
+# be judged against a comorbid code and earn a correct NO, which would read as
+# the judge failing rather than the pairing being wrong. Populate it from the
+# arm's selected_features.csv / top_associations.csv before running.
+sae_checkpoint: /out/sources/dim_full
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/icd_eval/fourarm/dim_full
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/fourarm/dim_full
+
+explicit_features: null    # <- fill with [[feature_id, "icd9_XXXX"], ...]
+
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+scorers:
+  - fuzzing
+  - detection
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+max_workers: 3        # tier-1 org: 50 RPM. More will 429-storm and drop features.
+checkpoint_dir: null
+logging_level: INFO

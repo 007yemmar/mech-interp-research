@@ -269,13 +269,34 @@ def _load_pooled_and_labels(config: dict[str, Any], held_out_start: int):
 
 
 def _build_diff_in_means(config: dict[str, Any], held_out_start: int, log: Any):
-    from mech_interp_research.feature_sources import build_diff_in_means_variants
+    """Diff-in-means directions, either this module's variants or the whitened suite.
 
+    ``whiten`` (none | diagonal | full) routes to ``diff_in_means_baseline.
+    build_directions``, which applies a metric M to the mean difference. The
+    necessity suite measured all three on the same 4,911 audit notes: plain
+    0.121 and diagonal 0.127 both sit BELOW the random-dense null of 0.219,
+    while full-covariance whitening reaches 0.339. Prefer ``whiten: full``;
+    the ``variant`` path is kept for reproducing the earlier numbers.
+    """
     X, Y, code_names, _, sel, _ = _load_pooled_and_labels(config, held_out_start)
-    variant = config.get("variant", "v2_zscored")
-    W = build_diff_in_means_variants(X[sel], Y[sel], variant=variant)
-    log.info("diff-in-means %s: W %s over %d selection notes", variant, W.shape, int(sel.sum()))
-    return W, {"variant": variant, "code_names": code_names, "n_selection_notes": int(sel.sum())}
+    whiten = config.get("whiten")
+
+    if whiten:
+        from mech_interp_research.diff_in_means_baseline import build_directions
+
+        W = build_directions(X[sel], Y[sel], whiten=whiten)
+        label = f"whiten={whiten}"
+        meta_extra = {"whiten": whiten}
+    else:
+        from mech_interp_research.feature_sources import build_diff_in_means_variants
+
+        variant = config.get("variant", "v2_zscored")
+        W = build_diff_in_means_variants(X[sel], Y[sel], variant=variant)
+        label = variant
+        meta_extra = {"variant": variant}
+
+    log.info("diff-in-means %s: W %s over %d selection notes", label, W.shape, int(sel.sum()))
+    return W, {**meta_extra, "code_names": code_names, "n_selection_notes": int(sel.sum())}
 
 
 # ---------------------------------------------------------------------------
