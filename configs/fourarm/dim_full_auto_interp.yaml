@@ -29,6 +29,9 @@ concordance_thresholds: [0.3, 0.4, 0.5]
 icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
 
 model_name: google/gemma-2-2b
-max_workers: 3        # tier-1 org: 50 RPM. More will 429-storm and drop features.
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
 checkpoint_dir: null
 logging_level: INFO
