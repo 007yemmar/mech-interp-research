@@ -1,0 +1,16 @@
+{
+  "shards_used": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "n_sigma_tokens": 1986733,
+  "n_token_sample": 250000,
+  "d_model": 2304,
+  "trace": 30187.606442728462,
+  "mean_variance": 13.102259740767561,
+  "max_variance": 3950.182060699651,
+  "min_variance": 4.977938608887052,
+  "mean_abs_offdiag": 0.5124413883675154
+}

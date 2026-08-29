@@ -1,0 +1,3 @@
+{"type":"server-started","port":60441,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:60441","screen_dir":"/Users/mohitgupta/Documents/GitHub/mech-interp-research/.superpowers/brainstorm/13844-1779341169/content","state_dir":"/Users/mohitgupta/Documents/GitHub/mech-interp-research/.superpowers/brainstorm/13844-1779341169/state"}
+{"type":"screen-added","file":"/Users/mohitgupta/Documents/GitHub/mech-interp-research/.superpowers/brainstorm/13844-1779341169/content/01-superposition.html"}
+{"type":"server-stopped","reason":"idle timeout"}

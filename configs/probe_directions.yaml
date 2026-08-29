@@ -1,0 +1,78 @@
+# Supervised probe directions (code plan C3, plan item A2).
+#
+# WHY
+# ---
+# raw_lr_baseline already reports mean AUC-ROC 0.808 for a per-code logistic
+# probe on the pooled 2,304-d activations -- but only as a CLASSIFIER. Its
+# fitted weight vector was never used as a direction and never audited. The
+# meta-review named supervised probes explicitly, and R1 asked for baselines
+# compared on audit properties rather than prediction.
+#
+# TWO CORRECTIONS TO THE PUBLISHED PROBE
+# --------------------------------------
+# 1. The 0.808 run used 5-fold CV across all 50,000 notes, so its fits had
+#    already seen shards 281-311. Reusing them would make held-out grounding
+#    circular. Here the probe is refit on shards [31, 281) only.
+# 2. That run fitted LR on unstandardized features with an isotropic L2 penalty,
+#    in a space whose per-dimension variance spans 104x (measured in C2). That
+#    is not one penalty, it is 2,304 different ones. Here features are
+#    standardized with TRAIN statistics and the coefficient is mapped back to
+#    raw space as coef/sigma, so the emitted source projects from the unmodified
+#    pooled vectors.
+#
+# WHAT C SELECTION MEANS HERE
+# ---------------------------
+# For centered X, beta_ridge is proportional to (Sigma + (lambda/n) I)^-1 d.
+# So C is not a nuisance knob: it interpolates between the plain difference of
+# class means (strong penalty) and the Sigma^-1 d / LDA form (weak penalty) --
+# the two endpoints C2 measured at 0.121 and 0.339. Selecting C on the audit
+# split would be selection on the reported statistic, so it is chosen by
+# stratified CV on train only.
+#
+# Run:
+#   modal run modal_app/probe_directions.py --config-file configs/probe_directions.yaml
+# Then add the arms to configs/necessity_audit_directions.yaml and run:
+#   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_directions.yaml
+
+raw_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+output_dir: /out/necessity/probe_directions
+
+# Two arms so class weighting is reported rather than assumed. Panel prevalence
+# runs 0.043-0.386, so it is a live question, not a formality.
+arms:
+  - name: balanced
+    class_weight: balanced
+  - name: unweighted
+    class_weight: null
+
+# NOTE: the first run used [0.001, 0.01, 0.1, 1.0] and selected 0.001 for all 46
+# codes in both arms -- the grid's lower boundary, so the optimum was outside it
+# and the selection was not really a selection. Extended downward until the
+# chosen C is interior. sklearn penalizes with 1/C against a SUMMED loss, so the
+# effective strength is 1/(C*n); at n = 40,088 even C = 1e-3 is a weak penalty.
+c_grid: [0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1]
+cv_folds: 3
+# The C search runs on a 15,000-note subsample of train; the refit at the chosen
+# C always uses all ~40,000. Selecting one scalar does not need the full split,
+# and this is what keeps the run in minutes rather than hours.
+cv_subsample: 15000
+max_iter: 2000
+random_state: 0
+
+# Same disjoint splits as the diff-in-means arms, so the two are comparable.
+train_shard_start: 31
+train_shard_end: 281
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+logging_level: INFO

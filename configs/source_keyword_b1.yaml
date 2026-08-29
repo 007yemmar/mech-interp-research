@@ -1,0 +1,49 @@
+# Feature source: keyword_b1 -- undiluted keyword-mean token directions.
+#
+# For each ICD-9 code, scans a deterministic sample of selection shards for
+# tokens matching the code's ONE core keyword (icd9_keywords_improved.yaml,
+# keywords[0] -- "first keyword under `# Core terms`", spec Sec 4.2.1; the
+# rest of that code's keyword list is deliberately unused) and averages the
+# activations at those token positions into a unit-norm direction. This is
+# the sensitivity ceiling control: an unmistakable lexical signal that
+# concordance judges should reliably accept.
+#
+# Codes with fewer than min_token_positions matched tokens are reported as
+# underpowered in source_meta.json (not dropped or errored).
+#
+# Run:
+#   uv run modal run modal_app/build_feature_source.py --config-file configs/source_keyword_b1.yaml
+
+arm: keyword_b1
+output_dir: /out/sources/keyword_b1
+
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+model_name: google/gemma-2-2b
+text_col: note_text
+max_length: 8192
+
+# Reference JumpReLU SAE's pooled-vector checkpoints -- see
+# source_diff_in_means.yaml for what this drives (Arm C selection +
+# note-level calibration target, shared by every arm).
+sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
+
+held_out_shard_start: 281
+
+target_density: 0.002220     # reported-only, see source_diff_in_means.yaml
+calibration_n_shards: 6
+calibration_notes_per_shard: 50    # whole notes per shard, NOT a token count (see build_feature_source.py:_sample_tokens)
+
+scan_n_shards: 24            # selection shards scanned for keyword occurrences
+min_token_positions: 200     # below this, a code is reported as underpowered
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+seed: 42
+logging_level: INFO

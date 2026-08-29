@@ -1,0 +1,39 @@
+# Multi-judge discriminative concordance (post-hoc; reuses the completed run).
+# Run: uv run modal run modal_app/concordance_multi_judge.py --config-file configs/concordance_multi_judge.yaml
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_eval_dir:    /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: null   # null -> <auto_interp_dir>/multi_judge
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+# Only reachable judges: this account's OpenRouter key is 403'd on openai/*,
+# anthropic/* and google/*, so gpt-4o, gpt-5.1 and gemini are unavailable.
+# sonnet is 'reuse' (its verdicts come from the auto-interp stage).
+judges:
+  - {slug: sonnet-4-6,  backend: reuse}
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+
+thresholds: [0.3, 0.4, 0.5]
+n_candidates: 5
+n_hard_neg: 3
+seed: 42
+run_shuffled: true
+max_workers: 6
+
+# Arm 6 (independent explainer). Route is the operator's choice.
+# Arm 6 -- INDEPENDENT SECOND EXPLAINER. Every explanation in the study so far
+# is Sonnet-generated; if the EXPLAINER rather than the judge is the bottleneck,
+# no judge-side experiment can detect it. DeepSeek is a different model family,
+# so a re-explanation that concords similarly rules the explainer out.
+arm6:
+  enabled: true
+  model: deepseek/deepseek-chat
+  route: openrouter
+  sample: 120
+# needed only if arm6.enabled — to resolve note fragments:
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+model_name: google/gemma-2-2b
+join_key: admission_id
+text_col: note_text
+
+logging_level: INFO

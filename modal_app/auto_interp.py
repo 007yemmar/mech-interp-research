@@ -29,7 +29,16 @@ DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
     cpu=DEFAULT_CPU,
     memory=16384,
     timeout=28800,
-    secrets=[modal.Secret.from_name("anthropic-api-key"), hf_secret],
+    # Both are attached so llm_backend can pick either without redeploying. A
+    # missing key only matters for the backend actually selected.
+    secrets=[
+        # mohit-gupta2002's own key. The shared "anthropic-api-key" secret belongs
+        # to a collaborator and is out of credits; leaving it untouched keeps their
+        # other entrypoints working.
+        modal.Secret.from_name("anthropic-api-key-mohit"),
+        modal.Secret.from_name("openrouter-api-key"),
+        hf_secret,
+    ],
     volumes={
         "/out": artifacts_volume,
         "/data": raw_volume,

@@ -1,0 +1,25 @@
+# Judge-validity pool for random. Features are |r|-MATCHED across arms (median
+# |delta r| = 0.0000), so any difference in the judge's verdicts is about the
+# CONTENT of the explanation rather than the correlation the prompt states.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/sources/random_matched_note
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/judgetest/random_hard
+output_dir: /out/judgetest/random_hard/feature_inspection
+shard_ckpt_dir: /out/necessity/random_matched/seed0/shard_ckpt_audit
+
+model_name: google/gemma-2-2b
+max_length: 8192
+n_pairs: 300
+top_k: 50
+context_window: 5
+n_shards: 20
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+text_col: note_text
+rng_seed: 42
+logging_level: INFO

@@ -1,0 +1,163 @@
+{
+  "raw_ckpt_dir": "/out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt",
+  "code_names": [
+    "icd9_4019",
+    "icd9_2724",
+    "icd9_53081",
+    "icd9_4280",
+    "icd9_25000",
+    "icd9_42731",
+    "icd9_41401",
+    "icd9_V1582",
+    "icd9_5849",
+    "icd9_311",
+    "icd9_2449",
+    "icd9_40390",
+    "icd9_2859",
+    "icd9_V5861",
+    "icd9_3051",
+    "icd9_2720",
+    "icd9_5990",
+    "icd9_32723",
+    "icd9_V5867",
+    "icd9_5859",
+    "icd9_30000",
+    "icd9_V4582",
+    "icd9_412",
+    "icd9_V5866",
+    "icd9_49390",
+    "icd9_496",
+    "icd9_27800",
+    "icd9_V4581",
+    "icd9_2761",
+    "icd9_73300",
+    "icd9_486",
+    "icd9_V4986",
+    "icd9_2749",
+    "icd9_41400",
+    "icd9_V1251",
+    "icd9_2851",
+    "icd9_33829",
+    "icd9_V1254",
+    "icd9_27651",
+    "icd9_2762",
+    "icd9_60000",
+    "icd9_56400",
+    "icd9_3572",
+    "icd9_5856",
+    "icd9_42789",
+    "icd9_2875"
+  ],
+  "n_codes": 46,
+  "whiten_arms": [
+    "none",
+    "diagonal",
+    "full"
+  ],
+  "shrinkage_setting": "ledoit_wolf",
+  "train_shards": [
+    31,
+    281
+  ],
+  "select_shards": [
+    0,
+    31
+  ],
+  "audit_shards": [
+    281,
+    312
+  ],
+  "n_train_notes": 40088,
+  "covariance": {
+    "n_train": 40088,
+    "d": 2304,
+    "shrinkage": 0.0009710168485815325,
+    "shrinkage_target_mu": 2.10496588151143,
+    "var_max": 220.4451573995197,
+    "var_min": 0.0,
+    "var_mean": 2.10496588151143,
+    "var_max_over_mean": 104.72623776744226,
+    "condition_number_raw": 6.942838941790394e+16,
+    "condition_number": 372305.60368865996
+  },
+  "arms": {
+    "none": {
+      "checkpoint_dir": "/out/necessity/diff_in_means_whitened/dm_none/shard_ckpt",
+      "directions_npy": "/out/necessity/diff_in_means_whitened/dm_none/directions.npy",
+      "n_features": 46,
+      "n_zero_columns": 0,
+      "select": {
+        "output_dir": "/out/necessity/diff_in_means_whitened/dm_none/shard_ckpt",
+        "n_shards": 31,
+        "shard_range": [
+          0,
+          30
+        ],
+        "n_notes": 5001,
+        "n_features": 46
+      },
+      "audit": {
+        "output_dir": "/out/necessity/diff_in_means_whitened/dm_none/shard_ckpt",
+        "n_shards": 31,
+        "shard_range": [
+          281,
+          311
+        ],
+        "n_notes": 4911,
+        "n_features": 46
+      }
+    },
+    "diagonal": {
+      "checkpoint_dir": "/out/necessity/diff_in_means_whitened/dm_diagonal/shard_ckpt",
+      "directions_npy": "/out/necessity/diff_in_means_whitened/dm_diagonal/directions.npy",
+      "n_features": 46,
+      "n_zero_columns": 0,
+      "select": {
+        "output_dir": "/out/necessity/diff_in_means_whitened/dm_diagonal/shard_ckpt",
+        "n_shards": 31,
+        "shard_range": [
+          0,
+          30
+        ],
+        "n_notes": 5001,
+        "n_features": 46
+      },
+      "audit": {
+        "output_dir": "/out/necessity/diff_in_means_whitened/dm_diagonal/shard_ckpt",
+        "n_shards": 31,
+        "shard_range": [
+          281,
+          311
+        ],
+        "n_notes": 4911,
+        "n_features": 46
+      }
+    },
+    "full": {
+      "checkpoint_dir": "/out/necessity/diff_in_means_whitened/dm_full/shard_ckpt",
+      "directions_npy": "/out/necessity/diff_in_means_whitened/dm_full/directions.npy",
+      "n_features": 46,
+      "n_zero_columns": 0,
+      "select": {
+        "output_dir": "/out/necessity/diff_in_means_whitened/dm_full/shard_ckpt",
+        "n_shards": 31,
+        "shard_range": [
+          0,
+          30
+        ],
+        "n_notes": 5001,
+        "n_features": 46
+      },
+      "audit": {
+        "output_dir": "/out/necessity/diff_in_means_whitened/dm_full/shard_ckpt",
+        "n_shards": 31,
+        "shard_range": [
+          281,
+          311
+        ],
+        "n_notes": 4911,
+        "n_features": 46
+      }
+    }
+  }
+}

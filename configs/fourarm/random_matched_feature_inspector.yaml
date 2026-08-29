@@ -1,0 +1,28 @@
+# Token-level contexts for random_matched — feeds the LLM explainer.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/sources/random_matched_note
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/necessity/random_matched/seed0/audit_note_matched
+output_dir: /out/necessity/random_matched/seed0/audit_note_matched/feature_inspection
+
+model_name: google/gemma-2-2b
+max_length: 8192
+
+n_pairs: 46          # one direction per code
+top_k: 50
+context_window: 5
+n_shards: 20         # of the 31 audit shards
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+text_col: note_text
+
+# Audit-split pooled vectors (31 shards, 281-311). The necessity suite writes
+# these beside the run rather than inside the eval dir, hence the override.
+shard_ckpt_dir: /out/necessity/random_matched/seed0/shard_ckpt_audit
+
+rng_seed: 42
+logging_level: INFO

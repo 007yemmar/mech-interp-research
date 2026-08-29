@@ -1,0 +1,32 @@
+# Token-level contexts for sae_jumprelu — feeds the LLM explainer.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/necessity/sae_audit/sae_jumprelu
+output_dir: /out/necessity/sae_audit/sae_jumprelu/feature_inspection
+
+model_name: google/gemma-2-2b
+max_length: 8192
+
+n_pairs: 46          # one direction per code
+top_k: 50
+context_window: 5
+n_shards: 20         # of the 31 audit shards
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+text_col: note_text
+
+# KNOWN ASYMMETRY: this ckpt holds all 312 shards while Arm A's holds only the
+# 31 audit shards, so with n_shards: 20 Arm C selects its context shards from a
+# 10x larger pool and may draw better-activating examples. Contexts feed the
+# explainer only -- no scored statistic is computed from them -- but if the two
+# arms' explanation quality diverges, write an audit-only shard_ckpt for C
+# before drawing conclusions from the gap.
+shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+
+rng_seed: 42
+logging_level: INFO

@@ -1,0 +1,70 @@
+# TF-IDF as an AUDITED source (code plan C8, plan item A3).
+#
+# WHY
+# ---
+# All three reviewers read section 4.3 as "TF-IDF beats the SAE". What exists is
+# exclusively classification -- classification_auc_roc, classification_auc_pr,
+# Wilcoxon, and a supplementary best-feature correlation; `grep -E
+# 'off_target|monospecif'` over tfidf_lr_baseline.py returned zero matches. The
+# reply is that beating the SAE at PREDICTION is a different claim from being a
+# better AUDIT UNIT, and settling it means running TF-IDF through the same
+# grounding / off-target / monospecificity instruments as every other source.
+#
+# Reframed this way, TF-IDF with 10,000 supervised n-grams is a CEILING ON HOW
+# MUCH SURFACE SIGNAL EXISTS IN THE TEXT, not a rival interpretability method.
+# Its classification win (0.917) becomes the expected result.
+#
+# TWO DESIGN POINTS THAT DECIDE FAIRNESS
+# --------------------------------------
+# 1. The vectoriser is fitted on TRAIN shards only. Vocabulary selection and IDF
+#    weights are both learned from data; deriving them from the audit notes
+#    would leak, exactly as the published probe's 5-fold CV over all 50,000
+#    notes leaked (see the C3 run log).
+# 2. ALL 10,000 n-grams are emitted, not one winner per code. The code plan
+#    proposed auditing `best_tfidf_feature` with selection: identity. That would
+#    HIDE the search budget: TF-IDF picking the best of 10,000 candidates per
+#    code is the same kind of search the SAE gets over 18,432 features. Emitting
+#    the full matrix lets the harness's top_per_code rule reproduce the search
+#    honestly on the selection split, which is the like-for-like comparison.
+#    This is a deliberate deviation from the plan, in the direction that favours
+#    the baseline.
+#
+# Two arms, because the choice is not obvious and should not be made silently:
+#   value  -- the TF-IDF weight (what the published best_r_tfidf was computed on)
+#   binary -- presence/absence, the plan's "indicator"
+#
+# Run:
+#   modal run modal_app/tfidf_directions.py --config-file configs/tfidf_directions.yaml
+#   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_tfidf.yaml
+
+# shard_ckpt/ is the authority on which note sits in which shard; the pooled
+# vectors in it are not used.
+checkpoint_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+output_dir: /out/necessity/tfidf_sources
+
+text_col: note_text
+
+# Matches the published TF-IDF baseline's settings so the audited features are
+# the same features the 0.917 AUC was computed on.
+max_features: 10000
+ngram_range: [1, 2]
+sublinear_tf: true
+min_df: 5
+
+# Same disjoint splits as the diff-in-means and probe sources.
+train_shard_start: 31
+train_shard_end: 281
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+logging_level: INFO

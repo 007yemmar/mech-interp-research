@@ -1,0 +1,39 @@
+# PCA directions (Rishit's C5) -> pseudo-SAE checkpoint for the judge pipeline.
+#
+# PCA is the most informative non-SAE source for the judge-validity question
+# because k=2304 supports the same |r| stratification as the SAE. The
+# one-direction-per-code sources (diff-in-means, probe) have only 46 features
+# and cannot fill five buckets, so they can only be compared at whole-arm level.
+#
+# The question this arm answers: concordance YES tracks |r| for the SAE
+# (0% -> 68% across 0.2 -> 0.6+). Is that relationship SAE-specific, or does ANY
+# direction at |r| 0.6 earn 68% YES? If PCA matches the SAE curve, concordance
+# is measuring correlation strength rather than anything the SAE contributes.
+#
+# Uses note_matched thresholds for the same reason the random arm does:
+# correlation is computed after max-pooling, so note-level detection rate is what
+# has to match the SAE, not token-level density.
+#
+# Run:
+#   uv run modal run modal_app/import_direction_source.py \
+#       --config-file configs/import_pca.yaml
+
+arm: pca
+directions_npy: /out/necessity/pca/seed0/directions.npy
+thresholds_npy: /out/necessity/pca/seed0/thresholds_note_matched.npy
+source_manifest_json: /out/necessity/pca/seed0/directions_manifest.json
+output_dir: /out/sources/pca_note
+
+expect_d_model: 2304
+
+provenance_note: >
+  2304 PCA components of the layer-16 activation covariance, estimated on train
+  shards only (effective_rank 2304, condition number 2.2e4, no negative
+  eigenvalues). Thresholds calibrated to the SAE's per-feature note-level
+  density. Audit artifacts already exist at
+  /out/necessity/pca/seed0/audit_note_matched/ and should be used as the
+  eval_output_dir rather than re-running icd_eval.
+
+nonfinite_threshold_policy: inert
+
+logging_level: INFO

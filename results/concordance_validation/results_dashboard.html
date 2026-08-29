@@ -1,0 +1,475 @@
+
+<title>Concordance Validation Results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#fbfcfd; --surface:#f1f5f8; --ink:#0d1520; --muted:#56687b; --rule:#dce3ea;
+  --accent:#0d5c6b; --accent-soft:#e3f0f2; --good:#1a6b47; --bad:#a3232c;
+  --hi-bg:#e6f2ec; --lo-bg:#fbeaea;
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  --serif:"IBM Plex Serif",Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0b1016; --surface:#141c25; --ink:#dce5ed; --muted:#8b9cad; --rule:#243040;
+  --accent:#4fb3c4; --accent-soft:#122a30; --good:#4ec08a; --bad:#e2757c;
+  --hi-bg:#122a20; --lo-bg:#2a1418;
+}}
+:root[data-theme="dark"]{
+  --paper:#0b1016; --surface:#141c25; --ink:#dce5ed; --muted:#8b9cad; --rule:#243040;
+  --accent:#4fb3c4; --accent-soft:#122a30; --good:#4ec08a; --bad:#e2757c;
+  --hi-bg:#122a20; --lo-bg:#2a1418;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}
+header{padding:56px 0 28px;border-bottom:2px solid var(--ink)}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(28px,4vw,42px);line-height:1.12;
+  margin:0 0 10px;text-wrap:balance;letter-spacing:-.015em}
+.sub{color:var(--muted);max-width:64ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:4px 9px;border:1px solid var(--rule);
+  border-radius:3px;color:var(--muted);background:var(--surface)}
+nav{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:1px solid var(--rule);
+  padding:11px 0;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+nav a{font-size:12.5px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:3px}
+nav a:hover{color:var(--accent);background:var(--accent-soft)}
+nav .spacer{flex:1}
+.toggle{display:flex;gap:0;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.toggle button{font-family:var(--sans);font-size:12px;padding:5px 12px;border:0;cursor:pointer;
+  background:var(--paper);color:var(--muted)}
+.toggle button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.toggle button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+section{margin:48px 0 0;scroll-margin-top:64px}
+h2{font-family:var(--serif);font-size:24px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+h2 .k{font-family:var(--mono);font-size:12px;color:var(--accent);display:block;
+  letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;font-weight:500}
+.lede{color:var(--muted);max-width:72ch;margin:0 0 20px}
+.findings{list-style:none;padding:0;margin:28px 0 0;counter-reset:f}
+.findings li{counter-increment:f;position:relative;padding:16px 0 16px 52px;border-top:1px solid var(--rule)}
+.findings li::before{content:counter(f,decimal-leading-zero);position:absolute;left:0;top:16px;
+  font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500}
+.findings b{font-weight:600}
+.findings .why{display:block;color:var(--muted);font-size:14px;margin-top:3px}
+.scroll{overflow-x:auto;border:1px solid var(--rule);border-radius:5px;margin:16px 0 6px;background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:8px 11px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--rule)}
+th{background:var(--surface);font-weight:600;font-size:11.5px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--muted);position:sticky;top:0}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--paper);z-index:1}
+th:first-child{background:var(--surface);z-index:2}
+tbody tr:hover td{background:var(--surface)}
+tbody tr:hover td:first-child{background:var(--surface)}
+td b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
+td.arm{font-weight:500}
+td.dim,td .n{color:var(--muted)}
+td .n{font-family:var(--mono);font-size:10.5px;margin-left:6px;font-variant-numeric:tabular-nums}
+td.jd{font-size:12px;color:var(--muted)}
+td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+td.hi{background:var(--hi-bg)} td.lo{background:var(--lo-bg)}
+td.good b{color:var(--good)} td.bad b{color:var(--bad)}
+.sig-y{color:var(--good);font-weight:600;font-family:var(--mono);font-size:12px}
+.sig-n{color:var(--muted);font-family:var(--mono);font-size:12px}
+.na{color:var(--muted)}
+.fam{display:inline-block;font-family:var(--mono);font-size:9.5px;padding:1px 5px;margin-left:7px;
+  border-radius:2px;background:var(--surface);color:var(--muted);border:1px solid var(--rule);
+  text-transform:uppercase;letter-spacing:.05em;vertical-align:1px}
+.note{font-size:13px;color:var(--muted);margin:0 0 22px;max-width:78ch}
+.callout{border-left:3px solid var(--accent);background:var(--accent-soft);padding:14px 18px;
+  margin:20px 0;border-radius:0 4px 4px 0;font-size:14px}
+.callout b{color:var(--accent)}
+.grid2{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin:20px 0}
+.card{border:1px solid var(--rule);border-radius:5px;padding:16px 18px;background:var(--surface)}
+.card h4{margin:0 0 4px;font-size:13px;font-family:var(--mono);color:var(--accent);
+  text-transform:uppercase;letter-spacing:.06em;font-weight:500}
+.card p{margin:0;font-size:13.5px;color:var(--muted)}
+.card .big{font-family:var(--mono);font-size:26px;font-weight:500;color:var(--ink);
+  display:block;margin:2px 0 4px;font-variant-numeric:tabular-nums}
+ol.plan{padding-left:0;list-style:none;counter-reset:p}
+ol.plan li{counter-increment:p;padding:14px 0 14px 46px;border-top:1px solid var(--rule);position:relative}
+ol.plan li::before{content:"§" counter(p);position:absolute;left:0;top:14px;font-family:var(--mono);
+  font-size:12px;color:var(--accent)}
+ol.plan b{font-weight:600}
+ol.plan span{display:block;color:var(--muted);font-size:13.5px;margin-top:3px}
+footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--rule);color:var(--muted);font-size:12.5px}
+@media (max-width:640px){.wrap{padding:0 14px 64px}nav{gap:0}nav a{padding:5px 7px;font-size:12px}}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Concordance Validation</h1>
+  <p class="sub">Does the LLM judge in our SAE auto-interpretability pipeline measure what we claim?
+  Nine direction sources, two judges, four metrics, three |r| bands &mdash; all on held-out notes.</p>
+  <div class="meta">
+    <span class="chip">61 run-cells complete</span>
+    <span class="chip">3 gaps</span>
+    <span class="chip">Sonnet 4.6 &middot; DeepSeek-V3</span>
+    <span class="chip">MIMIC-IV &middot; Gemma-2-2B L16</span>
+    <span class="chip">46 ICD-9 codes</span>
+    <span class="chip">shards 281&ndash;311 held out</span>
+  </div>
+</header>
+
+<nav>
+  <a href="#findings">Findings</a><a href="#anchor">Anchoring</a><a href="#conc">Concordance</a>
+  <a href="#hit1">hit@1</a><a href="#binary">Binary</a><a href="#sig">Significance</a>
+  <a href="#inv">Inventory</a><a href="#plan">Paper plan</a>
+  <span class="spacer"></span>
+  <div class="toggle" role="group" aria-label="Filter by judge">
+    <button data-j="all" aria-pressed="true">Both</button>
+    <button data-j="Sonnet" aria-pressed="false">Sonnet</button>
+    <button data-j="DeepSeek" aria-pressed="false">DeepSeek</button>
+  </div>
+</nav>
+
+<section id="findings">
+  <h2><span class="k">The argument</span>Seven findings, in the order they build</h2>
+  <p class="lede">Each depends on the one before it. Together they say: the pooled metric fails,
+  we know why, and the metric that survives holds under a harder test.</p>
+  <ol class="findings">
+    <li><b>YES+PARTIAL is not a valid measure &mdash; random directions beat the SAE on it.</b>
+      At |r| 0.1&ndash;0.3, random scores <b>79%</b> against the SAE's <b>58%</b> (p&nbsp;=&nbsp;6.4&times;10<sup>&minus;5</sup>).
+      <span class="why">A metric that noise wins is not measuring signal.</span></li>
+    <li><b>The failure is localised to PARTIAL, not to the judge.</b>
+      exact-YES over the same features: SAE 0%, random 2%, p&nbsp;=&nbsp;0.35.
+      <span class="why">Same judge, same prompt, same features. Only the pooling differs.</span></li>
+    <li><b>PARTIAL is a real category, not an artifact of offering it.</b>
+      Forced to choose, only <b>6&ndash;16%</b> of PARTIALs become YES; the rest become NO.
+      <span class="why">The judge was correctly declining to call clinically adjacent concepts a match.</span></li>
+    <li><b>Stating the correlation inflates agreement about threefold.</b>
+      De-anchoring the prompt drops exact-YES from <b>37.5% to 12.9%</b> at r&gt;0.3.
+      <span class="why">Our published number is anchored. This is the first measurement of that inflation.</span></li>
+    <li><b>Hard negatives are what make the SAE result significant.</b>
+      Same-chapter distractors: JumpReLU +38.2pp (p&nbsp;=&nbsp;0.003) versus +15.8pp and ns under cross-chapter.
+      <span class="why">The easy slate let random directions win on organ-system plausibility alone.</span></li>
+    <li><b>Label-supervised directions score below random.</b>
+      Diff-in-means 24%, probe LR 17%, random 38% at |r| 0.3&ndash;0.5 &mdash; despite both seeing the ICD labels and reaching |r| 0.70.
+      <span class="why">Prediction and description come apart. This is what the SAE contributes.</span></li>
+    <li><b>Two SAEs replicate; the general-purpose SAE does not compete.</b>
+      JumpReLU and ReLU+L1 agree within 3pp everywhere. GemmaScope has 13 features above r&gt;0.4 against 276.
+      <span class="why">Domain training, not architecture, is what matters.</span></li>
+  </ol>
+</section>
+
+<section id="anchor">
+  <h2><span class="k">Finding 4</span>The r-anchor effect</h2>
+  <p class="lede">Arm&nbsp;0 is the verbatim published prompt, which states the point-biserial correlation.
+  Arm&nbsp;1 removes only that sentence. Everything else is identical.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Prompt</th><th>Judge</th><th>Band</th><th>n</th><th>exact-YES</th><th>YES+PARTIAL</th><th>hit@1</th></tr></thead>
+    <tbody><tr><td class="arm">anchored (r stated)</td><td class="jd">deepseek-v3</td><td class="dim">r&gt;0.3</td><td class="dim">280</td><td><b>37.5%</b></td><td class="dim">99.3%</td><td class="dim">nan%</td></tr>
+<tr><td class="arm">anchored (r stated)</td><td class="jd">deepseek-v3</td><td class="dim">r&gt;0.4</td><td class="dim">280</td><td><b>37.5%</b></td><td class="dim">99.3%</td><td class="dim">nan%</td></tr>
+<tr><td class="arm">anchored (r stated)</td><td class="jd">deepseek-v3</td><td class="dim">r&gt;0.5</td><td class="dim">144</td><td><b>48.6%</b></td><td class="dim">100.0%</td><td class="dim">nan%</td></tr>
+<tr><td class="arm">de-anchored (no r)</td><td class="jd">deepseek-v3</td><td class="dim">r&gt;0.3</td><td class="dim">280</td><td><b>12.9%</b></td><td class="dim">98.2%</td><td class="dim">83.6%</td></tr>
+<tr><td class="arm">de-anchored (no r)</td><td class="jd">deepseek-v3</td><td class="dim">r&gt;0.4</td><td class="dim">280</td><td><b>12.9%</b></td><td class="dim">98.2%</td><td class="dim">83.6%</td></tr>
+<tr><td class="arm">de-anchored (no r)</td><td class="jd">deepseek-v3</td><td class="dim">r&gt;0.5</td><td class="dim">144</td><td><b>16.7%</b></td><td class="dim">99.3%</td><td class="dim">90.3%</td></tr></tbody></table></div>
+  <div class="callout"><b>Telling the judge the correlation nearly triples agreement.</b>
+  exact-YES falls 37.5% &rarr; 12.9% at r&gt;0.3 once the anchor is removed, while YES+PARTIAL barely moves
+  (99.3% &rarr; 98.2%) &mdash; the pooled metric was already saturated.</div>
+  <p class="note">Measured on DeepSeek only, at r&gt;0.3 and above. Extending to Sonnet and the full band set is the highest-value remaining run.</p>
+</section>
+
+<section id="conc">
+  <h2><span class="k">Metric 1</span>Concordance</h2>
+  <p class="lede">exact-YES first, then the pooled YES+PARTIAL. Cells shaded green above 70%, red below 20%.
+  Read the two tables against each other: the first separates sources, the second does not.</p>
+  <h3 style="font-family:var(--serif);font-size:17px;margin:26px 0 0">exact-YES</h3>
+  <div class="scroll"><table><thead><tr><th>Source</th><th>Pool</th><th>Judge</th><th>|r| 0.1-0.3</th><th>|r| 0.3-0.5</th><th>|r| >0.5</th></tr></thead><tbody><tr data-judge="Sonnet"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">Sonnet</td><td class=""><b>66.7%</b><span class="n">n=6</span></td><td class="hi"><b>84.6%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">DeepSeek</td><td class=""><b>50.0%</b><span class="n">n=6</span></td><td class="hi"><b>76.9%</b><span class="n">n=26</span></td><td class="hi"><b>83.3%</b><span class="n">n=6</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class="lo"><b>17.6%</b><span class="n">n=136</span></td><td class=""><b>42.4%</b><span class="n">n=144</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class=""><b>21.3%</b><span class="n">n=136</span></td><td class=""><b>42.4%</b><span class="n">n=144</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=40</span></td><td class="lo"><b>18.8%</b><span class="n">n=80</span></td><td class=""><b>48.8%</b><span class="n">n=80</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">judge-pool-75</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=27</span></td><td class="na">&mdash;</td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class="lo"><b>15.3%</b><span class="n">n=137</span></td><td class=""><b>46.9%</b><span class="n">n=143</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class="lo"><b>17.5%</b><span class="n">n=137</span></td><td class=""><b>53.1%</b><span class="n">n=143</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=40</span></td><td class="lo"><b>8.8%</b><span class="n">n=80</span></td><td class=""><b>51.2%</b><span class="n">n=80</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">judge-pool-75</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=27</span></td><td class="na">&mdash;</td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class="lo"><b>11.1%</b><span class="n">n=9</span></td><td class="lo"><b>0.0%</b><span class="n">n=4</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">DeepSeek</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class=""><b>33.3%</b><span class="n">n=9</span></td><td class="lo"><b>0.0%</b><span class="n">n=4</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class="lo"><b>5.6%</b><span class="n">n=18</span></td><td class="lo"><b>19.0%</b><span class="n">n=21</span></td><td class="lo"><b>14.3%</b><span class="n">n=7</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class="lo"><b>11.1%</b><span class="n">n=18</span></td><td class=""><b>28.6%</b><span class="n">n=21</span></td><td class=""><b>28.6%</b><span class="n">n=7</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class="lo"><b>11.8%</b><span class="n">n=17</span></td><td class="lo"><b>12.5%</b><span class="n">n=24</span></td><td class="lo"><b>20.0%</b><span class="n">n=5</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class="lo"><b>11.8%</b><span class="n">n=17</span></td><td class="lo"><b>12.5%</b><span class="n">n=24</span></td><td class="lo"><b>20.0%</b><span class="n">n=5</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">PCA<span class="fam f-unsupervised">unsupervised</span></td><td class="dim">top46-by-|r|</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=34</span></td><td class="hi"><b>100.0%</b><span class="n">n=1</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">PCA<span class="fam f-unsupervised">unsupervised</span></td><td class="dim">top46-by-|r|</td><td class="jd">DeepSeek</td><td class="lo"><b>2.9%</b><span class="n">n=34</span></td><td class="hi"><b>100.0%</b><span class="n">n=1</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">Sonnet</td><td class="lo"><b>2.1%</b><span class="n">n=284</span></td><td class="lo"><b>0.0%</b><span class="n">n=16</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">DeepSeek</td><td class="lo"><b>1.8%</b><span class="n">n=284</span></td><td class="lo"><b>0.0%</b><span class="n">n=16</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (spanning)<span class="fam f-random">random</span></td><td class="dim">spanning-150</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=58</span></td><td class="na">&mdash;</td><td class="na">&mdash;</td></tr></tbody></table></div>
+  <h3 style="font-family:var(--serif);font-size:17px;margin:26px 0 0">YES+PARTIAL</h3>
+  <div class="scroll"><table><thead><tr><th>Source</th><th>Pool</th><th>Judge</th><th>|r| 0.1-0.3</th><th>|r| 0.3-0.5</th><th>|r| >0.5</th></tr></thead><tbody><tr data-judge="Sonnet"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">Sonnet</td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="hi"><b>100.0%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">DeepSeek</td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="hi"><b>100.0%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class=""><b>58.0%</b><span class="n">n=100</span></td><td class="hi"><b>90.4%</b><span class="n">n=136</span></td><td class="hi"><b>98.6%</b><span class="n">n=144</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="hi"><b>89.0%</b><span class="n">n=100</span></td><td class="hi"><b>97.8%</b><span class="n">n=136</span></td><td class="hi"><b>100.0%</b><span class="n">n=144</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">Sonnet</td><td class="hi"><b>77.5%</b><span class="n">n=40</span></td><td class="hi"><b>91.2%</b><span class="n">n=80</span></td><td class="hi"><b>98.8%</b><span class="n">n=80</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">judge-pool-75</td><td class="jd">Sonnet</td><td class=""><b>33.3%</b><span class="n">n=27</span></td><td class="na">&mdash;</td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class=""><b>55.0%</b><span class="n">n=100</span></td><td class="hi"><b>96.4%</b><span class="n">n=137</span></td><td class="hi"><b>97.9%</b><span class="n">n=143</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="hi"><b>88.0%</b><span class="n">n=100</span></td><td class="hi"><b>100.0%</b><span class="n">n=137</span></td><td class="hi"><b>100.0%</b><span class="n">n=143</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">Sonnet</td><td class="hi"><b>82.5%</b><span class="n">n=40</span></td><td class="hi"><b>97.5%</b><span class="n">n=80</span></td><td class="hi"><b>100.0%</b><span class="n">n=80</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">judge-pool-75</td><td class="jd">Sonnet</td><td class=""><b>22.2%</b><span class="n">n=27</span></td><td class="na">&mdash;</td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">Sonnet</td><td class=""><b>22.0%</b><span class="n">n=100</span></td><td class=""><b>66.7%</b><span class="n">n=9</span></td><td class="hi"><b>75.0%</b><span class="n">n=4</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">DeepSeek</td><td class="hi"><b>72.0%</b><span class="n">n=100</span></td><td class="hi"><b>77.8%</b><span class="n">n=9</span></td><td class="hi"><b>100.0%</b><span class="n">n=4</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class=""><b>33.3%</b><span class="n">n=18</span></td><td class=""><b>52.4%</b><span class="n">n=21</span></td><td class=""><b>57.1%</b><span class="n">n=7</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class=""><b>55.6%</b><span class="n">n=18</span></td><td class=""><b>66.7%</b><span class="n">n=21</span></td><td class="hi"><b>85.7%</b><span class="n">n=7</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class=""><b>23.5%</b><span class="n">n=17</span></td><td class=""><b>37.5%</b><span class="n">n=24</span></td><td class="hi"><b>100.0%</b><span class="n">n=5</span></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class="hi"><b>70.6%</b><span class="n">n=17</span></td><td class=""><b>45.8%</b><span class="n">n=24</span></td><td class="hi"><b>100.0%</b><span class="n">n=5</span></td></tr>
+<tr data-judge="Sonnet"><td class="arm">PCA<span class="fam f-unsupervised">unsupervised</span></td><td class="dim">top46-by-|r|</td><td class="jd">Sonnet</td><td class=""><b>32.4%</b><span class="n">n=34</span></td><td class="hi"><b>100.0%</b><span class="n">n=1</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">PCA<span class="fam f-unsupervised">unsupervised</span></td><td class="dim">top46-by-|r|</td><td class="jd">DeepSeek</td><td class="hi"><b>91.2%</b><span class="n">n=34</span></td><td class="hi"><b>100.0%</b><span class="n">n=1</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">Sonnet</td><td class="hi"><b>79.2%</b><span class="n">n=284</span></td><td class="hi"><b>100.0%</b><span class="n">n=16</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">DeepSeek</td><td class="hi"><b>93.3%</b><span class="n">n=284</span></td><td class="hi"><b>100.0%</b><span class="n">n=16</span></td><td class="na">&mdash;</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (spanning)<span class="fam f-random">random</span></td><td class="dim">spanning-150</td><td class="jd">Sonnet</td><td class=""><b>25.9%</b><span class="n">n=58</span></td><td class="na">&mdash;</td><td class="na">&mdash;</td></tr></tbody></table></div>
+  <p class="note">Random reaches 78&ndash;100% on YES+PARTIAL &mdash; at or above every SAE row in the same band.</p>
+</section>
+
+<section id="hit1">
+  <h2><span class="k">Metric 2</span>Retrieval &mdash; hit@1</h2>
+  <p class="lede">Blind forced choice from nine options: the grounded code, seven distractors, and &ldquo;none&rdquo;.
+  Chance is 11.1%. The two conditions differ only in where distractors come from.</p>
+  <h3 style="font-family:var(--serif);font-size:17px;margin:26px 0 0">Cross-chapter distractors <span style="color:var(--muted);font-weight:400;font-size:14px">&mdash; the published, easier slate</span></h3>
+  <div class="scroll"><table><thead><tr><th>Source</th><th>Pool</th><th>Judge</th><th>|r| 0.1-0.3</th><th>|r| 0.3-0.5</th><th>|r| >0.5</th><th>'none' rate</th></tr></thead><tbody><tr data-judge="Sonnet"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">Sonnet</td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="hi"><b>96.2%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">DeepSeek</td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="hi"><b>92.3%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class="lo"><b>17.0%</b><span class="n">n=100</span></td><td class="hi"><b>84.6%</b><span class="n">n=136</span></td><td class="hi"><b>95.8%</b><span class="n">n=144</span></td><td class="dim">4.2%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="lo"><b>13.0%</b><span class="n">n=100</span></td><td class="hi"><b>86.0%</b><span class="n">n=136</span></td><td class="hi"><b>94.4%</b><span class="n">n=144</span></td><td class="dim">3.5%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">Sonnet</td><td class=""><b>27.5%</b><span class="n">n=40</span></td><td class="hi"><b>75.0%</b><span class="n">n=80</span></td><td class="hi"><b>93.8%</b><span class="n">n=80</span></td><td class="dim">6.2%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">DeepSeek</td><td class=""><b>35.0%</b><span class="n">n=40</span></td><td class="hi"><b>86.2%</b><span class="n">n=80</span></td><td class="hi"><b>97.5%</b><span class="n">n=80</span></td><td class="dim">1.2%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class="lo"><b>15.0%</b><span class="n">n=100</span></td><td class="hi"><b>88.3%</b><span class="n">n=137</span></td><td class="hi"><b>97.9%</b><span class="n">n=143</span></td><td class="dim">2.1%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class=""><b>23.0%</b><span class="n">n=100</span></td><td class="hi"><b>89.8%</b><span class="n">n=137</span></td><td class="hi"><b>97.2%</b><span class="n">n=143</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">Sonnet</td><td class="lo"><b>2.0%</b><span class="n">n=100</span></td><td class=""><b>66.7%</b><span class="n">n=9</span></td><td class="hi"><b>75.0%</b><span class="n">n=4</span></td><td class="dim">25.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">DeepSeek</td><td class="lo"><b>3.0%</b><span class="n">n=100</span></td><td class=""><b>66.7%</b><span class="n">n=9</span></td><td class="hi"><b>100.0%</b><span class="n">n=4</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class=""><b>27.8%</b><span class="n">n=18</span></td><td class=""><b>28.6%</b><span class="n">n=21</span></td><td class=""><b>42.9%</b><span class="n">n=7</span></td><td class="dim">42.9%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class=""><b>27.8%</b><span class="n">n=18</span></td><td class=""><b>38.1%</b><span class="n">n=21</span></td><td class=""><b>42.9%</b><span class="n">n=7</span></td><td class="dim">42.9%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class="lo"><b>11.8%</b><span class="n">n=17</span></td><td class=""><b>20.8%</b><span class="n">n=24</span></td><td class="lo"><b>20.0%</b><span class="n">n=5</span></td><td class="dim">80.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class="lo"><b>17.6%</b><span class="n">n=17</span></td><td class=""><b>20.8%</b><span class="n">n=24</span></td><td class=""><b>60.0%</b><span class="n">n=5</span></td><td class="dim">20.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">PCA<span class="fam f-unsupervised">unsupervised</span></td><td class="dim">top46-by-|r|</td><td class="jd">Sonnet</td><td class="lo"><b>14.7%</b><span class="n">n=34</span></td><td class="hi"><b>100.0%</b><span class="n">n=1</span></td><td class="na">&mdash;</td><td class="dim">0.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">PCA<span class="fam f-unsupervised">unsupervised</span></td><td class="dim">top46-by-|r|</td><td class="jd">DeepSeek</td><td class="lo"><b>11.8%</b><span class="n">n=34</span></td><td class="hi"><b>100.0%</b><span class="n">n=1</span></td><td class="na">&mdash;</td><td class="dim">0.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">Sonnet</td><td class=""><b>34.2%</b><span class="n">n=284</span></td><td class=""><b>68.8%</b><span class="n">n=16</span></td><td class="na">&mdash;</td><td class="dim">25.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">DeepSeek</td><td class=""><b>35.2%</b><span class="n">n=284</span></td><td class="hi"><b>81.2%</b><span class="n">n=16</span></td><td class="na">&mdash;</td><td class="dim">12.5%</td></tr></tbody></table></div>
+  <h3 style="font-family:var(--serif);font-size:17px;margin:26px 0 0">Same-chapter hard negatives <span style="color:var(--muted);font-weight:400;font-size:14px">&mdash; CHF vs atrial fibrillation, not CHF vs a renal code</span></h3>
+  <div class="scroll"><table><thead><tr><th>Source</th><th>Pool</th><th>Judge</th><th>|r| 0.1-0.3</th><th>|r| 0.3-0.5</th><th>|r| >0.5</th><th>'none' rate</th></tr></thead><tbody><tr data-judge="Sonnet"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">Sonnet</td><td class=""><b>50.0%</b><span class="n">n=6</span></td><td class="hi"><b>92.3%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Keyword<span class="fam f-lexical">lexical</span></td><td class="dim">all-39</td><td class="jd">DeepSeek</td><td class="hi"><b>83.3%</b><span class="n">n=6</span></td><td class="hi"><b>96.2%</b><span class="n">n=26</span></td><td class="hi"><b>100.0%</b><span class="n">n=6</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class="lo"><b>10.0%</b><span class="n">n=100</span></td><td class="hi"><b>75.7%</b><span class="n">n=136</span></td><td class="hi"><b>92.4%</b><span class="n">n=144</span></td><td class="dim">7.6%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="lo"><b>7.0%</b><span class="n">n=100</span></td><td class="hi"><b>75.0%</b><span class="n">n=136</span></td><td class="hi"><b>92.4%</b><span class="n">n=144</span></td><td class="dim">4.2%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">Sonnet</td><td class="lo"><b>7.5%</b><span class="n">n=40</span></td><td class=""><b>66.2%</b><span class="n">n=80</span></td><td class="hi"><b>91.2%</b><span class="n">n=80</span></td><td class="dim">7.5%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU<span class="fam f-sae">SAE domain</span></td><td class="dim">stratified-200</td><td class="jd">DeepSeek</td><td class=""><b>22.5%</b><span class="n">n=40</span></td><td class="hi"><b>72.5%</b><span class="n">n=80</span></td><td class="hi"><b>91.2%</b><span class="n">n=80</span></td><td class="dim">6.2%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">Sonnet</td><td class="lo"><b>8.0%</b><span class="n">n=100</span></td><td class="hi"><b>73.0%</b><span class="n">n=137</span></td><td class="hi"><b>94.4%</b><span class="n">n=143</span></td><td class="dim">4.2%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1<span class="fam f-sae">SAE domain</span></td><td class="dim">published-380</td><td class="jd">DeepSeek</td><td class="lo"><b>8.0%</b><span class="n">n=100</span></td><td class="hi"><b>75.9%</b><span class="n">n=137</span></td><td class="hi"><b>93.7%</b><span class="n">n=143</span></td><td class="dim">1.4%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">Sonnet</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class="hi"><b>77.8%</b><span class="n">n=9</span></td><td class="hi"><b>100.0%</b><span class="n">n=4</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE GemmaScope<span class="fam f-sae">SAE general</span></td><td class="dim">tiered-113</td><td class="jd">DeepSeek</td><td class="lo"><b>0.0%</b><span class="n">n=100</span></td><td class=""><b>66.7%</b><span class="n">n=9</span></td><td class="hi"><b>100.0%</b><span class="n">n=4</span></td><td class="dim">0.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class=""><b>22.2%</b><span class="n">n=18</span></td><td class=""><b>23.8%</b><span class="n">n=21</span></td><td class=""><b>42.9%</b><span class="n">n=7</span></td><td class="dim">57.1%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Diff-in-means<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class=""><b>27.8%</b><span class="n">n=18</span></td><td class=""><b>38.1%</b><span class="n">n=21</span></td><td class=""><b>28.6%</b><span class="n">n=7</span></td><td class="dim">57.1%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">Sonnet</td><td class="lo"><b>11.8%</b><span class="n">n=17</span></td><td class="lo"><b>16.7%</b><span class="n">n=24</span></td><td class=""><b>40.0%</b><span class="n">n=5</span></td><td class="dim">60.0%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Probe LR<span class="fam f-supervised">supervised</span></td><td class="dim">all-46</td><td class="jd">DeepSeek</td><td class="lo"><b>17.6%</b><span class="n">n=17</span></td><td class="lo"><b>16.7%</b><span class="n">n=24</span></td><td class=""><b>40.0%</b><span class="n">n=5</span></td><td class="dim">20.0%</td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">Sonnet</td><td class="lo"><b>16.5%</b><span class="n">n=284</span></td><td class=""><b>37.5%</b><span class="n">n=16</span></td><td class="na">&mdash;</td><td class="dim">37.5%</td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Random (adversarial)<span class="fam f-random">random</span></td><td class="dim">top300-by-|r|</td><td class="jd">DeepSeek</td><td class="lo"><b>18.3%</b><span class="n">n=284</span></td><td class=""><b>43.8%</b><span class="n">n=16</span></td><td class="na">&mdash;</td><td class="dim">12.5%</td></tr></tbody></table></div>
+  <div class="grid2">
+    <div class="card"><h4>Random collapses</h4><span class="big">69 &rarr; 38%</span>
+      <p>Hard negatives remove the organ-system shortcut that carried random directions.</p></div>
+    <div class="card"><h4>The SAE holds</h4><span class="big">85 &rarr; 76%</span>
+      <p>A 9-point drop against random's 31 &mdash; the gap more than doubles.</p></div>
+    <div class="card"><h4>&ldquo;None&rdquo; rate tracks describability</h4><span class="big">0 &rarr; 88%</span>
+      <p>Keyword 0%, SAE 15%, supervised 70%, GemmaScope 88%. The judge declines when there is nothing to describe.</p></div>
+  </div>
+</section>
+
+<section id="binary">
+  <h2><span class="k">Metric 3</span>Forced binary YES/NO</h2>
+  <p class="lede">PARTIAL removed from the option set and the r-anchor dropped. The last column is the one that matters:
+  of the features the original prompt called PARTIAL, how many survive as YES when there is no middle option.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Source</th><th>Judge</th><th>|r|</th><th>n</th><th>binary-YES</th><th>unknown</th><th>orig. PARTIAL</th><th>PARTIAL &rarr; YES</th></tr></thead>
+    <tbody><tr data-judge="Sonnet"><td class="arm">SAE JumpReLU</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td class="dim">100</td><td><b>0.0%</b></td><td class="dim">0.0%</td><td class="dim">58</td><td class="lo"><b>0.0%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td class="dim">136</td><td><b>33.1%</b></td><td class="dim">0.0%</td><td class="dim">99</td><td class="lo"><b>18.2%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE JumpReLU</td><td class="jd">Sonnet</td><td class="dim">&gt;0.5</td><td class="dim">144</td><td><b>54.2%</b></td><td class="dim">0.0%</td><td class="dim">81</td><td class=""><b>21.0%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td class="dim">100</td><td><b>0.0%</b></td><td class="dim">0.0%</td><td class="dim">58</td><td class="lo"><b>0.0%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td class="dim">136</td><td><b>19.1%</b></td><td class="dim">0.0%</td><td class="dim">99</td><td class="lo"><b>11.1%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE JumpReLU</td><td class="jd">DeepSeek</td><td class="dim">&gt;0.5</td><td class="dim">144</td><td><b>41.0%</b></td><td class="dim">0.0%</td><td class="dim">81</td><td class="lo"><b>7.4%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td class="dim">100</td><td><b>1.0%</b></td><td class="dim">0.0%</td><td class="dim">55</td><td class="lo"><b>1.8%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td class="dim">137</td><td><b>29.2%</b></td><td class="dim">0.0%</td><td class="dim">111</td><td class="lo"><b>17.1%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">SAE ReLU+L1</td><td class="jd">Sonnet</td><td class="dim">&gt;0.5</td><td class="dim">143</td><td><b>60.1%</b></td><td class="dim">0.0%</td><td class="dim">73</td><td class=""><b>26.0%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td class="dim">100</td><td><b>1.0%</b></td><td class="dim">0.0%</td><td class="dim">55</td><td class="lo"><b>1.8%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td class="dim">137</td><td><b>14.6%</b></td><td class="dim">0.0%</td><td class="dim">111</td><td class="lo"><b>5.4%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">SAE ReLU+L1</td><td class="jd">DeepSeek</td><td class="dim">&gt;0.5</td><td class="dim">143</td><td><b>42.0%</b></td><td class="dim">0.0%</td><td class="dim">73</td><td class="lo"><b>11.0%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (adversarial)</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td class="dim">284</td><td><b>8.5%</b></td><td class="dim">0.0%</td><td class="dim">219</td><td class="lo"><b>8.2%</b></td></tr>
+<tr data-judge="Sonnet"><td class="arm">Random (adversarial)</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td class="dim">16</td><td><b>25.0%</b></td><td class="dim">0.0%</td><td class="dim">16</td><td class=""><b>25.0%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Random (adversarial)</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td class="dim">284</td><td><b>6.7%</b></td><td class="dim">0.0%</td><td class="dim">219</td><td class="lo"><b>6.4%</b></td></tr>
+<tr data-judge="DeepSeek"><td class="arm">Random (adversarial)</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td class="dim">16</td><td><b>12.5%</b></td><td class="dim">0.0%</td><td class="dim">16</td><td class="lo"><b>12.5%</b></td></tr></tbody></table></div>
+  <div class="callout"><b>PARTIAL survives removal.</b> Only 6&ndash;16% convert to YES, and binary-YES lands on exact-YES
+  (22.4% vs 22.4% for JumpReLU/DeepSeek). exact-YES is stable whether or not PARTIAL is on offer.</div>
+</section>
+
+<section id="sig">
+  <h2><span class="k">Statistics</span>Every source against the random floor</h2>
+  <p class="lede">Fisher exact on hit@1, per condition, judge and band. Sorted with hard negatives first.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Source</th><th>Condition</th><th>Judge</th><th>|r|</th><th>hit@1</th><th>random</th><th>gap</th><th>p</th><th></th></tr></thead>
+    <tbody><tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">Keyword</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>50.0%<span class="n">n=6</span></td><td class="dim">16.5%</td><td class="good"><b>+33.5</b></td><td class="mono">0.066</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">Keyword</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>92.3%<span class="n">n=26</span></td><td class="dim">37.5%</td><td class="good"><b>+54.8</b></td><td class="mono">0.000246</td><td class="sig-y">***</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">Keyword</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>83.3%<span class="n">n=6</span></td><td class="dim">18.3%</td><td class="good"><b>+65.0</b></td><td class="mono">0.00129</td><td class="sig-y">**</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">Keyword</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>96.2%<span class="n">n=26</span></td><td class="dim">43.8%</td><td class="good"><b>+52.4</b></td><td class="mono">0.000208</td><td class="sig-y">***</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>10.0%<span class="n">n=100</span></td><td class="dim">16.5%</td><td class="bad"><b>-6.5</b></td><td class="mono">0.141</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>75.7%<span class="n">n=136</span></td><td class="dim">37.5%</td><td class="good"><b>+38.2</b></td><td class="mono">0.00271</td><td class="sig-y">**</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>7.0%<span class="n">n=100</span></td><td class="dim">18.3%</td><td class="bad"><b>-11.3</b></td><td class="mono">0.00595</td><td class="sig-y">**</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>75.0%<span class="n">n=136</span></td><td class="dim">43.8%</td><td class="good"><b>+31.2</b></td><td class="mono">0.016</td><td class="sig-y">*</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>8.0%<span class="n">n=100</span></td><td class="dim">16.5%</td><td class="bad"><b>-8.5</b></td><td class="mono">0.0453</td><td class="sig-y">*</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>73.0%<span class="n">n=137</span></td><td class="dim">37.5%</td><td class="good"><b>+35.5</b></td><td class="mono">0.00762</td><td class="sig-y">**</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>8.0%<span class="n">n=100</span></td><td class="dim">18.3%</td><td class="bad"><b>-10.3</b></td><td class="mono">0.0157</td><td class="sig-y">*</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>75.9%<span class="n">n=137</span></td><td class="dim">43.8%</td><td class="good"><b>+32.2</b></td><td class="mono">0.0142</td><td class="sig-y">*</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>0.0%<span class="n">n=100</span></td><td class="dim">16.5%</td><td class="bad"><b>-16.5</b></td><td class="mono">4.17e-07</td><td class="sig-y">***</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>77.8%<span class="n">n=9</span></td><td class="dim">37.5%</td><td class="good"><b>+40.3</b></td><td class="mono">0.0968</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>0.0%<span class="n">n=100</span></td><td class="dim">18.3%</td><td class="bad"><b>-18.3</b></td><td class="mono">6.94e-08</td><td class="sig-y">***</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>66.7%<span class="n">n=9</span></td><td class="dim">43.8%</td><td class="good"><b>+22.9</b></td><td class="mono">0.411</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">Diff-in-means</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>22.2%<span class="n">n=18</span></td><td class="dim">16.5%</td><td class="good"><b>+5.7</b></td><td class="mono">0.519</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">Diff-in-means</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>23.8%<span class="n">n=21</span></td><td class="dim">37.5%</td><td class="bad"><b>-13.7</b></td><td class="mono">0.475</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">Diff-in-means</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>27.8%<span class="n">n=18</span></td><td class="dim">18.3%</td><td class="good"><b>+9.5</b></td><td class="mono">0.35</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">Diff-in-means</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>38.1%<span class="n">n=21</span></td><td class="dim">43.8%</td><td class="bad"><b>-5.7</b></td><td class="mono">0.749</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">Probe LR</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>11.8%<span class="n">n=17</span></td><td class="dim">16.5%</td><td class="bad"><b>-4.8</b></td><td class="mono">1.0</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="same-chapter"><td class="arm">Probe LR</td><td class="dim">same-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>16.7%<span class="n">n=24</span></td><td class="dim">37.5%</td><td class="bad"><b>-20.8</b></td><td class="mono">0.159</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">Probe LR</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>17.6%<span class="n">n=17</span></td><td class="dim">18.3%</td><td class="bad"><b>-0.7</b></td><td class="mono">1.0</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="same-chapter"><td class="arm">Probe LR</td><td class="dim">same-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>16.7%<span class="n">n=24</span></td><td class="dim">43.8%</td><td class="bad"><b>-27.1</b></td><td class="mono">0.08</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">Keyword</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>100.0%<span class="n">n=6</span></td><td class="dim">34.2%</td><td class="good"><b>+65.8</b></td><td class="mono">0.00182</td><td class="sig-y">**</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">Keyword</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>96.2%<span class="n">n=26</span></td><td class="dim">68.8%</td><td class="good"><b>+27.4</b></td><td class="mono">0.0232</td><td class="sig-y">*</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">Keyword</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>100.0%<span class="n">n=6</span></td><td class="dim">35.2%</td><td class="good"><b>+64.8</b></td><td class="mono">0.00218</td><td class="sig-y">**</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">Keyword</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>92.3%<span class="n">n=26</span></td><td class="dim">81.2%</td><td class="good"><b>+11.1</b></td><td class="mono">0.352</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>17.0%<span class="n">n=100</span></td><td class="dim">34.2%</td><td class="bad"><b>-17.2</b></td><td class="mono">0.00136</td><td class="sig-y">**</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>84.6%<span class="n">n=136</span></td><td class="dim">68.8%</td><td class="good"><b>+15.8</b></td><td class="mono">0.153</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>13.0%<span class="n">n=100</span></td><td class="dim">35.2%</td><td class="bad"><b>-22.2</b></td><td class="mono">2.01e-05</td><td class="sig-y">***</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">SAE JumpReLU</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>86.0%<span class="n">n=136</span></td><td class="dim">81.2%</td><td class="good"><b>+4.8</b></td><td class="mono">0.705</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>15.0%<span class="n">n=100</span></td><td class="dim">34.2%</td><td class="bad"><b>-19.2</b></td><td class="mono">0.0002</td><td class="sig-y">***</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>88.3%<span class="n">n=137</span></td><td class="dim">68.8%</td><td class="good"><b>+19.6</b></td><td class="mono">0.0474</td><td class="sig-y">*</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>23.0%<span class="n">n=100</span></td><td class="dim">35.2%</td><td class="bad"><b>-12.2</b></td><td class="mono">0.0253</td><td class="sig-y">*</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">SAE ReLU+L1</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>89.8%<span class="n">n=137</span></td><td class="dim">81.2%</td><td class="good"><b>+8.5</b></td><td class="mono">0.391</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>2.0%<span class="n">n=100</span></td><td class="dim">34.2%</td><td class="bad"><b>-32.2</b></td><td class="mono">6.6e-13</td><td class="sig-y">***</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>66.7%<span class="n">n=9</span></td><td class="dim">68.8%</td><td class="bad"><b>-2.1</b></td><td class="mono">1.0</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>3.0%<span class="n">n=100</span></td><td class="dim">35.2%</td><td class="bad"><b>-32.2</b></td><td class="mono">3.19e-12</td><td class="sig-y">***</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">SAE GemmaScope</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>66.7%<span class="n">n=9</span></td><td class="dim">81.2%</td><td class="bad"><b>-14.6</b></td><td class="mono">0.63</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">Diff-in-means</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>27.8%<span class="n">n=18</span></td><td class="dim">34.2%</td><td class="bad"><b>-6.4</b></td><td class="mono">0.798</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">Diff-in-means</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>28.6%<span class="n">n=21</span></td><td class="dim">68.8%</td><td class="bad"><b>-40.2</b></td><td class="mono">0.022</td><td class="sig-y">*</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">Diff-in-means</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>27.8%<span class="n">n=18</span></td><td class="dim">35.2%</td><td class="bad"><b>-7.4</b></td><td class="mono">0.617</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">Diff-in-means</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>38.1%<span class="n">n=21</span></td><td class="dim">81.2%</td><td class="bad"><b>-43.2</b></td><td class="mono">0.0178</td><td class="sig-y">*</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">Probe LR</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.1-0.3</td><td>11.8%<span class="n">n=17</span></td><td class="dim">34.2%</td><td class="bad"><b>-22.4</b></td><td class="mono">0.0647</td><td class="sig-n">ns</td></tr>
+<tr data-judge="Sonnet" data-cond="cross-chapter"><td class="arm">Probe LR</td><td class="dim">cross-chapter</td><td class="jd">Sonnet</td><td class="dim">0.3-0.5</td><td>20.8%<span class="n">n=24</span></td><td class="dim">68.8%</td><td class="bad"><b>-47.9</b></td><td class="mono">0.00362</td><td class="sig-y">**</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">Probe LR</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.1-0.3</td><td>17.6%<span class="n">n=17</span></td><td class="dim">35.2%</td><td class="bad"><b>-17.6</b></td><td class="mono">0.19</td><td class="sig-n">ns</td></tr>
+<tr data-judge="DeepSeek" data-cond="cross-chapter"><td class="arm">Probe LR</td><td class="dim">cross-chapter</td><td class="jd">DeepSeek</td><td class="dim">0.3-0.5</td><td>20.8%<span class="n">n=24</span></td><td class="dim">81.2%</td><td class="bad"><b>-60.4</b></td><td class="mono">0.000271</td><td class="sig-y">***</td></tr></tbody></table></div>
+  <p class="note">The random arm has only 16 directions above |r| 0.3 &mdash; a census of 18,432 drawn from one seed, not a sample.
+  Significance under hard negatives is achieved despite that n.</p>
+</section>
+
+<section id="inv">
+  <h2><span class="k">Coverage</span>Run inventory</h2>
+  <p class="lede">Every source &times; pool &times; stage &times; judge cell attempted in this study. Gaps listed first.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Source</th><th>Pool</th><th>Stage</th><th>Judge</th><th>n</th><th>Status</th></tr></thead>
+    <tbody><tr><td class="arm">SAE JumpReLU</td><td class="dim">judge-pool-75</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">nan</td><td class="sig-n">not run</td></tr>
+<tr><td class="arm">PCA</td><td class="dim">top46-by-|r|</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">nan</td><td class="sig-n">not run</td></tr>
+<tr><td class="arm">PCA</td><td class="dim">top46-by-|r|</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">nan</td><td class="sig-n">not run</td></tr>
+<tr><td class="arm">Keyword</td><td class="dim">all-39</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">39.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Keyword</td><td class="dim">all-39</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">39.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Keyword</td><td class="dim">all-39</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">39.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Keyword</td><td class="dim">all-39</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">39.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Keyword</td><td class="dim">all-39</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">39.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Keyword</td><td class="dim">all-39</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">39.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">nan</td><td class="dim">binary YES/NO</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">nan</td><td class="dim">binary YES/NO</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">published-380</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">published-380</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">stratified-200</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">200.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">published-380</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">published-380</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">stratified-200</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">200.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">stratified-200</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">200.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">published-380</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">published-380</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">stratified-200</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">200.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE JumpReLU</td><td class="dim">stratified-200</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">200.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">nan</td><td class="dim">binary YES/NO</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">nan</td><td class="dim">binary YES/NO</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">published-380</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">published-380</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">stratified-200</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">200.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">judge-pool-75</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">75.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">published-380</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">published-380</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">published-380</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE ReLU+L1</td><td class="dim">published-380</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">380.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">tiered-113</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">113.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">tiered-113</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">113.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">judge-pool-75</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">75.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">tiered-113</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">113.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">tiered-113</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">113.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">tiered-113</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">113.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">SAE GemmaScope</td><td class="dim">tiered-113</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">113.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Diff-in-means</td><td class="dim">all-46</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Diff-in-means</td><td class="dim">all-46</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Diff-in-means</td><td class="dim">all-46</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Diff-in-means</td><td class="dim">all-46</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Diff-in-means</td><td class="dim">all-46</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Diff-in-means</td><td class="dim">all-46</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Probe LR</td><td class="dim">all-46</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Probe LR</td><td class="dim">all-46</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Probe LR</td><td class="dim">all-46</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Probe LR</td><td class="dim">all-46</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Probe LR</td><td class="dim">all-46</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Probe LR</td><td class="dim">all-46</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">46.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">PCA</td><td class="dim">top46-by-|r|</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">35.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">PCA</td><td class="dim">top46-by-|r|</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">35.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">PCA</td><td class="dim">top46-by-|r|</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">35.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">PCA</td><td class="dim">top46-by-|r|</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">35.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">nan</td><td class="dim">binary YES/NO</td><td class="jd">Sonnet</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">nan</td><td class="dim">binary YES/NO</td><td class="jd">DeepSeek</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">top300-by-|r|</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">top300-by-|r|</td><td class="dim">concordance</td><td class="jd">DeepSeek</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">top300-by-|r|</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">Sonnet</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">top300-by-|r|</td><td class="dim">retrieval easy (cross-chapter)</td><td class="jd">DeepSeek</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">top300-by-|r|</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">Sonnet</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (adversarial)</td><td class="dim">top300-by-|r|</td><td class="dim">retrieval hard (same-chapter)</td><td class="jd">DeepSeek</td><td class="dim">300.0</td><td class="sig-y">done</td></tr>
+<tr><td class="arm">Random (spanning)</td><td class="dim">spanning-150</td><td class="dim">concordance</td><td class="jd">Sonnet</td><td class="dim">150.0</td><td class="sig-y">done</td></tr></tbody></table></div>
+</section>
+
+<section id="plan">
+  <h2><span class="k">For discussion</span>A proposed results structure</h2>
+  <p class="lede">One way to sequence this. The ordering follows the findings above &mdash;
+  each section earns the next. Open questions are flagged.</p>
+  <ol class="plan">
+    <li><b>The pooled metric fails a floor test</b>
+      <span>Table: exact-YES vs YES+PARTIAL for SAE and random across |r|. One p-value carries it (6.4&times;10<sup>&minus;5</sup>).
+      Open: do we lead with this or with the anchoring result?</span></li>
+    <li><b>Why it fails &mdash; PARTIAL captures clinical adjacency</b>
+      <span>The binary experiment. Establishes PARTIAL is genuine, so the fix is reporting, not re-prompting.</span></li>
+    <li><b>A second reporting artifact &mdash; the correlation anchor</b>
+      <span>Arm 0 vs Arm 1. Currently DeepSeek-only; needs Sonnet before it can be a headline.</span></li>
+    <li><b>What survives: hit@1 under hard negatives</b>
+      <span>Both conditions, both judges. Argues the metric choice with data rather than assertion.</span></li>
+    <li><b>Is an SAE necessary?</b>
+      <span>Supervised and unsupervised sources at matched |r|. Strongest single row in the paper.</span></li>
+    <li><b>Robustness</b>
+      <span>Two architectures replicate; two judges agree on exact-YES and hit@1 but not on YES+PARTIAL.</span></li>
+    <li><b>Limitations</b>
+      <span>16 random directions above |r| 0.3 (single seed). GemmaScope's hard-negative cell is ns at n=9.
+      No human validation &mdash; &kappa; measures model&ndash;model agreement only.</span></li>
+  </ol>
+</section>
+
+<footer>
+  All evaluations on held-out shards 281&ndash;311. Directions built and selected on shards &lt;281.
+  Judges: Claude Sonnet 4.6 (Anthropic API) and DeepSeek-V3 (OpenRouter), identical prompts and features.
+  Pairing is by-construction for one-direction-per-code sources and argmax otherwise.
+  95% Wilson intervals in the workbook; Fisher exact for all significance tests.
+</footer>
+</div>
+
+<script>
+(function(){
+  var btns=document.querySelectorAll('.toggle button');
+  btns.forEach(function(b){
+    b.addEventListener('click',function(){
+      var j=b.dataset.j;
+      btns.forEach(function(o){o.setAttribute('aria-pressed',String(o===b));});
+      document.querySelectorAll('tr[data-judge]').forEach(function(tr){
+        tr.style.display=(j==='all'||tr.dataset.judge===j)?'':'none';
+      });
+    });
+  });
+})();
+</script>

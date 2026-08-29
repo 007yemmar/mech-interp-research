@@ -52,6 +52,7 @@ def select_features(
     weak_lo: float = 0.1,
     weak_hi: float = 0.3,
     seed: int = 42,
+    explicit_features: list[int] | list[tuple[int, str]] | None = None,
 ) -> dict[str, list[int]]:
     """Select features in four tiers for auto-interp.
 
@@ -71,11 +72,25 @@ def select_features(
         weak_lo: Lower bound for weak grounding (default 0.1).
         weak_hi: Upper bound for weak grounding (default 0.3).
         seed: Random seed for reproducible sampling.
+        explicit_features: If given, bypass tiering entirely and return exactly
+            these feature indices as 'strong_grounded', with the other tiers
+            empty. Used by sources whose k has no tier structure (one direction
+            per code). Default None reproduces the original behaviour exactly.
 
     Returns:
         Dict with keys 'strong_grounded', 'weak_grounded', 'non_grounded',
         'dead', each mapping to a list of feature indices.
     """
+    if explicit_features is not None:
+        ids = [int(f[0]) if isinstance(f, tuple | list) else int(f) for f in explicit_features]
+        logger.info("Explicit feature list supplied (%d features); skipping tiering.", len(ids))
+        return {
+            "strong_grounded": ids,
+            "weak_grounded": [],
+            "non_grounded": [],
+            "dead": [],
+        }
+
     rng = np.random.default_rng(seed)
     d_sae = r_pb.shape[0]
     max_abs_r = np.abs(r_pb).max(axis=1)
@@ -616,6 +631,114 @@ or procedures if applicable. One to two sentences.
 Format your response as:
 EXPLANATION: <your explanation>
 CATEGORY: <category_name>"""
+
+
+# --- LLM backend selection -------------------------------------------------
+#
+# Every API call in this module goes through the same two-line shape:
+#     response = client.messages.create(model=..., max_tokens=..., messages=[...])
+#     text = response.content[0].text
+# Six call sites use it. Adapting the *client* to that surface, rather than
+# rewriting the call sites, keeps prompts, parsing and retry behaviour byte
+# identical across backends — so switching where a request is billed cannot
+# change what the judge is asked or how its reply is read.
+
+# OpenRouter spells Anthropic model versions with a dot where the Anthropic API
+# uses a dash, so a config's model string cannot be forwarded unchanged.
+_OPENROUTER_MODEL_ALIASES = {
+    "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
+    "claude-opus-4-6": "anthropic/claude-opus-4.6",
+    "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+}
+
+
+def to_openrouter_model(model: str) -> str:
+    """Map an Anthropic model id to its OpenRouter slug.
+
+    A string already containing "/" is taken as fully qualified and passed
+    through, which is how non-Anthropic panel models are named.
+    """
+    if "/" in model:
+        return model
+    try:
+        return _OPENROUTER_MODEL_ALIASES[model]
+    except KeyError:
+        raise ValueError(
+            f"No OpenRouter slug known for model {model!r}. Add it to "
+            "_OPENROUTER_MODEL_ALIASES, or give the fully qualified slug "
+            "(e.g. 'anthropic/claude-sonnet-4.6') in the config."
+        ) from None
+
+
+class _OpenRouterMessages:
+    """The ``.messages`` half of the Anthropic client surface, over OpenRouter."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def create(self, *, model: str, max_tokens: int, messages: list, **_ignored):
+        from types import SimpleNamespace
+
+        resp = self._inner.chat.completions.create(
+            model=to_openrouter_model(model),
+            max_tokens=max_tokens,
+            messages=messages,
+        )
+        # An empty choices list means the request failed in a way the SDK did not
+        # raise on. Surfacing it beats returning "" — a silent empty explanation
+        # would be scored and judged as though the model had produced it.
+        if not resp.choices:
+            raise RuntimeError(f"OpenRouter returned no choices for model {model!r}")
+        return SimpleNamespace(
+            content=[SimpleNamespace(text=resp.choices[0].message.content or "")]
+        )
+
+
+class OpenRouterClient:
+    """Presents ``anthropic.Anthropic``'s ``.messages.create`` surface over OpenRouter.
+
+    Routing an Anthropic model through OpenRouter is a billing change, not a
+    model change: ``claude-sonnet-4-6`` and ``anthropic/claude-sonnet-4.6`` are
+    the same weights, so explanations are unaffected by which backend produced
+    them.
+    """
+
+    def __init__(self, api_key: str, *, max_retries: int = 5) -> None:
+        from openai import OpenAI
+
+        self.messages = _OpenRouterMessages(
+            OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+                max_retries=max_retries,
+            )
+        )
+
+
+def make_llm_client(backend: str = "anthropic", *, max_retries: int = 5):
+    """Build the client for the configured backend.
+
+    Defaults to Anthropic so existing configs are unaffected.
+    """
+    if backend == "anthropic":
+        import anthropic
+
+        # Identity-linked API keys must name the workspace a request acts in, or
+        # the API rejects them with 400 "anthropic-workspace-id is required".
+        # Classic keys carry their workspace implicitly and need no header, so
+        # this is set only when the variable is present.
+        workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID")
+        headers = {"anthropic-workspace-id": workspace} if workspace else None
+        return anthropic.Anthropic(max_retries=max_retries, default_headers=headers)
+    if backend == "openrouter":
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            raise RuntimeError(
+                "llm_backend='openrouter' but OPENROUTER_API_KEY is unset. Attach "
+                "modal.Secret.from_name('openrouter-api-key') to the Modal function."
+            )
+        return OpenRouterClient(key, max_retries=max_retries)
+    raise ValueError(f"Unknown llm_backend {backend!r}; expected 'anthropic' or 'openrouter'.")
 
 
 def explain_feature(
@@ -1244,9 +1367,33 @@ def _get_strongest_icd(
     feature_idx: int,
     r_pb: np.ndarray,
     code_names: list[str],
+    pairing_override: dict[int, str] | None = None,
 ) -> tuple[str, float]:
-    """Return (code_name, r_pb) for the feature's strongest ICD correlation."""
+    """Return (code_name, r_pb) for the code this feature is judged against.
+
+    By default the code is chosen by ``argmax|r|`` — the selection rule the SAE
+    arms are under test for. ``pairing_override`` supplies a **by-construction**
+    pairing instead, for sources where the direction for code *c* was built from
+    code *c* and the correct answer is therefore known in advance. Control arms
+    need this: with argmax a keyword direction can be judged against a comorbid
+    code and earn a correct NO, which would be read as the judge failing rather
+    than the pairing being wrong.
+
+    The returned r is always this feature's correlation with the *returned*
+    code, not the argmax one, so the reported value matches what was judged.
+    """
     row = r_pb[feature_idx]
+    if pairing_override is not None and feature_idx in pairing_override:
+        code = pairing_override[feature_idx]
+        if code in code_names:
+            idx = code_names.index(code)
+            return code, float(row[idx])
+        logger.warning(
+            "pairing_override names %r for feature %d, which is not in the code "
+            "panel; falling back to argmax",
+            code,
+            feature_idx,
+        )
     best_idx = int(np.argmax(np.abs(row)))
     return code_names[best_idx], float(row[best_idx])
 
@@ -1316,6 +1463,7 @@ def _fill_missing_scores(
     n_contexts_train: int,
     n_contexts_test: int,
     context_window: int,
+    pairing_override: dict[int, str] | None = None,
 ) -> dict:
     """Re-run only the null/failed scored fields from an existing checkpoint.
 
@@ -1402,7 +1550,7 @@ def _fill_missing_scores(
         "strong_grounded",
         "weak_grounded",
     ):
-        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names)
+        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names, pairing_override)
         icd_code_clean = icd_code.replace("icd9_", "")
         icd_desc = code_descriptions.get(icd_code_clean, icd_code_clean)
         conc_verdict, conc_rationale = check_concordance(
@@ -1437,6 +1585,7 @@ def _process_one_feature(
     n_contexts_train: int,
     n_contexts_test: int,
     context_window: int,
+    pairing_override: dict[int, str] | None = None,
     min_contexts: int = 5,
 ) -> dict:
     """Process a single feature: explain → score → categorize → concordance.
@@ -1489,7 +1638,7 @@ def _process_one_feature(
     conc_r_pb_val = None
 
     if tier in ("strong_grounded", "weak_grounded") and explanation:
-        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names)
+        icd_code, r_val = _get_strongest_icd(feature_idx, r_pb, code_names, pairing_override)
         icd_code_clean = icd_code.replace("icd9_", "")
         icd_desc = code_descriptions.get(icd_code_clean, icd_code_clean)
 
@@ -1569,6 +1718,8 @@ def run_auto_interp(
     icd_eval_dir: str,
     icd_csv_path: str,
     output_dir: str,
+    shard_ckpt_dir: str | None = None,
+    llm_backend: str = "anthropic",
     n_strong_grounded: int = 280,
     n_weak_grounded: int = 100,
     n_non_grounded: int = 1000,
@@ -1582,6 +1733,7 @@ def run_auto_interp(
     scorers: list[str] | None = None,
     concordance_thresholds: list[float] | None = None,
     random_seed: int = 42,
+    explicit_features: list[int] | list[tuple[int, str]] | None = None,
     icd_descriptions_path: str | None = None,
     icd_keywords_yaml_path: str | None = None,
     model_name: str = "google/gemma-2-2b",
@@ -1619,8 +1771,18 @@ def run_auto_interp(
     code_names = corr_data["code_names"]
     code_descriptions = _load_code_descriptions(icd_descriptions_path, icd_keywords_yaml_path)
 
-    shard_ckpt_dir = Path(icd_eval_dir) / "shard_ckpt"
-    note_vectors, _ = reassemble_note_vectors(shard_ckpt_dir)
+    # Defaults to icd_eval_dir/shard_ckpt, which is where a standard icd_eval run
+    # leaves its pooled vectors. The judge-validity control arms keep theirs
+    # elsewhere — the random arm's sit in the seed directory beside
+    # audit_note_matched rather than inside it — so the location has to be
+    # overridable or those arms cannot run at all.
+    #
+    # Whatever it points at must cover the same notes the correlation matrices in
+    # icd_eval_dir were computed over: note_vectors is what picks which shards to
+    # scan for a feature's top-activating contexts, so a mismatched population
+    # silently pulls contexts for the wrong notes.
+    resolved_ckpt = Path(shard_ckpt_dir) if shard_ckpt_dir else Path(icd_eval_dir) / "shard_ckpt"
+    note_vectors, _ = reassemble_note_vectors(resolved_ckpt)
 
     tiers = select_features(
         r_pb=r_pb,
@@ -1633,6 +1795,7 @@ def run_auto_interp(
         n_non_grounded=n_non_grounded,
         n_dead=n_dead,
         seed=random_seed,
+        explicit_features=explicit_features,
     )
 
     feature_list: list[tuple[int, str]] = []
@@ -1642,6 +1805,18 @@ def run_auto_interp(
     logger.info(f"Total features to process: {len(feature_list)}")
 
     metadata = load_metadata(Path(activations_dir))
+
+    # A (feature_id, code_name) list means the caller knows which code each
+    # direction was built for, so concordance must judge against that code
+    # rather than argmax|r|. Bare ints keep the argmax rule unchanged.
+    pairing_override: dict[int, str] | None = None
+    if explicit_features and isinstance(explicit_features[0], tuple | list):
+        pairing_override = {int(f[0]): str(f[1]) for f in explicit_features}
+        logger.info(
+            "By-construction pairing supplied for %d features; concordance will "
+            "not use argmax|r| for them.",
+            len(pairing_override),
+        )
 
     all_feature_ids = [fid for fid, _ in feature_list]
     shard_map = select_shards_for_features(note_vectors, metadata, all_feature_ids)
@@ -1656,9 +1831,7 @@ def run_auto_interp(
 
     client = _client
     if client is None:
-        import anthropic
-
-        client = anthropic.Anthropic(max_retries=5)
+        client = make_llm_client(llm_backend)
 
     models_to_run = [explainer_model]
     if comparison_model and comparison_model != explainer_model:
@@ -1758,6 +1931,7 @@ def run_auto_interp(
                             n_contexts_train=n_contexts_train,
                             n_contexts_test=n_contexts_test,
                             context_window=max_tokens_context,
+                            pairing_override=pairing_override,
                         )
                         _write_json(existing, ckpt_path)
                     except Exception:
@@ -1786,6 +1960,7 @@ def run_auto_interp(
                     n_contexts_train=n_contexts_train,
                     n_contexts_test=n_contexts_test,
                     context_window=max_tokens_context,
+                    pairing_override=pairing_override,
                 )
                 _write_json(result, ckpt_path)
                 feature_results.append(result)

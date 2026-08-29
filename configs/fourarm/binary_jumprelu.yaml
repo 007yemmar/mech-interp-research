@@ -1,0 +1,8 @@
+# Forced-binary YES/NO concordance for jumprelu. PARTIAL removed from the option set.
+# Explanations held fixed; only the option set changes.
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/binary_eval
+judges:
+  - {slug: sonnet-4-6,  backend: anthropic,  model: claude-sonnet-4-6}
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+logging_level: INFO

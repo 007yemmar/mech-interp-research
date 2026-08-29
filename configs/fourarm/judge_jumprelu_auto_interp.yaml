@@ -1,0 +1,56 @@
+# LLM explanation + concordance for the SAE, STRATIFIED BY |r|.
+#
+# 40 features in each of |r| 0.2-0.3, 0.3-0.4, 0.4-0.5, 0.5-0.6, 0.6+.
+#
+# The previous pool was |r|-matched to the SPANNING random pool and came out
+# bimodal -- 147 features below |r| 0.2 and 50 above 0.5, with NOTHING between
+# 0.3 and 0.5. That hole is exactly where the paper's r>0.4 claim lives, and the
+# low band sat below the hard floor's 0.193-0.432 range, so it did not even match
+# the null it was meant to match. Those features fire on generic English (from,
+# Please, appropriate), making that comparison junk against junk.
+#
+# Stratifying answers the question the paper actually asks -- at what |r| does
+# concordance start working? -- instead of assuming 0.4. The random floor spans
+# 0.193-0.432 and so overlays the lower three buckets as a per-bucket null.
+#
+# Features are sampled RANDOMLY within each bucket, never by rank, so no
+# maximisation bias is introduced by the binning. Cached features are preferred
+# where a bucket contains them: 43 of 200 already have contexts from the
+# credit-failed run, and auto_interp extracts only the difference.
+sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/necessity/sae_audit/sae_jumprelu
+shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/judgetest/jumprelu
+
+explicit_features: [[175, "icd9_2449"], [231, "icd9_4280"], [368, "icd9_4280"], [570, "icd9_2851"], [743, "icd9_4280"], [843, "icd9_32723"], [973, "icd9_311"], [1201, "icd9_V5867"], [1235, "icd9_42731"], [1256, "icd9_3572"], [1423, "icd9_40390"], [1504, "icd9_2749"], [1557, "icd9_42731"], [1583, "icd9_4280"], [1592, "icd9_25000"], [1615, "icd9_5849"], [1842, "icd9_2875"], [2038, "icd9_V5867"], [2085, "icd9_486"], [2218, "icd9_3572"], [2265, "icd9_2449"], [2443, "icd9_5849"], [2474, "icd9_4280"], [2550, "icd9_5990"], [2562, "icd9_4280"], [2768, "icd9_V5867"], [2909, "icd9_V5866"], [2967, "icd9_2724"], [3101, "icd9_4019"], [3143, "icd9_496"], [3239, "icd9_42731"], [3254, "icd9_41401"], [3255, "icd9_25000"], [3289, "icd9_32723"], [3405, "icd9_73300"], [3420, "icd9_5990"], [3515, "icd9_5849"], [3561, "icd9_V4986"], [3667, "icd9_412"], [4126, "icd9_42731"], [4140, "icd9_V5861"], [4244, "icd9_5990"], [4251, "icd9_41401"], [4414, "icd9_42731"], [4694, "icd9_4280"], [4821, "icd9_5856"], [5005, "icd9_5856"], [5029, "icd9_2851"], [5076, "icd9_V5861"], [5432, "icd9_V4986"], [5583, "icd9_2851"], [5647, "icd9_5849"], [5694, "icd9_4280"], [5891, "icd9_4280"], [5901, "icd9_V4582"], [6067, "icd9_V4986"], [6224, "icd9_5990"], [6236, "icd9_42731"], [6239, "icd9_V5861"], [6390, "icd9_2762"], [6403, "icd9_5849"], [6417, "icd9_2449"], [6507, "icd9_5990"], [6545, "icd9_5849"], [6701, "icd9_42731"], [6727, "icd9_5990"], [6825, "icd9_486"], [6863, "icd9_2724"], [6920, "icd9_4280"], [7127, "icd9_5849"], [7283, "icd9_486"], [7315, "icd9_42731"], [7383, "icd9_5849"], [7492, "icd9_5856"], [7694, "icd9_2724"], [7728, "icd9_53081"], [7776, "icd9_53081"], [7861, "icd9_32723"], [7985, "icd9_V4581"], [8039, "icd9_5856"], [8161, "icd9_4280"], [8212, "icd9_25000"], [8302, "icd9_4280"], [8336, "icd9_5990"], [8377, "icd9_V5866"], [8428, "icd9_5849"], [8448, "icd9_49390"], [8533, "icd9_2762"], [8650, "icd9_5856"], [8668, "icd9_60000"], [8743, "icd9_5849"], [8820, "icd9_42731"], [8858, "icd9_4280"], [9054, "icd9_60000"], [9055, "icd9_V5867"], [9163, "icd9_42731"], [9334, "icd9_42731"], [9385, "icd9_2724"], [9400, "icd9_3572"], [9485, "icd9_5856"], [9521, "icd9_5990"], [9589, "icd9_4280"], [9595, "icd9_5990"], [9647, "icd9_2720"], [9694, "icd9_5856"], [9833, "icd9_2749"], [9854, "icd9_5990"], [9879, "icd9_4019"], [9905, "icd9_311"], [9913, "icd9_2761"], [10179, "icd9_4280"], [10188, "icd9_2749"], [10397, "icd9_41401"], [10431, "icd9_V5861"], [10473, "icd9_5849"], [10763, "icd9_73300"], [10857, "icd9_2449"], [10929, "icd9_4280"], [10935, "icd9_42731"], [11141, "icd9_4280"], [11255, "icd9_5856"], [11287, "icd9_V1582"], [11307, "icd9_2449"], [11321, "icd9_V5867"], [11469, "icd9_53081"], [11522, "icd9_42731"], [11645, "icd9_5990"], [11749, "icd9_4280"], [11840, "icd9_42731"], [11910, "icd9_V4986"], [11978, "icd9_4280"], [12034, "icd9_60000"], [12072, "icd9_V5861"], [12091, "icd9_2761"], [12093, "icd9_5990"], [12164, "icd9_4280"], [12251, "icd9_53081"], [12284, "icd9_4280"], [12301, "icd9_V5867"], [12461, "icd9_V5866"], [12473, "icd9_5856"], [12491, "icd9_2449"], [12597, "icd9_41401"], [12655, "icd9_2449"], [12675, "icd9_2449"], [12778, "icd9_5849"], [13014, "icd9_V4581"], [13164, "icd9_5849"], [13249, "icd9_2851"], [13263, "icd9_42731"], [13319, "icd9_2449"], [13324, "icd9_4280"], [13363, "icd9_4280"], [13591, "icd9_2724"], [13643, "icd9_2761"], [13668, "icd9_4280"], [13811, "icd9_496"], [13873, "icd9_42731"], [13973, "icd9_4280"], [14029, "icd9_V5867"], [14193, "icd9_V5861"], [14278, "icd9_311"], [14285, "icd9_V4582"], [14398, "icd9_60000"], [14476, "icd9_2720"], [14669, "icd9_5856"], [14726, "icd9_5990"], [14763, "icd9_41401"], [14781, "icd9_4280"], [14802, "icd9_2724"], [14807, "icd9_42731"], [14970, "icd9_V5861"], [15246, "icd9_4280"], [15249, "icd9_49390"], [15251, "icd9_4019"], [15289, "icd9_25000"], [15381, "icd9_V1251"], [15529, "icd9_4280"], [15694, "icd9_42731"], [15717, "icd9_2724"], [15937, "icd9_V5867"], [15968, "icd9_V4986"], [16148, "icd9_V5867"], [16195, "icd9_4019"], [16330, "icd9_2761"], [16437, "icd9_5990"], [16508, "icd9_4280"], [16529, "icd9_41401"], [16534, "icd9_25000"], [16704, "icd9_4280"], [16844, "icd9_486"], [16936, "icd9_V4581"], [17315, "icd9_25000"], [17357, "icd9_4280"], [17391, "icd9_42731"], [17421, "icd9_2720"], [17462, "icd9_V5867"], [18002, "icd9_4280"], [18108, "icd9_5990"], [18226, "icd9_41401"]]
+
+# anthropic (default) or openrouter. See docs: OpenRouter on this account can
+# currently only reach deepseek/deepseek-chat; every other provider 403s.
+llm_backend: anthropic
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+# Fuzzing/Detection measure explanation QUALITY (Paulo et al.), not whether
+# the judge discriminates, which is the only question this suite asks. They
+# are two of the four calls per feature; dropping them halves the spend and
+# costs nothing here. The remaining two are load bearing: explain produces the
+# explanation, concordance writes the concordance_results.csv that
+# concordance_multi_judge re-judges with the panel.
+scorers: []
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
+checkpoint_dir: null
+logging_level: INFO

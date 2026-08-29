@@ -1,0 +1,165 @@
+{
+  "sae_name": "gemma_scope_pilot_extended",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 4911,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 20,
+  "n_features_distinct": 20,
+  "n_sig_q05": 15,
+  "median_cliffs_delta_grounded": 0.1690984365905086,
+  "median_cliffs_delta_controls": NaN,
+  "mean_loss_clean": 1.6347653633087866,
+  "mean_loss_recon": 2.283250774198286,
+  "mean_recon_tax": 0.6484854108894995,
+  "config": {
+    "sae_name": "gemma_scope_pilot_extended",
+    "sae_checkpoint_dir": null,
+    "sae_hf_repo_id": "google/gemma-scope-2b-pt-res",
+    "sae_hf_filename": "layer_16/width_16k/average_l0_42/params.npz",
+    "is_centered": false,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z",
+    "centered_activations_dir": null,
+    "mean_path": null,
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 16233,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.4227
+      },
+      {
+        "feature_idx": 12184,
+        "code": "icd9_2749",
+        "kind": "grounded",
+        "r_pb": 0.4118
+      },
+      {
+        "feature_idx": 4291,
+        "code": "icd9_27800",
+        "kind": "grounded",
+        "r_pb": 0.4079
+      },
+      {
+        "feature_idx": 14799,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.3892
+      },
+      {
+        "feature_idx": 2907,
+        "code": "icd9_V5867",
+        "kind": "grounded",
+        "r_pb": 0.3888
+      },
+      {
+        "feature_idx": 5588,
+        "code": "icd9_4019",
+        "kind": "grounded",
+        "r_pb": 0.3874
+      },
+      {
+        "feature_idx": 5093,
+        "code": "icd9_5990",
+        "kind": "grounded",
+        "r_pb": 0.3801
+      },
+      {
+        "feature_idx": 9555,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.3777
+      },
+      {
+        "feature_idx": 9268,
+        "code": "icd9_486",
+        "kind": "grounded",
+        "r_pb": 0.3755
+      },
+      {
+        "feature_idx": 8281,
+        "code": "icd9_2724",
+        "kind": "grounded",
+        "r_pb": 0.369
+      },
+      {
+        "feature_idx": 11234,
+        "code": "icd9_5849",
+        "kind": "grounded",
+        "r_pb": 0.3627
+      },
+      {
+        "feature_idx": 15883,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.3614
+      },
+      {
+        "feature_idx": 11544,
+        "code": "icd9_V5867",
+        "kind": "grounded",
+        "r_pb": 0.3562
+      },
+      {
+        "feature_idx": 5624,
+        "code": "icd9_V5861",
+        "kind": "grounded",
+        "r_pb": 0.3558
+      },
+      {
+        "feature_idx": 3136,
+        "code": "icd9_V5861",
+        "kind": "grounded",
+        "r_pb": 0.3536
+      },
+      {
+        "feature_idx": 8886,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.3519
+      },
+      {
+        "feature_idx": 5935,
+        "code": "icd9_60000",
+        "kind": "grounded",
+        "r_pb": 0.3506
+      },
+      {
+        "feature_idx": 12324,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.3483
+      },
+      {
+        "feature_idx": 12120,
+        "code": "icd9_41401",
+        "kind": "grounded",
+        "r_pb": 0.3441
+      },
+      {
+        "feature_idx": 2513,
+        "code": "icd9_311",
+        "kind": "grounded",
+        "r_pb": 0.3434
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": null,
+    "output_dir": "/out/ablation/gemma_scope_pilot_extended",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}

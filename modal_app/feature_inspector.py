@@ -57,11 +57,17 @@ def run_feature_inspector_remote(config: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.local_entrypoint()
-def main(config_file: str) -> None:
+def main(config_file: str, detach: bool = False) -> None:
     """Load YAML config and dispatch to Modal.
 
     Usage:
-        modal run modal_app/feature_inspector.py --config-file configs/feature_inspector.yaml
+        uv run modal run modal_app/feature_inspector.py \
+            --config-file configs/feature_inspector.yaml
+
+    Pass --detach BOTH before the entrypoint and after the config for runs
+    longer than ~5 minutes. The outer flag keeps the app alive after the CLI
+    exits; this inner one makes main() spawn instead of blocking. The outer
+    flag alone gets the run silently cancelled a few minutes in.
     """
     import yaml
 
@@ -69,5 +75,9 @@ def main(config_file: str) -> None:
         config = yaml.safe_load(f)
 
     print(f"Dispatching feature inspection: {config.get('eval_output_dir')}")
+    if detach:
+        call = run_feature_inspector_remote.spawn(config)
+        print(f"Spawned detached: {call.object_id}")
+        return
     result = run_feature_inspector_remote.remote(config)
     print(json.dumps(result, indent=2, default=str))

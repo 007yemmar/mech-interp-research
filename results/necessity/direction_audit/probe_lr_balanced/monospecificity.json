@@ -1,0 +1,122 @@
+[
+  {
+    "threshold": 0.1,
+    "n_grounded": 46,
+    "frac_grounded": 1.0,
+    "n_monospecific": 0,
+    "n_oligospecific": 0,
+    "n_polyspecific": 46,
+    "frac_mono_of_grounded": 0.0,
+    "mean_codes_per_grounded": 17.78,
+    "histogram": {
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 3,
+      "10": 2,
+      "11": 5,
+      "13": 3,
+      "14": 1,
+      "15": 3,
+      "16": 3,
+      "19": 1,
+      "21": 6,
+      "23": 4,
+      "24": 4,
+      "25": 1,
+      "26": 1,
+      "27": 3,
+      "29": 1,
+      "30": 1,
+      "31": 1,
+      "20+": 22
+    }
+  },
+  {
+    "threshold": 0.2,
+    "n_grounded": 46,
+    "frac_grounded": 1.0,
+    "n_monospecific": 7,
+    "n_oligospecific": 14,
+    "n_polyspecific": 25,
+    "frac_mono_of_grounded": 0.1522,
+    "mean_codes_per_grounded": 5.33,
+    "histogram": {
+      "1": 7,
+      "2": 8,
+      "3": 6,
+      "4": 4,
+      "5": 2,
+      "6": 4,
+      "7": 2,
+      "8": 3,
+      "9": 1,
+      "10": 2,
+      "11": 2,
+      "13": 5
+    }
+  },
+  {
+    "threshold": 0.3,
+    "n_grounded": 32,
+    "frac_grounded": 0.6957,
+    "n_monospecific": 15,
+    "n_oligospecific": 8,
+    "n_polyspecific": 9,
+    "frac_mono_of_grounded": 0.4688,
+    "mean_codes_per_grounded": 2.62,
+    "histogram": {
+      "0": 14,
+      "1": 15,
+      "2": 6,
+      "3": 2,
+      "4": 1,
+      "5": 3,
+      "6": 3,
+      "7": 2
+    }
+  },
+  {
+    "threshold": 0.4,
+    "n_grounded": 21,
+    "frac_grounded": 0.4565,
+    "n_monospecific": 16,
+    "n_oligospecific": 5,
+    "n_polyspecific": 0,
+    "frac_mono_of_grounded": 0.7619,
+    "mean_codes_per_grounded": 1.24,
+    "histogram": {
+      "0": 25,
+      "1": 16,
+      "2": 5
+    }
+  },
+  {
+    "threshold": 0.5,
+    "n_grounded": 5,
+    "frac_grounded": 0.1087,
+    "n_monospecific": 5,
+    "n_oligospecific": 0,
+    "n_polyspecific": 0,
+    "frac_mono_of_grounded": 1.0,
+    "mean_codes_per_grounded": 1.0,
+    "histogram": {
+      "0": 41,
+      "1": 5
+    }
+  },
+  {
+    "threshold": 0.6,
+    "n_grounded": 2,
+    "frac_grounded": 0.0435,
+    "n_monospecific": 2,
+    "n_oligospecific": 0,
+    "n_polyspecific": 0,
+    "frac_mono_of_grounded": 1.0,
+    "mean_codes_per_grounded": 1.0,
+    "histogram": {
+      "0": 44,
+      "1": 2
+    }
+  }
+]

@@ -1,0 +1,79 @@
+{
+  "global": {
+    "counts": {
+      "clinical_vocabulary": 179,
+      "structural_pattern": 137,
+      "noise": 483,
+      "clinical_concept": 150,
+      "general_language": 13,
+      "unknown": 2
+    },
+    "fractions": {
+      "clinical_vocabulary": 0.18568464730290457,
+      "structural_pattern": 0.1421161825726141,
+      "noise": 0.5010373443983402,
+      "clinical_concept": 0.15560165975103735,
+      "general_language": 0.013485477178423237,
+      "unknown": 0.002074688796680498
+    },
+    "total": 964
+  },
+  "dead": {
+    "counts": {
+      "structural_pattern": 75,
+      "clinical_vocabulary": 20,
+      "clinical_concept": 4,
+      "general_language": 1
+    },
+    "fractions": {
+      "structural_pattern": 0.75,
+      "clinical_vocabulary": 0.2,
+      "clinical_concept": 0.04,
+      "general_language": 0.01
+    },
+    "total": 100
+  },
+  "non_grounded": {
+    "counts": {
+      "noise": 483,
+      "structural_pattern": 1
+    },
+    "fractions": {
+      "noise": 0.9979338842975206,
+      "structural_pattern": 0.002066115702479339
+    },
+    "total": 484
+  },
+  "strong_grounded": {
+    "counts": {
+      "structural_pattern": 26,
+      "clinical_vocabulary": 120,
+      "clinical_concept": 132,
+      "general_language": 2
+    },
+    "fractions": {
+      "structural_pattern": 0.09285714285714286,
+      "clinical_vocabulary": 0.42857142857142855,
+      "clinical_concept": 0.4714285714285714,
+      "general_language": 0.007142857142857143
+    },
+    "total": 280
+  },
+  "weak_grounded": {
+    "counts": {
+      "clinical_vocabulary": 39,
+      "structural_pattern": 35,
+      "general_language": 10,
+      "clinical_concept": 14,
+      "unknown": 2
+    },
+    "fractions": {
+      "clinical_vocabulary": 0.39,
+      "structural_pattern": 0.35,
+      "general_language": 0.1,
+      "clinical_concept": 0.14,
+      "unknown": 0.02
+    },
+    "total": 100
+  }
+}

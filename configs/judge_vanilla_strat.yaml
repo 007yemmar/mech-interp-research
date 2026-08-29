@@ -1,0 +1,70 @@
+# Published 380-feature rule applied to the vanilla SAE, on held-out shards.
+#
+# Same selection (280 strong at r>0.4 + 100 weak at 0.1-0.3), same prompts and
+# thresholds as the published jumprelu run, so results drop straight into the
+# R1/R2 tables. For vanilla: 291 features clear r>0.4 (jumprelu: 276), max |r| 0.859 vs 0.864 --
+# a like-for-like 380-feature replication of the published run.
+
+# --- paths ---
+sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split
+# 31 held-out shards, not the 312-shard full checkpoint: auto_interp's shard
+# fan-out is bounded only by what note_vectors covers, and the full checkpoint
+# drove an 83-minute extraction that never survived to the explainer.
+shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/vanilla_strat
+
+# --- feature selection ---
+# explicit_features pins the stratified pool, so the tier knobs are inert.
+n_strong_grounded: 0
+n_weak_grounded: 0
+# Noise-floor tiers OFF. The published config carries n_non_grounded: 1000 and
+# n_dead: 100, which inflated the selection to 616 (vanilla) and 1213
+# (gemmascope) features. Those tiers have no ICD code, so they yield no
+# concordance verdict and never enter the banded tables -- ~60% and ~90% of the
+# calls respectively bought nothing reportable. They are already established
+# for jumprelu, and the architecture question is answered by the grounded
+# features alone. Fewer features also shrinks the shard union
+# select_shards_for_features returns, so extraction shortens too.
+n_non_grounded: 0
+n_dead: 0
+random_seed: 42
+
+# --- explanation ---
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20         # activating contexts shown to the explainer
+n_contexts_test: 10          # held out for scoring (5 pos, 5 neg)
+max_tokens_context: 30       # +/- tokens around trigger token
+
+# --- scoring ---
+# Fuzzing/Detection do not affect the concordance verdict and are half the
+# calls; the published run included them, this one does not.
+scorers: []
+
+# --- post-processing ---
+concordance_model: claude-sonnet-4-6
+concordance_thresholds:
+  - 0.3
+  - 0.4
+  - 0.5
+
+# --- ICD descriptions (for concordance prompts) ---
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+# --- tokenizer ---
+model_name: google/gemma-2-2b
+
+# --- resume ---
+checkpoint_dir: null         # auto-detected from output_dir
+
+logging_level: INFO
+
+# 40 features per |r| bucket (0.2-0.3 ... 0.6+), matching the JumpReLU stratified
+# pool. The published 380-rule leaves 0.3-0.4 EMPTY by construction (strong is
+# r>0.4, weak is 0.1-0.3), so vanilla's replication of JumpReLU was approximate
+# in exactly the band where hit@1 transitions. 134 of 200 already have contexts
+# from the 380 run; auto_interp extracts only the remaining 66.
+explicit_features: [[103, "icd9_4280"], [115, "icd9_41401"], [129, "icd9_V4582"], [181, "icd9_4019"], [321, "icd9_5990"], [415, "icd9_2749"], [449, "icd9_41401"], [517, "icd9_25000"], [550, "icd9_4280"], [555, "icd9_5990"], [562, "icd9_V5867"], [671, "icd9_30000"], [780, "icd9_4280"], [787, "icd9_41401"], [827, "icd9_5849"], [843, "icd9_32723"], [1008, "icd9_5849"], [1042, "icd9_60000"], [1079, "icd9_2720"], [1131, "icd9_486"], [1165, "icd9_4280"], [1192, "icd9_73300"], [1299, "icd9_486"], [1325, "icd9_42731"], [1387, "icd9_42731"], [1504, "icd9_2749"], [1562, "icd9_V5867"], [1584, "icd9_5990"], [1641, "icd9_V5867"], [1652, "icd9_3572"], [1708, "icd9_41401"], [1713, "icd9_27800"], [1762, "icd9_5990"], [1790, "icd9_2449"], [1806, "icd9_2749"], [1892, "icd9_56400"], [1950, "icd9_5856"], [1954, "icd9_4280"], [1980, "icd9_V5861"], [1987, "icd9_5856"], [1993, "icd9_2724"], [2087, "icd9_V5867"], [2125, "icd9_4280"], [2141, "icd9_4280"], [2164, "icd9_5990"], [2218, "icd9_2761"], [2462, "icd9_2724"], [2556, "icd9_4280"], [2614, "icd9_V5867"], [2653, "icd9_41401"], [2659, "icd9_4280"], [2762, "icd9_42731"], [2868, "icd9_2449"], [2882, "icd9_5849"], [2884, "icd9_42789"], [2942, "icd9_42731"], [2952, "icd9_2851"], [2971, "icd9_2851"], [2979, "icd9_2724"], [2981, "icd9_V5867"], [3161, "icd9_32723"], [3233, "icd9_V5867"], [3244, "icd9_V1582"], [3248, "icd9_V5861"], [3321, "icd9_486"], [3340, "icd9_V4581"], [3389, "icd9_5849"], [3447, "icd9_5849"], [3456, "icd9_60000"], [3467, "icd9_41401"], [3485, "icd9_2449"], [3537, "icd9_2449"], [3569, "icd9_42731"], [3670, "icd9_2762"], [3728, "icd9_4280"], [3731, "icd9_5856"], [3758, "icd9_496"], [3764, "icd9_53081"], [3898, "icd9_V5861"], [4037, "icd9_41401"], [4072, "icd9_2762"], [4094, "icd9_5849"], [4152, "icd9_2449"], [4153, "icd9_2761"], [4228, "icd9_V5867"], [4261, "icd9_73300"], [4378, "icd9_4019"], [4391, "icd9_V5861"], [4393, "icd9_73300"], [4448, "icd9_5856"], [4558, "icd9_41401"], [4595, "icd9_4019"], [4615, "icd9_41401"], [4652, "icd9_311"], [4657, "icd9_4280"], [4858, "icd9_42731"], [4965, "icd9_5849"], [4999, "icd9_V5861"], [5076, "icd9_V5861"], [5286, "icd9_2749"], [5301, "icd9_V5867"], [5303, "icd9_V5861"], [5362, "icd9_42731"], [5451, "icd9_42731"], [5542, "icd9_5990"], [5553, "icd9_60000"], [5591, "icd9_5849"], [5826, "icd9_2449"], [5895, "icd9_4280"], [5952, "icd9_2851"], [6040, "icd9_60000"], [6100, "icd9_4280"], [6123, "icd9_5856"], [6198, "icd9_496"], [6236, "icd9_42731"], [6405, "icd9_V5867"], [6433, "icd9_V4581"], [6437, "icd9_41401"], [6462, "icd9_5856"], [6552, "icd9_5856"], [6570, "icd9_V5866"], [6613, "icd9_53081"], [6626, "icd9_2720"], [6638, "icd9_42731"], [6699, "icd9_5849"], [6941, "icd9_5856"], [6990, "icd9_41401"], [7048, "icd9_2749"], [7116, "icd9_42731"], [7304, "icd9_2449"], [7341, "icd9_V5861"], [7380, "icd9_4280"], [7484, "icd9_5849"], [7611, "icd9_4280"], [7695, "icd9_2875"], [7775, "icd9_5856"], [7820, "icd9_4280"], [7861, "icd9_32723"], [7863, "icd9_42731"], [7871, "icd9_60000"], [7909, "icd9_496"], [8012, "icd9_5849"], [8057, "icd9_V5867"], [8285, "icd9_V5867"], [8326, "icd9_3572"], [8363, "icd9_4280"], [8370, "icd9_41401"], [8371, "icd9_V5861"], [8618, "icd9_4280"], [8700, "icd9_5856"], [8711, "icd9_2720"], [8729, "icd9_40390"], [8753, "icd9_5990"], [8823, "icd9_2449"], [8858, "icd9_5856"], [8930, "icd9_5849"], [8980, "icd9_V5861"], [9090, "icd9_486"], [9118, "icd9_25000"], [9261, "icd9_42731"], [9336, "icd9_5849"], [9398, "icd9_4280"], [9496, "icd9_73300"], [9546, "icd9_2449"], [9647, "icd9_2724"], [9830, "icd9_5856"], [10009, "icd9_4280"], [10516, "icd9_4280"], [10968, "icd9_4280"], [11282, "icd9_V4582"], [11427, "icd9_5990"], [11747, "icd9_2724"], [11861, "icd9_5990"], [12579, "icd9_3572"], [12912, "icd9_5849"], [13313, "icd9_4280"], [13579, "icd9_5990"], [13594, "icd9_4280"], [13633, "icd9_311"], [13782, "icd9_V5866"], [14025, "icd9_4280"], [14056, "icd9_496"], [14207, "icd9_27651"], [14661, "icd9_42789"], [14764, "icd9_73300"], [15240, "icd9_4280"], [15247, "icd9_41401"], [15268, "icd9_5990"], [15284, "icd9_5990"], [16382, "icd9_4019"], [16666, "icd9_V5861"], [17089, "icd9_4019"], [17158, "icd9_5849"], [17238, "icd9_5849"], [17248, "icd9_4280"], [17672, "icd9_2724"], [17738, "icd9_5990"], [17789, "icd9_5990"], [18055, "icd9_4280"], [18393, "icd9_49390"]]

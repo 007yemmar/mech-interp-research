@@ -1,0 +1,30 @@
+# R2 (hit@1 forced-choice retrieval) on the random_hard CONTROL arm.
+#
+# The published Table R2 reports hit@1 for the SAE only, against a purely
+# combinatorial 1-of-9 = 11.1% floor. That floor does not bound what a random
+# direction scores, because the EXPLANATIONS are not random even when the
+# directions are: a direction firing on "flutter" yields an explanation naming
+# atrial flutter, and picking the cardiac code out of 7 cross-organ-system
+# distractors is then easy. This measures the real floor.
+#
+# Sonnet runs on the direct Anthropic key; this account's OpenRouter key is
+# 403'd on anthropic/* and openai/*, so gpt-4o is unavailable and DeepSeek is
+# the reachable second family.
+
+auto_interp_dir: /out/auto_interp/judgetest/keyword_b1
+icd_eval_dir:    /out/icd_eval/fourarm/keyword_b1_bosfix
+icd_csv_path:    /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: /out/auto_interp/judgetest/keyword_b1/retrieval_eval_hardneg
+
+judges:
+  - {slug: sonnet-4-6,  backend: anthropic,  model: claude-sonnet-4-6}
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+
+n_distractors: 7
+# HARD NEGATIVES: distractors from the correct code's OWN chapter.
+same_chapter_distractors: true
+r_unrelated: 0.05
+thresholds: [0.3, 0.5]
+max_workers: 4
+logging_level: INFO

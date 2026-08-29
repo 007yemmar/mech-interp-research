@@ -1,0 +1,25 @@
+{
+  "ablation_output_dir": "/out/ablation/jumprelu_pilot",
+  "n_targets": 12,
+  "n_grounded": 10,
+  "restrict_true_negative": true,
+  "off_target": {
+    "mean_on_target_delta": 0.24586946644098223,
+    "mean_abs_off_target_delta": 0.024232277705952078,
+    "median_specificity_ratio": 11.10299893444852,
+    "total_off_target_sig_q05": 4
+  },
+  "length_matched": {
+    "mean_delta_raw": 0.24586946644098223,
+    "mean_delta_adjusted": 0.19085613284868758,
+    "mean_attenuation": 0.055013333592294635,
+    "n_sig_after_adjust": 6
+  },
+  "calibration": {
+    "base_loss": 1.6347653633087866,
+    "recon_tax": 0.008792023998830256,
+    "mean_on_target_delta_nats": 0.0005366219674635519,
+    "mean_pct_of_base_loss": 0.032825626203470695,
+    "mean_ratio_to_recon_tax": 0.061035089023295144
+  }
+}

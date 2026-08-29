@@ -1,0 +1,1014 @@
+{
+  "n_methods": 11,
+  "n_codes": 46,
+  "split": {
+    "audit_shards": [
+      281,
+      312
+    ],
+    "n_audit_notes": 4911
+  },
+  "per_method_summary": [
+    {
+      "method": "vanilla SAE",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.5736416876316071,
+      "median_mean_abs_off_r": 0.0324462598965813,
+      "median_specificity_ratio": 15.882739630097948,
+      "median_n_off_sig": 2.0
+    },
+    {
+      "method": "JumpReLU SAE",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.5739237666130066,
+      "median_mean_abs_off_r": 0.03727254983710325,
+      "median_specificity_ratio": 14.937177606641548,
+      "median_n_off_sig": 3.0
+    },
+    {
+      "method": "GemmaScope SAE",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.30938041210174555,
+      "median_mean_abs_off_r": 0.0468480567874697,
+      "median_specificity_ratio": 6.28897943197956,
+      "median_n_off_sig": 4.0
+    },
+    {
+      "method": "PCA",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.14120834320783615,
+      "median_mean_abs_off_r": 0.0484398753516567,
+      "median_specificity_ratio": 2.8790944782813863,
+      "median_n_off_sig": 4.0
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.3394991308450699,
+      "median_mean_abs_off_r": 0.0572130049701728,
+      "median_specificity_ratio": 5.681225538784078,
+      "median_n_off_sig": 8.0
+    },
+    {
+      "method": "random (L0-matched)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.14906115829944605,
+      "median_mean_abs_off_r": 0.07507471779697675,
+      "median_specificity_ratio": 2.118979413469771,
+      "median_n_off_sig": 12.0
+    },
+    {
+      "method": "random (dense)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.2186128422617912,
+      "median_mean_abs_off_r": 0.07856697384203365,
+      "median_specificity_ratio": 2.9970810552275324,
+      "median_n_off_sig": 13.0
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.33312936127185816,
+      "median_mean_abs_off_r": 0.08853403036159249,
+      "median_specificity_ratio": 4.420142175924568,
+      "median_n_off_sig": 17.0
+    },
+    {
+      "method": "probe LR (balanced)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.32735227048397064,
+      "median_mean_abs_off_r": 0.09208401887735809,
+      "median_specificity_ratio": 3.6673107302965953,
+      "median_n_off_sig": 16.5
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.12660805881023404,
+      "median_mean_abs_off_r": 0.0937984634863419,
+      "median_specificity_ratio": 1.3690817883978148,
+      "median_n_off_sig": 17.0
+    },
+    {
+      "method": "diff-in-means (plain)",
+      "n_codes": 46,
+      "median_abs_on_target_r": 0.1208894550800323,
+      "median_mean_abs_off_r": 0.09403997334237725,
+      "median_specificity_ratio": 1.2509233407570441,
+      "median_n_off_sig": 17.0
+    }
+  ],
+  "threshold_table": [
+    {
+      "method": "diff-in-means (plain)",
+      "k": 46,
+      "peak_abs_r": 0.2907048165798187,
+      "grounded_r0.1": 46,
+      "grounded_r0.2": 42,
+      "grounded_r0.3": 0,
+      "grounded_r0.4": 0,
+      "grounded_r0.5": 0,
+      "grounded_r0.6": 0
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "k": 46,
+      "peak_abs_r": 0.30967816710472107,
+      "grounded_r0.1": 46,
+      "grounded_r0.2": 41,
+      "grounded_r0.3": 3,
+      "grounded_r0.4": 0,
+      "grounded_r0.5": 0,
+      "grounded_r0.6": 0
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "k": 46,
+      "peak_abs_r": 0.6986889839172363,
+      "grounded_r0.1": 46,
+      "grounded_r0.2": 43,
+      "grounded_r0.3": 28,
+      "grounded_r0.4": 19,
+      "grounded_r0.5": 7,
+      "grounded_r0.6": 2
+    },
+    {
+      "method": "probe LR (balanced)",
+      "k": 46,
+      "peak_abs_r": 0.6297281384468079,
+      "grounded_r0.1": 46,
+      "grounded_r0.2": 46,
+      "grounded_r0.3": 32,
+      "grounded_r0.4": 21,
+      "grounded_r0.5": 5,
+      "grounded_r0.6": 2
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "k": 46,
+      "peak_abs_r": 0.6367574334144592,
+      "grounded_r0.1": 46,
+      "grounded_r0.2": 46,
+      "grounded_r0.3": 31,
+      "grounded_r0.4": 19,
+      "grounded_r0.5": 5,
+      "grounded_r0.6": 2
+    },
+    {
+      "method": "PCA",
+      "k": 2304,
+      "peak_abs_r": 0.440860778093338,
+      "grounded_r0.1": 256,
+      "grounded_r0.2": 18,
+      "grounded_r0.3": 1,
+      "grounded_r0.4": 1,
+      "grounded_r0.5": 0,
+      "grounded_r0.6": 0
+    },
+    {
+      "method": "random (dense)",
+      "k": 18432,
+      "peak_abs_r": 0.4307236671447754,
+      "grounded_r0.1": 10988,
+      "grounded_r0.2": 538,
+      "grounded_r0.3": 40,
+      "grounded_r0.4": 2,
+      "grounded_r0.5": 0,
+      "grounded_r0.6": 0
+    },
+    {
+      "method": "random (L0-matched)",
+      "k": 18432,
+      "peak_abs_r": 0.31426572799682617,
+      "grounded_r0.1": 9132,
+      "grounded_r0.2": 127,
+      "grounded_r0.3": 1,
+      "grounded_r0.4": 0,
+      "grounded_r0.5": 0,
+      "grounded_r0.6": 0
+    },
+    {
+      "method": "GemmaScope SAE",
+      "k": 16384,
+      "peak_abs_r": 0.5449675917625427,
+      "grounded_r0.1": 5790,
+      "grounded_r0.2": 295,
+      "grounded_r0.3": 54,
+      "grounded_r0.4": 13,
+      "grounded_r0.5": 4,
+      "grounded_r0.6": 0
+    },
+    {
+      "method": "vanilla SAE",
+      "k": 18432,
+      "peak_abs_r": 0.859485924243927,
+      "grounded_r0.1": 8985,
+      "grounded_r0.2": 2063,
+      "grounded_r0.3": 675,
+      "grounded_r0.4": 291,
+      "grounded_r0.5": 143,
+      "grounded_r0.6": 73
+    },
+    {
+      "method": "JumpReLU SAE",
+      "k": 18432,
+      "peak_abs_r": 0.8642893433570862,
+      "grounded_r0.1": 9721,
+      "grounded_r0.2": 2075,
+      "grounded_r0.3": 610,
+      "grounded_r0.4": 276,
+      "grounded_r0.5": 147,
+      "grounded_r0.6": 61
+    }
+  ],
+  "coupling_control": {
+    "fit": {
+      "slope": -0.036528905413576146,
+      "intercept": 0.08146075495313443,
+      "r": -0.2204718112720459,
+      "p": 5.474499101523744e-07,
+      "n_points": 506
+    },
+    "by_method": [
+      {
+        "method": "vanilla SAE",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.5736416876316071,
+        "median_mean_abs_off_r": 0.0324462598965813,
+        "median_leakage_residual": -0.02587856236342184
+      },
+      {
+        "method": "PCA",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.14120834320783615,
+        "median_mean_abs_off_r": 0.0484398753516567,
+        "median_leakage_residual": -0.024941325551406546
+      },
+      {
+        "method": "GemmaScope SAE",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.30938041210174555,
+        "median_mean_abs_off_r": 0.0468480567874697,
+        "median_leakage_residual": -0.02320682667004637
+      },
+      {
+        "method": "JumpReLU SAE",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.5739237666130066,
+        "median_mean_abs_off_r": 0.03727254983710325,
+        "median_leakage_residual": -0.021270092409540763
+      },
+      {
+        "method": "diff-in-means (LDA)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.3394991308450699,
+        "median_mean_abs_off_r": 0.0572130049701728,
+        "median_leakage_residual": -0.0129465327627423
+      },
+      {
+        "method": "random (L0-matched)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.14906115829944605,
+        "median_mean_abs_off_r": 0.07507471779697675,
+        "median_leakage_residual": 0.0027554959009529895
+      },
+      {
+        "method": "random (dense)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.2186128422617912,
+        "median_mean_abs_off_r": 0.07856697384203365,
+        "median_leakage_residual": 0.005069093572493424
+      },
+      {
+        "method": "diff-in-means (diagonal)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.12660805881023404,
+        "median_mean_abs_off_r": 0.0937984634863419,
+        "median_leakage_residual": 0.017533088135187655
+      },
+      {
+        "method": "diff-in-means (plain)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.1208894550800323,
+        "median_mean_abs_off_r": 0.09403997334237725,
+        "median_leakage_residual": 0.01785812384929679
+      },
+      {
+        "method": "probe LR (unweighted)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.33312936127185816,
+        "median_mean_abs_off_r": 0.08853403036159249,
+        "median_leakage_residual": 0.020148632052957277
+      },
+      {
+        "method": "probe LR (balanced)",
+        "n_codes": 46,
+        "median_abs_on_target_r": 0.32735227048397064,
+        "median_mean_abs_off_r": 0.09208401887735809,
+        "median_leakage_residual": 0.026133090386991117
+      }
+    ]
+  },
+  "matched_r_comparisons": [
+    {
+      "method_a": "vanilla SAE",
+      "method_b": "diff-in-means (LDA)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 5,
+      "median_r_a": 0.4583365023136139,
+      "median_r_b": 0.4569708704948425,
+      "median_leakage_a": 0.0825241828958193,
+      "median_leakage_b": 0.0757568073148528,
+      "median_specificity_a": 5.9537896790170235,
+      "median_specificity_b": 5.889252908482772,
+      "a_lower_leakage_on_n_codes": 2.0,
+      "leakage_wilcoxon_p": 1.0,
+      "specificity_wilcoxon_p": 1.0,
+      "note": ""
+    },
+    {
+      "method_a": "vanilla SAE",
+      "method_b": "probe LR (unweighted)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 5,
+      "median_r_a": 0.4583365023136139,
+      "median_r_b": 0.4353340268135071,
+      "median_leakage_a": 0.0842584486513967,
+      "median_leakage_b": 0.0884667755828963,
+      "median_specificity_a": 5.9537896790170235,
+      "median_specificity_b": 5.266277874359042,
+      "a_lower_leakage_on_n_codes": 4.0,
+      "leakage_wilcoxon_p": 0.625,
+      "specificity_wilcoxon_p": 0.1875,
+      "note": ""
+    },
+    {
+      "method_a": "vanilla SAE",
+      "method_b": "PCA",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 0,
+      "median_r_a": NaN,
+      "median_r_b": NaN,
+      "median_leakage_a": NaN,
+      "median_leakage_b": NaN,
+      "median_specificity_a": NaN,
+      "median_specificity_b": NaN,
+      "a_lower_leakage_on_n_codes": NaN,
+      "leakage_wilcoxon_p": NaN,
+      "specificity_wilcoxon_p": NaN,
+      "note": "the two methods never reach comparable on-target |r|"
+    },
+    {
+      "method_a": "vanilla SAE",
+      "method_b": "random (L0-matched)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 0,
+      "median_r_a": NaN,
+      "median_r_b": NaN,
+      "median_leakage_a": NaN,
+      "median_leakage_b": NaN,
+      "median_specificity_a": NaN,
+      "median_specificity_b": NaN,
+      "a_lower_leakage_on_n_codes": NaN,
+      "leakage_wilcoxon_p": NaN,
+      "specificity_wilcoxon_p": NaN,
+      "note": "the two methods never reach comparable on-target |r|"
+    },
+    {
+      "method_a": "vanilla SAE",
+      "method_b": "GemmaScope SAE",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 3,
+      "median_r_a": 0.3456708192825317,
+      "median_r_b": 0.3115482032299042,
+      "median_leakage_a": 0.0501409458255188,
+      "median_leakage_b": 0.0503410041383985,
+      "median_specificity_a": 11.360052974357044,
+      "median_specificity_b": 10.527816913942578,
+      "a_lower_leakage_on_n_codes": 1.0,
+      "leakage_wilcoxon_p": 0.5,
+      "specificity_wilcoxon_p": 1.0,
+      "note": ""
+    },
+    {
+      "method_a": "JumpReLU SAE",
+      "method_b": "diff-in-means (LDA)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 7,
+      "median_r_a": 0.3669810593128204,
+      "median_r_b": 0.319143146276474,
+      "median_leakage_a": 0.0774879494681954,
+      "median_leakage_b": 0.0426672536291233,
+      "median_specificity_a": 5.667713686386557,
+      "median_specificity_b": 6.779614025750464,
+      "a_lower_leakage_on_n_codes": 2.0,
+      "leakage_wilcoxon_p": 0.6875,
+      "specificity_wilcoxon_p": 1.0,
+      "note": ""
+    },
+    {
+      "method_a": "JumpReLU SAE",
+      "method_b": "probe LR (unweighted)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 6,
+      "median_r_a": 0.4013115465641022,
+      "median_r_b": 0.3638436794281006,
+      "median_leakage_a": 0.05737303245954935,
+      "median_leakage_b": 0.05944211310577675,
+      "median_specificity_a": 9.009011904737267,
+      "median_specificity_b": 5.499232689669126,
+      "a_lower_leakage_on_n_codes": 5.0,
+      "leakage_wilcoxon_p": 0.3125,
+      "specificity_wilcoxon_p": 0.15625,
+      "note": ""
+    },
+    {
+      "method_a": "JumpReLU SAE",
+      "method_b": "GemmaScope SAE",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 3,
+      "median_r_a": 0.3353749811649322,
+      "median_r_b": 0.3115482032299042,
+      "median_leakage_a": 0.0527125071042165,
+      "median_leakage_b": 0.0503410041383985,
+      "median_specificity_a": 10.871405173021904,
+      "median_specificity_b": 10.527816913942578,
+      "a_lower_leakage_on_n_codes": 0.0,
+      "leakage_wilcoxon_p": 0.25,
+      "specificity_wilcoxon_p": 0.75,
+      "note": ""
+    },
+    {
+      "method_a": "GemmaScope SAE",
+      "method_b": "diff-in-means (LDA)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 15,
+      "median_r_a": 0.3050801455974579,
+      "median_r_b": 0.2693379819393158,
+      "median_leakage_a": 0.0376124837953183,
+      "median_leakage_b": 0.0440596168498612,
+      "median_specificity_a": 6.718697497853389,
+      "median_specificity_b": 5.550235698344513,
+      "a_lower_leakage_on_n_codes": 11.0,
+      "leakage_wilcoxon_p": 0.10699462890625,
+      "specificity_wilcoxon_p": 0.1876220703125,
+      "note": ""
+    },
+    {
+      "method_a": "GemmaScope SAE",
+      "method_b": "probe LR (unweighted)",
+      "tol": 0.05,
+      "n_codes_common": 46,
+      "n_codes_matched": 14,
+      "median_r_a": 0.30938041210174555,
+      "median_r_b": 0.30317549407482147,
+      "median_leakage_a": 0.036348183021052805,
+      "median_leakage_b": 0.0742276629743476,
+      "median_specificity_a": 7.088656888387726,
+      "median_specificity_b": 4.557806340096969,
+      "a_lower_leakage_on_n_codes": 13.0,
+      "leakage_wilcoxon_p": 0.001708984375,
+      "specificity_wilcoxon_p": 0.0023193359375,
+      "note": ""
+    }
+  ],
+  "monospecificity": [
+    {
+      "method": "diff-in-means (plain)",
+      "threshold": 0.1,
+      "n_grounded": 46,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 17.89
+    },
+    {
+      "method": "diff-in-means (plain)",
+      "threshold": 0.2,
+      "n_grounded": 42,
+      "n_monospecific": 3,
+      "frac_mono_of_grounded": 0.0714,
+      "mean_codes_per_grounded": 2.24
+    },
+    {
+      "method": "diff-in-means (plain)",
+      "threshold": 0.3,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (plain)",
+      "threshold": 0.4,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (plain)",
+      "threshold": 0.5,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (plain)",
+      "threshold": 0.6,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "threshold": 0.1,
+      "n_grounded": 46,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 18.35
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "threshold": 0.2,
+      "n_grounded": 41,
+      "n_monospecific": 4,
+      "frac_mono_of_grounded": 0.0976,
+      "mean_codes_per_grounded": 2.51
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "threshold": 0.3,
+      "n_grounded": 3,
+      "n_monospecific": 3,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "threshold": 0.4,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "threshold": 0.5,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (diagonal)",
+      "threshold": 0.6,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "threshold": 0.1,
+      "n_grounded": 46,
+      "n_monospecific": 2,
+      "frac_mono_of_grounded": 0.0435,
+      "mean_codes_per_grounded": 10.98
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "threshold": 0.2,
+      "n_grounded": 43,
+      "n_monospecific": 19,
+      "frac_mono_of_grounded": 0.4419,
+      "mean_codes_per_grounded": 3.28
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "threshold": 0.3,
+      "n_grounded": 28,
+      "n_monospecific": 15,
+      "frac_mono_of_grounded": 0.5357,
+      "mean_codes_per_grounded": 2.04
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "threshold": 0.4,
+      "n_grounded": 19,
+      "n_monospecific": 14,
+      "frac_mono_of_grounded": 0.7368,
+      "mean_codes_per_grounded": 1.26
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "threshold": 0.5,
+      "n_grounded": 7,
+      "n_monospecific": 7,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "diff-in-means (LDA)",
+      "threshold": 0.6,
+      "n_grounded": 2,
+      "n_monospecific": 2,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "probe LR (balanced)",
+      "threshold": 0.1,
+      "n_grounded": 46,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 17.78
+    },
+    {
+      "method": "probe LR (balanced)",
+      "threshold": 0.2,
+      "n_grounded": 46,
+      "n_monospecific": 7,
+      "frac_mono_of_grounded": 0.1522,
+      "mean_codes_per_grounded": 5.33
+    },
+    {
+      "method": "probe LR (balanced)",
+      "threshold": 0.3,
+      "n_grounded": 32,
+      "n_monospecific": 15,
+      "frac_mono_of_grounded": 0.4688,
+      "mean_codes_per_grounded": 2.62
+    },
+    {
+      "method": "probe LR (balanced)",
+      "threshold": 0.4,
+      "n_grounded": 21,
+      "n_monospecific": 16,
+      "frac_mono_of_grounded": 0.7619,
+      "mean_codes_per_grounded": 1.24
+    },
+    {
+      "method": "probe LR (balanced)",
+      "threshold": 0.5,
+      "n_grounded": 5,
+      "n_monospecific": 5,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "probe LR (balanced)",
+      "threshold": 0.6,
+      "n_grounded": 2,
+      "n_monospecific": 2,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "threshold": 0.1,
+      "n_grounded": 46,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 16.67
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "threshold": 0.2,
+      "n_grounded": 46,
+      "n_monospecific": 11,
+      "frac_mono_of_grounded": 0.2391,
+      "mean_codes_per_grounded": 4.72
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "threshold": 0.3,
+      "n_grounded": 31,
+      "n_monospecific": 16,
+      "frac_mono_of_grounded": 0.5161,
+      "mean_codes_per_grounded": 2.55
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "threshold": 0.4,
+      "n_grounded": 19,
+      "n_monospecific": 14,
+      "frac_mono_of_grounded": 0.7368,
+      "mean_codes_per_grounded": 1.26
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "threshold": 0.5,
+      "n_grounded": 5,
+      "n_monospecific": 5,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "probe LR (unweighted)",
+      "threshold": 0.6,
+      "n_grounded": 2,
+      "n_monospecific": 2,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "PCA",
+      "threshold": 0.1,
+      "n_grounded": 256,
+      "n_monospecific": 125,
+      "frac_mono_of_grounded": 0.4883,
+      "mean_codes_per_grounded": 2.59
+    },
+    {
+      "method": "PCA",
+      "threshold": 0.2,
+      "n_grounded": 18,
+      "n_monospecific": 14,
+      "frac_mono_of_grounded": 0.7778,
+      "mean_codes_per_grounded": 1.28
+    },
+    {
+      "method": "PCA",
+      "threshold": 0.3,
+      "n_grounded": 1,
+      "n_monospecific": 1,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "PCA",
+      "threshold": 0.4,
+      "n_grounded": 1,
+      "n_monospecific": 1,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "PCA",
+      "threshold": 0.5,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "PCA",
+      "threshold": 0.6,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "random (dense)",
+      "threshold": 0.1,
+      "n_grounded": 10988,
+      "n_monospecific": 2872,
+      "frac_mono_of_grounded": 0.2614,
+      "mean_codes_per_grounded": 3.94
+    },
+    {
+      "method": "random (dense)",
+      "threshold": 0.2,
+      "n_grounded": 538,
+      "n_monospecific": 330,
+      "frac_mono_of_grounded": 0.6134,
+      "mean_codes_per_grounded": 1.7
+    },
+    {
+      "method": "random (dense)",
+      "threshold": 0.3,
+      "n_grounded": 40,
+      "n_monospecific": 28,
+      "frac_mono_of_grounded": 0.7,
+      "mean_codes_per_grounded": 1.32
+    },
+    {
+      "method": "random (dense)",
+      "threshold": 0.4,
+      "n_grounded": 2,
+      "n_monospecific": 2,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "random (dense)",
+      "threshold": 0.5,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "random (dense)",
+      "threshold": 0.6,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "random (L0-matched)",
+      "threshold": 0.1,
+      "n_grounded": 9132,
+      "n_monospecific": 3231,
+      "frac_mono_of_grounded": 0.3538,
+      "mean_codes_per_grounded": 2.99
+    },
+    {
+      "method": "random (L0-matched)",
+      "threshold": 0.2,
+      "n_grounded": 127,
+      "n_monospecific": 92,
+      "frac_mono_of_grounded": 0.7244,
+      "mean_codes_per_grounded": 1.39
+    },
+    {
+      "method": "random (L0-matched)",
+      "threshold": 0.3,
+      "n_grounded": 1,
+      "n_monospecific": 1,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "random (L0-matched)",
+      "threshold": 0.4,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "random (L0-matched)",
+      "threshold": 0.5,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "random (L0-matched)",
+      "threshold": 0.6,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "GemmaScope SAE",
+      "threshold": 0.1,
+      "n_grounded": 5790,
+      "n_monospecific": 1268,
+      "frac_mono_of_grounded": 0.219,
+      "mean_codes_per_grounded": 4.48
+    },
+    {
+      "method": "GemmaScope SAE",
+      "threshold": 0.2,
+      "n_grounded": 295,
+      "n_monospecific": 224,
+      "frac_mono_of_grounded": 0.7593,
+      "mean_codes_per_grounded": 1.38
+    },
+    {
+      "method": "GemmaScope SAE",
+      "threshold": 0.3,
+      "n_grounded": 54,
+      "n_monospecific": 47,
+      "frac_mono_of_grounded": 0.8704,
+      "mean_codes_per_grounded": 1.17
+    },
+    {
+      "method": "GemmaScope SAE",
+      "threshold": 0.4,
+      "n_grounded": 13,
+      "n_monospecific": 11,
+      "frac_mono_of_grounded": 0.8462,
+      "mean_codes_per_grounded": 1.15
+    },
+    {
+      "method": "GemmaScope SAE",
+      "threshold": 0.5,
+      "n_grounded": 4,
+      "n_monospecific": 4,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "GemmaScope SAE",
+      "threshold": 0.6,
+      "n_grounded": 0,
+      "n_monospecific": 0,
+      "frac_mono_of_grounded": 0.0,
+      "mean_codes_per_grounded": 0.0
+    },
+    {
+      "method": "vanilla SAE",
+      "threshold": 0.1,
+      "n_grounded": 8985,
+      "n_monospecific": 2810,
+      "frac_mono_of_grounded": 0.3127,
+      "mean_codes_per_grounded": 3.76
+    },
+    {
+      "method": "vanilla SAE",
+      "threshold": 0.2,
+      "n_grounded": 2063,
+      "n_monospecific": 1276,
+      "frac_mono_of_grounded": 0.6185,
+      "mean_codes_per_grounded": 1.72
+    },
+    {
+      "method": "vanilla SAE",
+      "threshold": 0.3,
+      "n_grounded": 675,
+      "n_monospecific": 551,
+      "frac_mono_of_grounded": 0.8163,
+      "mean_codes_per_grounded": 1.27
+    },
+    {
+      "method": "vanilla SAE",
+      "threshold": 0.4,
+      "n_grounded": 291,
+      "n_monospecific": 263,
+      "frac_mono_of_grounded": 0.9038,
+      "mean_codes_per_grounded": 1.11
+    },
+    {
+      "method": "vanilla SAE",
+      "threshold": 0.5,
+      "n_grounded": 143,
+      "n_monospecific": 135,
+      "frac_mono_of_grounded": 0.9441,
+      "mean_codes_per_grounded": 1.06
+    },
+    {
+      "method": "vanilla SAE",
+      "threshold": 0.6,
+      "n_grounded": 73,
+      "n_monospecific": 73,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    },
+    {
+      "method": "JumpReLU SAE",
+      "threshold": 0.1,
+      "n_grounded": 9721,
+      "n_monospecific": 2904,
+      "frac_mono_of_grounded": 0.2987,
+      "mean_codes_per_grounded": 3.84
+    },
+    {
+      "method": "JumpReLU SAE",
+      "threshold": 0.2,
+      "n_grounded": 2075,
+      "n_monospecific": 1270,
+      "frac_mono_of_grounded": 0.612,
+      "mean_codes_per_grounded": 1.73
+    },
+    {
+      "method": "JumpReLU SAE",
+      "threshold": 0.3,
+      "n_grounded": 610,
+      "n_monospecific": 484,
+      "frac_mono_of_grounded": 0.7934,
+      "mean_codes_per_grounded": 1.3
+    },
+    {
+      "method": "JumpReLU SAE",
+      "threshold": 0.4,
+      "n_grounded": 276,
+      "n_monospecific": 244,
+      "frac_mono_of_grounded": 0.8841,
+      "mean_codes_per_grounded": 1.13
+    },
+    {
+      "method": "JumpReLU SAE",
+      "threshold": 0.5,
+      "n_grounded": 147,
+      "n_monospecific": 136,
+      "frac_mono_of_grounded": 0.9252,
+      "mean_codes_per_grounded": 1.08
+    },
+    {
+      "method": "JumpReLU SAE",
+      "threshold": 0.6,
+      "n_grounded": 61,
+      "n_monospecific": 61,
+      "frac_mono_of_grounded": 1.0,
+      "mean_codes_per_grounded": 1.0
+    }
+  ]
+}

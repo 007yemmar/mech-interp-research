@@ -1,0 +1,165 @@
+{
+  "sae_name": "vanilla_pilot_extended",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 4911,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 20,
+  "n_features_distinct": 20,
+  "n_sig_q05": 15,
+  "median_cliffs_delta_grounded": 0.11826776681404166,
+  "median_cliffs_delta_controls": NaN,
+  "mean_loss_clean": 1.6347653633087866,
+  "mean_loss_recon": 1.6639779580935667,
+  "mean_recon_tax": 0.02921259478477955,
+  "config": {
+    "sae_name": "vanilla_pilot_extended",
+    "sae_checkpoint_dir": "/out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best",
+    "sae_hf_repo_id": null,
+    "sae_hf_filename": null,
+    "is_centered": true,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "centered_activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "mean_path": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt",
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 7304,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8188
+      },
+      {
+        "feature_idx": 4393,
+        "code": "icd9_73300",
+        "kind": "grounded",
+        "r_pb": 0.8128
+      },
+      {
+        "feature_idx": 11016,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.807
+      },
+      {
+        "feature_idx": 9809,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7957
+      },
+      {
+        "feature_idx": 1387,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7785
+      },
+      {
+        "feature_idx": 16170,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.768
+      },
+      {
+        "feature_idx": 17588,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.766
+      },
+      {
+        "feature_idx": 15117,
+        "code": "icd9_53081",
+        "kind": "grounded",
+        "r_pb": 0.7554
+      },
+      {
+        "feature_idx": 11445,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7511
+      },
+      {
+        "feature_idx": 10188,
+        "code": "icd9_2749",
+        "kind": "grounded",
+        "r_pb": 0.7416
+      },
+      {
+        "feature_idx": 3764,
+        "code": "icd9_53081",
+        "kind": "grounded",
+        "r_pb": 0.7389
+      },
+      {
+        "feature_idx": 11387,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.7362
+      },
+      {
+        "feature_idx": 4152,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.7332
+      },
+      {
+        "feature_idx": 1042,
+        "code": "icd9_60000",
+        "kind": "grounded",
+        "r_pb": 0.733
+      },
+      {
+        "feature_idx": 7116,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.7293
+      },
+      {
+        "feature_idx": 3537,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.7113
+      },
+      {
+        "feature_idx": 17076,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.7067
+      },
+      {
+        "feature_idx": 8363,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.7057
+      },
+      {
+        "feature_idx": 6433,
+        "code": "icd9_V4581",
+        "kind": "grounded",
+        "r_pb": 0.7054
+      },
+      {
+        "feature_idx": 3340,
+        "code": "icd9_V4581",
+        "kind": "grounded",
+        "r_pb": 0.6998
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": null,
+    "output_dir": "/out/ablation/vanilla_pilot_extended",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}

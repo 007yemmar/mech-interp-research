@@ -1,0 +1,33 @@
+# G4's sensitivity control, matched the OTHER way round.
+#
+# B2 was meant to dilute the keyword arm DOWN to the SAE's correlation. After
+# the BOS fix the keyword arm sits at median |r| 0.375 while the SAE's argmax
+# latents sit at 0.580 — the keyword arm is already below, so dilution has
+# nothing to remove and the solve reports unreachable for 44/46 codes.
+#
+# Instead: per code, pick the SAE latent whose |r| is CLOSEST to the keyword
+# arm's. Same difficulty match, opposite direction, and it cannot fail.
+#
+# Run:
+#   uv run modal run modal_app/match_sae_to_target.py \
+#       --config-file configs/match_sae_to_keyword.yaml
+
+sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+
+# The keyword arm's own post-threshold |r| per code, measured on selection
+# notes. In the B2 artifact this field is B1's value, because every alpha
+# solved to 0 — which is exactly the quantity we want to match to.
+target_source_meta: /out/sources/keyword_b2_bosfix/source_meta.json
+target_field: dilution_achieved_r_post_threshold
+
+output_json: /out/sources/_shared/sae_matched_to_keyword.json
+
+held_out_shard_start: 281
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+logging_level: INFO

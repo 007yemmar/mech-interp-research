@@ -1,0 +1,27 @@
+# Arm D — diff-in-means with FULL covariance whitening.
+# The necessity suite measured all three metrics on the same 4,911 audit notes:
+#   plain 0.121, diagonal 0.127  -> both BELOW the random-dense null of 0.219
+#   full  0.339                  -> the only variant that clears it
+# so 'full' is the only one worth pushing through the explainer.
+arm: diff_in_means
+whiten: full
+output_dir: /out/sources/dim_full
+
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+pooled_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
+icd_csv_path: /data/sample_50k.csv
+
+held_out_shard_start: 281
+calibration_n_shards: 6
+calibration_notes_per_shard: 50
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+seed: 42
+logging_level: INFO

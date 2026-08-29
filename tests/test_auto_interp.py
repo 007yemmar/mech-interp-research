@@ -1231,3 +1231,303 @@ class TestScoreExplanationAgainstContexts:
         assert fuzz is None  # fuzzing not requested
         assert det is not None and 0.0 <= det <= 1.0
         assert perr == 0
+
+
+def test_select_features_explicit_list_bypasses_tiering() -> None:
+    """An explicit list is returned as the strong tier with all others empty."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import select_features
+
+    rng = np.random.default_rng(0)
+    d_sae, n_codes = 40, 4
+    r_pb = rng.normal(scale=0.2, size=(d_sae, n_codes))
+    p_adj = np.full((d_sae, n_codes), 0.5)
+    significant = np.zeros((d_sae, n_codes), dtype=bool)
+    note_vectors = rng.random(size=(50, d_sae))
+
+    out = select_features(
+        r_pb,
+        p_adj,
+        significant,
+        [f"icd9_{i}" for i in range(n_codes)],
+        note_vectors,
+        explicit_features=[3, 11, 29],
+    )
+
+    assert out["strong_grounded"] == [3, 11, 29]
+    assert out["weak_grounded"] == []
+    assert out["non_grounded"] == []
+    assert out["dead"] == []
+
+
+def test_select_features_default_is_unchanged_by_the_new_parameter() -> None:
+    """explicit_features=None must reproduce the pre-existing tiering exactly."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import select_features
+
+    rng = np.random.default_rng(1)
+    d_sae, n_codes = 60, 3
+    r_pb = rng.normal(scale=0.3, size=(d_sae, n_codes))
+    p_adj = rng.random(size=(d_sae, n_codes))
+    significant = p_adj < 0.2
+    note_vectors = rng.random(size=(40, d_sae))
+    args = (r_pb, p_adj, significant, [f"icd9_{i}" for i in range(n_codes)], note_vectors)
+
+    a = select_features(*args, seed=42)
+    b = select_features(*args, seed=42, explicit_features=None)
+    assert a == b
+
+
+def test_get_strongest_icd_uses_argmax_by_default() -> None:
+    """Without an override the code is chosen by argmax|r| — the SAE's rule."""
+    import numpy as np
+    import pytest
+
+    from mech_interp_research.auto_interp import _get_strongest_icd
+
+    r_pb = np.array([[0.2, -0.7, 0.5]])
+    code, r = _get_strongest_icd(0, r_pb, ["icd9_a", "icd9_b", "icd9_c"])
+    assert code == "icd9_b"
+    assert r == pytest.approx(-0.7)
+
+
+def test_get_strongest_icd_honours_by_construction_pairing() -> None:
+    """An override pins the code AND returns that code's r, not the argmax r."""
+    import numpy as np
+    import pytest
+
+    from mech_interp_research.auto_interp import _get_strongest_icd
+
+    r_pb = np.array([[0.2, -0.7, 0.5]])
+    code, r = _get_strongest_icd(
+        0, r_pb, ["icd9_a", "icd9_b", "icd9_c"], pairing_override={0: "icd9_c"}
+    )
+    assert code == "icd9_c"
+    assert r == pytest.approx(0.5)
+
+
+def test_get_strongest_icd_falls_back_when_override_code_is_absent() -> None:
+    """An override naming a code outside the panel must not crash the run."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import _get_strongest_icd
+
+    r_pb = np.array([[0.2, -0.7, 0.5]])
+    code, _ = _get_strongest_icd(
+        0, r_pb, ["icd9_a", "icd9_b", "icd9_c"], pairing_override={0: "icd9_zzz"}
+    )
+    assert code == "icd9_b"
+
+
+def test_select_features_accepts_feature_code_tuples() -> None:
+    """(feature_id, code_name) pairs select the same ids as bare ints."""
+    import numpy as np
+
+    from mech_interp_research.auto_interp import select_features
+
+    rng = np.random.default_rng(3)
+    d_sae, n_codes = 40, 4
+    args = (
+        rng.normal(scale=0.2, size=(d_sae, n_codes)),
+        np.full((d_sae, n_codes), 0.5),
+        np.zeros((d_sae, n_codes), dtype=bool),
+        [f"icd9_{i}" for i in range(n_codes)],
+        rng.random(size=(50, d_sae)),
+    )
+
+    bare = select_features(*args, explicit_features=[3, 11, 29])
+    tupled = select_features(
+        *args, explicit_features=[(3, "icd9_0"), (11, "icd9_1"), (29, "icd9_2")]
+    )
+    assert (
+        bare
+        == tupled
+        == {
+            "strong_grounded": [3, 11, 29],
+            "weak_grounded": [],
+            "non_grounded": [],
+            "dead": [],
+        }
+    )
+
+
+def test_run_auto_interp_binds_shard_ckpt_dir_as_real_parameter():
+    """shard_ckpt_dir must be a named parameter, not swallowed by **_kwargs.
+
+    run_auto_interp's signature ends in **_kwargs, so an unrecognised config key
+    is silently absorbed instead of raising — that is exactly how max_workers sat
+    inert in production configs while appearing to be honoured.
+
+    The judge-validity control arms depend on this key actually binding: their
+    pooled vectors live outside icd_eval_dir/shard_ckpt, so if the parameter were
+    ever removed the arms would not fail loudly, they would quietly fall back to
+    the default path and pull contexts for the wrong note population.
+    """
+    import inspect
+
+    from mech_interp_research.auto_interp import run_auto_interp
+
+    params = inspect.signature(run_auto_interp).parameters
+    assert "shard_ckpt_dir" in params, "shard_ckpt_dir would be absorbed by **_kwargs"
+    assert params["shard_ckpt_dir"].default is None
+
+
+def test_to_openrouter_model_maps_dash_to_dot():
+    """OpenRouter spells Anthropic versions with a dot, the Anthropic API with a dash.
+
+    Forwarding the config's model string unchanged would 404 on OpenRouter, so
+    the mapping is what makes the two backends interchangeable.
+    """
+    from mech_interp_research.auto_interp import to_openrouter_model
+
+    assert to_openrouter_model("claude-sonnet-4-6") == "anthropic/claude-sonnet-4.6"
+    # Already-qualified slugs pass through, which is how non-Anthropic panel
+    # models are named.
+    assert to_openrouter_model("openai/gpt-4o") == "openai/gpt-4o"
+
+
+def test_to_openrouter_model_rejects_unknown_rather_than_guessing():
+    """An unmapped model must raise, not be silently rewritten.
+
+    Guessing a slug would send the run to a model nobody chose and report the
+    results under the configured name.
+    """
+    import pytest
+
+    from mech_interp_research.auto_interp import to_openrouter_model
+
+    with pytest.raises(ValueError, match="No OpenRouter slug known"):
+        to_openrouter_model("claude-imaginary-9")
+
+
+def test_make_llm_client_rejects_unknown_backend():
+    import pytest
+
+    from mech_interp_research.auto_interp import make_llm_client
+
+    with pytest.raises(ValueError, match="Unknown llm_backend"):
+        make_llm_client("bedrock")
+
+
+def test_make_llm_client_openrouter_requires_key(monkeypatch):
+    """Missing key must fail loudly at construction, not mid-run on the first call."""
+    import pytest
+
+    from mech_interp_research.auto_interp import make_llm_client
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY is unset"):
+        make_llm_client("openrouter")
+
+
+def test_openrouter_adapter_matches_anthropic_response_shape():
+    """The adapter must expose response.content[0].text, the shape all six call sites read.
+
+    If it drifts, every call site breaks at once and only at run time.
+    """
+    from types import SimpleNamespace
+
+    from mech_interp_research.auto_interp import _OpenRouterMessages
+
+    captured = {}
+
+    class _FakeCompletions:
+        def create(self, **kw):
+            captured.update(kw)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="hello"))]
+            )
+
+    inner = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    resp = _OpenRouterMessages(inner).create(
+        model="claude-sonnet-4-6", max_tokens=64, messages=[{"role": "user", "content": "hi"}]
+    )
+
+    assert resp.content[0].text == "hello"
+    assert captured["model"] == "anthropic/claude-sonnet-4.6"
+    assert captured["max_tokens"] == 64
+
+
+def test_openrouter_adapter_raises_on_empty_choices():
+    """An empty choices list must raise rather than yield an empty explanation.
+
+    A silent "" would be scored and judged as though the model had written it.
+    """
+    from types import SimpleNamespace
+
+    import pytest
+
+    from mech_interp_research.auto_interp import _OpenRouterMessages
+
+    class _FakeCompletions:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[])
+
+    inner = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    with pytest.raises(RuntimeError, match="no choices"):
+        _OpenRouterMessages(inner).create(model="claude-sonnet-4-6", max_tokens=64, messages=[])
+
+
+def test_anthropic_client_sends_workspace_header_when_set(monkeypatch):
+    """An identity-linked key needs anthropic-workspace-id or the API 400s.
+
+    The header is read from the environment so it can live beside the key in the
+    same Modal secret. Classic keys carry their workspace implicitly, so the
+    header must be omitted entirely when the variable is absent rather than sent
+    empty.
+    """
+    import anthropic
+
+    from mech_interp_research.auto_interp import make_llm_client
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_test123")
+    client = make_llm_client("anthropic")
+    assert isinstance(client, anthropic.Anthropic)
+    assert client.default_headers.get("anthropic-workspace-id") == "wrkspc_test123"
+
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID")
+    plain = make_llm_client("anthropic")
+    assert "anthropic-workspace-id" not in plain.default_headers
+
+
+def test_hard_negative_slate_draws_from_the_same_chapter():
+    """same_chapter=True must invert the distractor rule, not merely relax it.
+
+    The default slate requires a DIFFERENT ICD-9 chapter, so hit@1 only measures
+    organ-system-level discrimination -- a limitation the published scope note
+    concedes. The hard-negative variant draws distractors from the correct
+    code's own chapter (CHF vs atrial fibrillation, not CHF vs a renal code),
+    and a silent fallback to cross-chapter would make the harder condition look
+    identical to the easy one.
+    """
+    from mech_interp_research.concordance_multi_judge import _ch_ok
+
+    # Cross-chapter (default): same chapter rejected, different accepted.
+    assert _ch_ok("circulatory", "genitourinary", same_chapter=False)
+    assert not _ch_ok("circulatory", "circulatory", same_chapter=False)
+
+    # Hard negative: exactly reversed.
+    assert _ch_ok("circulatory", "circulatory", same_chapter=True)
+    assert not _ch_ok("circulatory", "genitourinary", same_chapter=True)
+
+
+def test_binary_parser_resolves_and_flags_ambiguity():
+    """Forced-binary parsing must not silently default to one side.
+
+    This arm exists to measure whether PARTIAL is real or an artifact of being
+    offered. Folding unparseable replies into NO would inflate that contrast, so
+    ambiguous output has to surface as UNKNOWN.
+    """
+    from mech_interp_research.concordance_multi_judge import parse_binary_response
+
+    assert parse_binary_response("YES | describes heart failure")["verdict"] == "YES"
+    assert parse_binary_response("NO | unrelated")["verdict"] == "NO"
+    # Bare word, no delimiter.
+    assert parse_binary_response("no")["verdict"] == "NO"
+    # Both tokens present and no leading verdict -> not guessable.
+    assert parse_binary_response("could be YES or NO here")["verdict"] == "UNKNOWN"
+    assert parse_binary_response("")["verdict"] == "UNKNOWN"
+    assert parse_binary_response("YES | x")["rationale"] == "x"

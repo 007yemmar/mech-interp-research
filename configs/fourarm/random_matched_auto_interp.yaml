@@ -1,0 +1,37 @@
+# LLM explanation + concordance for random_matched. THIS IS THE DELIVERABLE STAGE.
+#
+# explicit_features carries (feature_id, code_name) pairs, not bare ints, so
+# concordance judges each direction against the code it was BUILT for rather
+# than argmax|r|. Control arms need this: with argmax a keyword direction can
+# be judged against a comorbid code and earn a correct NO, which would read as
+# the judge failing rather than the pairing being wrong. Populate it from the
+# arm's selected_features.csv / top_associations.csv before running.
+sae_checkpoint: /out/sources/random_matched_note
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/necessity/random_matched/seed0/audit_note_matched
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/fourarm/random_matched
+
+explicit_features: [[17898, "icd9_4019"], [7658, "icd9_2724"], [2467, "icd9_53081"], [14681, "icd9_4280"], [13813, "icd9_25000"], [3955, "icd9_42731"], [14681, "icd9_41401"], [16687, "icd9_V1582"], [16017, "icd9_5849"], [9321, "icd9_311"], [14877, "icd9_2449"], [16095, "icd9_40390"], [9923, "icd9_2859"], [12514, "icd9_V5861"], [8526, "icd9_3051"], [7658, "icd9_2720"], [5821, "icd9_5990"], [16888, "icd9_32723"], [13813, "icd9_V5867"], [358, "icd9_5859"], [9321, "icd9_30000"], [13988, "icd9_V4582"], [13917, "icd9_412"], [17682, "icd9_V5866"], [11390, "icd9_49390"], [5708, "icd9_496"], [17682, "icd9_27800"], [15302, "icd9_V4581"], [2579, "icd9_2761"], [4078, "icd9_73300"], [14792, "icd9_486"], [14971, "icd9_V4986"], [12031, "icd9_2749"], [11717, "icd9_41400"], [9222, "icd9_V1251"], [15349, "icd9_2851"], [6774, "icd9_33829"], [11036, "icd9_V1254"], [10564, "icd9_27651"], [3645, "icd9_2762"], [13917, "icd9_60000"], [12960, "icd9_56400"], [13813, "icd9_3572"], [8596, "icd9_5856"], [7840, "icd9_42789"], [10547, "icd9_2875"]]    # <- fill with [[feature_id, "icd9_XXXX"], ...]
+
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+scorers:
+  - fuzzing
+  - detection
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
+checkpoint_dir: null
+logging_level: INFO

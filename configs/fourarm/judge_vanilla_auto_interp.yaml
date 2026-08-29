@@ -1,0 +1,45 @@
+# LLM explanation + concordance for sae_jumprelu. THIS IS THE DELIVERABLE STAGE.
+#
+# explicit_features carries (feature_id, code_name) pairs, not bare ints, so
+# concordance judges each direction against the code it was BUILT for rather
+# than argmax|r|. Control arms need this: with argmax a keyword direction can
+# be judged against a comorbid code and earn a correct NO, which would read as
+# the judge failing rather than the pairing being wrong. Populate it from the
+# arm's selected_features.csv / top_associations.csv before running.
+sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/necessity/sae_audit/sae_vanilla
+shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/judgetest/vanilla
+
+explicit_features: [[3446, "icd9_42731"], [13601, "icd9_V4986"], [1748, "icd9_486"], [565, "icd9_5856"], [10022, "icd9_V4582"], [10365, "icd9_2875"], [13205, "icd9_40390"], [10938, "icd9_2724"], [13870, "icd9_5849"], [13168, "icd9_2851"], [10647, "icd9_4280"], [10332, "icd9_4280"], [8089, "icd9_4280"], [13780, "icd9_41401"], [2358, "icd9_53081"], [14195, "icd9_3051"], [8989, "icd9_2762"], [1797, "icd9_4280"], [8758, "icd9_5990"], [14825, "icd9_2761"], [15004, "icd9_V5866"], [18087, "icd9_486"], [11589, "icd9_2851"], [6166, "icd9_4280"], [2508, "icd9_40390"], [1941, "icd9_41401"], [18157, "icd9_2449"], [12434, "icd9_V1582"], [10095, "icd9_41401"], [9365, "icd9_2875"], [10769, "icd9_486"], [3694, "icd9_V1582"], [6269, "icd9_53081"], [12799, "icd9_2851"], [8329, "icd9_5849"], [15625, "icd9_49390"], [5418, "icd9_42731"], [9783, "icd9_5849"], [17055, "icd9_41401"], [1264, "icd9_42731"], [14015, "icd9_5856"], [5186, "icd9_42731"], [8044, "icd9_42731"], [13312, "icd9_5990"], [9980, "icd9_5990"], [2056, "icd9_3051"], [16014, "icd9_40390"], [1920, "icd9_5849"], [14823, "icd9_5849"], [7019, "icd9_4280"], [6366, "icd9_60000"], [11271, "icd9_2875"], [7460, "icd9_5990"], [15881, "icd9_3051"], [13665, "icd9_4280"], [16115, "icd9_V4986"], [10350, "icd9_5849"], [4299, "icd9_V1254"], [10192, "icd9_2724"], [1302, "icd9_27800"], [2398, "icd9_5990"], [8070, "icd9_V4986"], [11396, "icd9_73300"], [9493, "icd9_33829"], [3802, "icd9_42731"], [14484, "icd9_41401"], [3353, "icd9_27800"], [13557, "icd9_41401"], [16452, "icd9_5849"], [10174, "icd9_2851"], [18175, "icd9_5849"], [10151, "icd9_5849"], [10831, "icd9_41401"], [7806, "icd9_V1251"], [6705, "icd9_V4581"]]
+
+# anthropic (default) or openrouter. See docs: OpenRouter on this account can
+# currently only reach deepseek/deepseek-chat; every other provider 403s.
+llm_backend: anthropic
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+# Fuzzing/Detection measure explanation QUALITY (Paulo et al.), not whether
+# the judge discriminates, which is the only question this suite asks. They
+# are two of the four calls per feature; dropping them halves the spend and
+# costs nothing here. The remaining two are load bearing: explain produces the
+# explanation, concordance writes the concordance_results.csv that
+# concordance_multi_judge re-judges with the panel.
+scorers: []
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
+checkpoint_dir: null
+logging_level: INFO

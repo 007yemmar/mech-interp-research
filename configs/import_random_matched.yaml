@@ -1,0 +1,38 @@
+# Arm A (random-matched null) -> pseudo-SAE checkpoint.
+#
+# The random-matched run already produced its directions, its note-level
+# thresholds, and a complete grounding audit. What it lacks is an *encoder on
+# disk*, which feature_inspector and auto_interp need to find top-activating
+# token contexts. This config supplies exactly that and nothing else.
+#
+# Use the note_matched thresholds, not a token-level arm: correlation is
+# computed after max-pooling, so note-level detection rate is the quantity that
+# has to match the SAE (0.675 mean / 0.714 median). The token-matched arms sit
+# at note-level density 0.95-0.96 and are not comparable.
+#
+# Run:
+#   uv run modal run modal_app/import_direction_source.py \
+#       --config-file configs/import_random_matched.yaml
+
+arm: random_matched
+directions_npy: /out/necessity/random_matched/seed0/directions.npy
+thresholds_npy: /out/necessity/random_matched/seed0/thresholds_note_matched.npy
+source_manifest_json: /out/necessity/random_matched/seed0/directions_manifest.json
+output_dir: /out/sources/random_matched_note
+
+expect_d_model: 2304
+
+provenance_note: >
+  18,432 directions drawn from N(0, Sigma_activations) on train shards only
+  (covariance-matched, not isotropic). Thresholds calibrated to the SAE's
+  per-feature note-level density. Audit artifacts already exist at
+  /out/necessity/random_matched/seed0/audit_note_matched/ and should be used as
+  the eval_output_dir for feature_inspector rather than re-running icd_eval.
+
+logging_level: INFO
+
+# 271/18432 thresholds are non-finite (directions whose pooled maxima were
+# degenerate, so no quantile exists). Verified: NONE of the 46 selected features
+# is among them, so making them inert cannot affect any audited result. k stays
+# 18,432, which the best-of-k selection rule depends on.
+nonfinite_threshold_policy: inert

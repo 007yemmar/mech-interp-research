@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 # ---------------------------------------------------------------------------
 # Unit tests: fit_tfidf
@@ -340,3 +341,188 @@ def test_run_tfidf_lr_baseline_integration(synthetic_run_dir: Path, tmp_path: Pa
         assert "best_r_tfidf" in row
         assert "best_tfidf_feature" in row
         assert "outcome_r" in row
+
+
+# ---------------------------------------------------------------------------
+# TF-IDF as an AUDITED source (code plan C8)
+#
+# What exists is exclusively classification. The meta-review and all three
+# reviewers read section 4.3 as "TF-IDF beats the SAE", and the answer is that
+# beating the SAE at prediction is a different claim from being a better audit
+# unit -- which requires running TF-IDF through the same grounding / off-target
+# / monospecificity harness.
+#
+# Two things the design has to get right:
+#  1. The vectoriser is fitted on TRAIN shards only. Vocabulary and IDF weights
+#     derived from the audit notes would leak.
+#  2. All 10,000 n-grams are emitted, not one pre-picked winner per code. TF-IDF
+#     searching 10,000 candidates per code is the same kind of search the SAE
+#     gets over 18,432; auditing only the winner would hide that budget, and the
+#     harness's top_per_code selection reproduces it honestly on the selection
+#     split.
+# ---------------------------------------------------------------------------
+
+
+def _text_fixture(tmp_path, n_shards: int = 8, per_shard: int = 40):
+    """Notes whose text carries a code-specific token, laid out across shards."""
+    import json
+
+    import pandas as pd
+
+    rng = np.random.default_rng(2)
+    n = n_shards * per_shard
+    names = ["icd9_4019", "icd9_25000", "icd9_4280"]
+    Y = (rng.random((n, 3)) < 0.35).astype(np.int8)
+
+    filler = ["patient", "admitted", "stable", "discharged", "followup", "reviewed"]
+    texts = []
+    for i in range(n):
+        words = list(rng.choice(filler, size=12))
+        for c, tok in enumerate(["hypertension", "diabetes", "heartfailure"]):
+            if Y[i, c]:
+                words += [tok] * 3
+        rng.shuffle(words)
+        texts.append(" ".join(words))
+
+    df = pd.DataFrame(Y, columns=names)
+    df.insert(0, "admission_id", range(n))
+    df["note_text"] = texts
+    df.to_csv(tmp_path / "icd.csv", index=False)
+    (tmp_path / "code_names.json").write_text(json.dumps(names))
+
+    ckpt = tmp_path / "shard_ckpt"
+    ckpt.mkdir(parents=True, exist_ok=True)
+    for s in range(n_shards):
+        lo, hi = s * per_shard, (s + 1) * per_shard
+        np.save(
+            ckpt / f"shard_{s:04d}_vectors.npy",
+            rng.standard_normal((per_shard, 5)).astype("float32"),
+        )
+        with open(ckpt / f"shard_{s:04d}_meta.jsonl", "w") as f:
+            for i in range(lo, hi):
+                f.write(json.dumps({"note_idx": i, "admission_id": i, "shard": s}) + "\n")
+    return ckpt
+
+
+def _run_tfidf_sources(tmp_path, ckpt, **kw):
+    from mech_interp_research.tfidf_lr_baseline import run_tfidf_direction_sources
+
+    params = dict(
+        checkpoint_dir=ckpt,
+        icd_csv_path=tmp_path / "icd.csv",
+        code_names_json=tmp_path / "code_names.json",
+        output_dir=tmp_path / "tfidf_src",
+        max_features=200,
+        train_shard_start=2,
+        train_shard_end=6,
+        select_shard_start=0,
+        select_shard_end=2,
+        audit_shard_start=6,
+        audit_shard_end=8,
+        min_notes=10,
+    )
+    params.update(kw)
+    return run_tfidf_direction_sources(**params)
+
+
+def test_tfidf_source_emits_both_arms_readable_by_the_harness(tmp_path) -> None:
+    from mech_interp_research.necessity_audit import load_feature_matrix
+
+    ckpt = _text_fixture(tmp_path)
+    manifest = _run_tfidf_sources(tmp_path, ckpt)
+
+    assert set(manifest["arms"]) == {"value", "binary"}
+    for arm in ("value", "binary"):
+        F, meta = load_feature_matrix(tmp_path / "tfidf_src" / f"tfidf_{arm}" / "shard_ckpt")
+        assert F.shape[0] == 160  # select (80) + audit (80)
+        assert F.shape[1] == manifest["n_features"]
+        assert sorted(meta["shard"].unique()) == [0, 1, 6, 7]
+
+
+def test_tfidf_binary_arm_is_zero_one(tmp_path) -> None:
+    from mech_interp_research.necessity_audit import load_feature_matrix
+
+    ckpt = _text_fixture(tmp_path)
+    _run_tfidf_sources(tmp_path, ckpt)
+
+    F, _ = load_feature_matrix(tmp_path / "tfidf_src" / "tfidf_binary" / "shard_ckpt")
+    assert set(np.unique(F)).issubset({0.0, 1.0})
+
+
+def test_tfidf_value_arm_is_not_binary(tmp_path) -> None:
+    from mech_interp_research.necessity_audit import load_feature_matrix
+
+    ckpt = _text_fixture(tmp_path)
+    _run_tfidf_sources(tmp_path, ckpt)
+
+    F, _ = load_feature_matrix(tmp_path / "tfidf_src" / "tfidf_value" / "shard_ckpt")
+    assert len(set(np.unique(F))) > 2
+
+
+def test_tfidf_vectoriser_is_fitted_on_train_only(tmp_path) -> None:
+    """A token appearing ONLY in audit notes must not enter the vocabulary."""
+    import pandas as pd
+
+    ckpt = _text_fixture(tmp_path)
+    df = pd.read_csv(tmp_path / "icd.csv")
+    # Shards 6-7 are the audit split: notes 240..319.
+    df.loc[df["admission_id"] >= 240, "note_text"] += " auditonlytoken"
+    df.to_csv(tmp_path / "icd.csv", index=False)
+
+    manifest = _run_tfidf_sources(tmp_path, ckpt)
+
+    assert "auditonlytoken" not in manifest["vocabulary_sample"]
+    assert manifest["train_shards"] == [2, 6]
+
+
+def test_tfidf_source_refuses_overlapping_splits(tmp_path) -> None:
+    ckpt = _text_fixture(tmp_path)
+    with pytest.raises(ValueError, match="overlap"):
+        _run_tfidf_sources(tmp_path, ckpt, train_shard_start=0, train_shard_end=6)
+
+
+def test_tfidf_source_audits_to_the_expected_grounding(tmp_path) -> None:
+    """End to end through the real harness, with top_per_code selection."""
+    import json
+
+    from mech_interp_research.necessity_audit import AuditConfig, audit_from_checkpoints
+
+    ckpt = _text_fixture(tmp_path)
+    _run_tfidf_sources(tmp_path, ckpt)
+
+    res = audit_from_checkpoints(
+        checkpoint_dir=tmp_path / "tfidf_src" / "tfidf_value" / "shard_ckpt",
+        icd_csv_path=tmp_path / "icd.csv",
+        source_name="tfidf_value",
+        code_names=json.loads((tmp_path / "code_names.json").read_text()),
+        select_shard_start=0,
+        select_shard_end=2,
+        audit_shard_start=6,
+        audit_shard_end=8,
+        config=AuditConfig(selection="top_per_code"),
+        min_notes=10,
+    )
+
+    assert res.in_sample_selection is False
+    # The planted tokens are near-perfect markers, so grounding must be strong.
+    assert res.selected["abs_r_audit"].median() > 0.5
+
+
+def test_emitted_meta_excludes_icd_label_columns(tmp_path) -> None:
+    """matched_meta carries the icd9_* columns; they must not reach the source.
+
+    If they do, the audit's own join against the label CSV produces suffixed
+    duplicates (icd9_4019_x / _y) and the fixed-panel lookup fails. The failure
+    is loud here but would be easy to reintroduce in any future source built
+    from a merge result.
+    """
+    import json
+
+    ckpt = _text_fixture(tmp_path)
+    _run_tfidf_sources(tmp_path, ckpt)
+
+    meta_path = tmp_path / "tfidf_src" / "tfidf_value" / "shard_ckpt" / "shard_0000_meta.jsonl"
+    keys = set(json.loads(meta_path.read_text().splitlines()[0]))
+
+    assert not [k for k in keys if k.startswith("icd9_")], f"label columns leaked: {keys}"
+    assert {"note_idx", "admission_id", "shard"} <= keys

@@ -13,6 +13,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -704,3 +705,196 @@ def run_tfidf_lr_baseline(
     logger.info("=" * 60)
 
     return summary
+
+
+# ---------------------------------------------------------------------------
+# TF-IDF as an audited source (code plan C8)
+# ---------------------------------------------------------------------------
+
+
+def run_tfidf_direction_sources(
+    checkpoint_dir: str | Path,
+    icd_csv_path: str | Path,
+    output_dir: str | Path,
+    code_names_json: str | Path | None = None,
+    text_col: str = "note_text",
+    max_features: int = 10000,
+    ngram_range: tuple[int, int] = (1, 2),
+    sublinear_tf: bool = True,
+    min_df: int = 5,
+    train_shard_start: int = 31,
+    train_shard_end: int = 281,
+    select_shard_start: int = 0,
+    select_shard_end: int = 31,
+    audit_shard_start: int = 281,
+    audit_shard_end: int = 312,
+    join_key: str = "admission_id",
+    icd_col_prefix: str = "icd9_",
+    min_prevalence: float = 0.02,
+    max_codes: int = 50,
+    min_notes: int = 100,
+) -> dict[str, Any]:
+    """Emit TF-IDF features as ``shard_ckpt`` sources for the necessity audit.
+
+    What exists today for TF-IDF is exclusively *classification* --
+    ``classification_auc_roc``, ``classification_auc_pr``, a Wilcoxon test and a
+    supplementary best-feature correlation. All three reviewers read that as
+    "TF-IDF beats the SAE". The reply is that beating the SAE at prediction is a
+    different claim from being a better **audit unit**, and settling it means
+    running TF-IDF through the same grounding, off-target and monospecificity
+    instruments as every other source.
+
+    Two design points that decide whether the comparison is fair:
+
+    * **The vectoriser is fitted on train shards only.** Vocabulary selection
+      and IDF weights are both learned from data; deriving them from the audit
+      notes would leak, in the same way the published probe's 5-fold CV over all
+      50,000 notes leaked (see the C3 run log).
+    * **All ``max_features`` n-grams are emitted, not one winner per code.**
+      TF-IDF searching 10,000 candidates per code is the same kind of search the
+      SAE gets over 18,432 features. Auditing only a pre-picked winner would
+      hide that budget and flatter TF-IDF; emitting the full matrix lets the
+      harness's ``top_per_code`` rule reproduce the search honestly on the
+      selection split, exactly as it does for the SAE.
+
+    Two arms are written, because the choice is not obvious and should not be
+    made silently: ``value`` (the TF-IDF weight, continuous -- what the
+    published ``best_r_tfidf`` correlation was computed on) and ``binary``
+    (presence/absence, the plan's "indicator").
+
+    Returns:
+        Manifest dict, also written to ``output_dir/tfidf_source_manifest.json``.
+    """
+    from mech_interp_research.necessity_audit import (
+        build_label_matrix,
+        write_shard_checkpoints,
+    )
+
+    checkpoint_dir = Path(checkpoint_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for (a_lo, a_hi, a), (b_lo, b_hi, b) in (
+        (
+            (train_shard_start, train_shard_end, "train"),
+            (select_shard_start, select_shard_end, "selection"),
+        ),
+        (
+            (train_shard_start, train_shard_end, "train"),
+            (audit_shard_start, audit_shard_end, "audit"),
+        ),
+        (
+            (select_shard_start, select_shard_end, "selection"),
+            (audit_shard_start, audit_shard_end, "audit"),
+        ),
+    ):
+        if max(a_lo, b_lo) < min(a_hi, b_hi):
+            raise ValueError(
+                f"{a} shards [{a_lo}, {a_hi}) overlap {b} shards [{b_lo}, {b_hi}). "
+                "A vectoriser fitted on notes it is later scored on is circular."
+            )
+
+    # Note metadata only: the pooled vectors themselves are irrelevant here,
+    # but shard_ckpt/ is the authority on which note sits in which shard.
+    _, note_meta = reassemble_note_vectors(checkpoint_dir)
+
+    code_names = None
+    if code_names_json is not None:
+        code_names = json.loads(Path(code_names_json).read_text())
+        logger.info("Fixed %d-code panel pinned from %s", len(code_names), code_names_json)
+
+    icd_df = pd.read_csv(icd_csv_path)
+    if text_col not in icd_df.columns:
+        raise KeyError(f"Text column {text_col!r} not in CSV: {list(icd_df.columns[:20])}")
+
+    _, code_names, matched_meta = build_label_matrix(
+        icd_csv_path=icd_csv_path,
+        note_meta=note_meta,
+        code_names=code_names,
+        min_prevalence=min_prevalence,
+        max_codes=max_codes,
+        icd_col_prefix=icd_col_prefix,
+        join_key=join_key,
+        min_notes=min_notes,
+    )
+
+    texts = (
+        icd_df.drop_duplicates(subset=[join_key])
+        .set_index(join_key)
+        .loc[matched_meta[join_key].to_numpy(), text_col]
+        .fillna("")
+        .astype(str)
+        .to_numpy()
+    )
+    shards = matched_meta["shard"].to_numpy()
+
+    train_mask = (shards >= train_shard_start) & (shards < train_shard_end)
+    emit_mask = ((shards >= select_shard_start) & (shards < select_shard_end)) | (
+        (shards >= audit_shard_start) & (shards < audit_shard_end)
+    )
+    if int(train_mask.sum()) < min_notes:
+        raise RuntimeError(f"Only {int(train_mask.sum())} train notes; min_notes={min_notes}.")
+
+    logger.info(
+        "Fitting TF-IDF on %d train notes (shards [%d, %d))",
+        int(train_mask.sum()),
+        train_shard_start,
+        train_shard_end,
+    )
+    vectorizer = TfidfVectorizer(
+        max_features=max_features,
+        ngram_range=ngram_range,
+        sublinear_tf=sublinear_tf,
+        min_df=min_df,
+        stop_words="english",
+    )
+    vectorizer.fit(texts[train_mask])
+
+    emit_texts = texts[emit_mask]
+    # Keep only the columns that came from the note metadata. matched_meta is a
+    # merge result and also carries the icd9_* label columns; writing those into
+    # the source's meta would make the audit's own re-join produce suffixed
+    # duplicates (icd9_4019_x / _y) and fail on the fixed panel lookup.
+    meta_cols = [c for c in note_meta.columns if c in matched_meta.columns]
+    emit_meta = matched_meta.loc[emit_mask, meta_cols].reset_index(drop=True)
+    X = vectorizer.transform(emit_texts)
+    logger.info("Transformed %d select+audit notes to %d features", X.shape[0], X.shape[1])
+
+    arms: dict[str, Any] = {}
+    for arm, mat in (
+        ("value", X.toarray().astype(np.float32)),
+        ("binary", (X > 0).toarray().astype(np.float32)),
+    ):
+        arm_dir = output_dir / f"tfidf_{arm}" / "shard_ckpt"
+        arms[arm] = {
+            "checkpoint_dir": str(arm_dir),
+            **write_shard_checkpoints(mat, emit_meta, arm_dir),
+        }
+        del mat
+
+    feature_names = list(vectorizer.get_feature_names_out())
+    manifest = {
+        "checkpoint_dir": str(checkpoint_dir),
+        "code_names": list(code_names),
+        "n_codes": len(code_names),
+        "n_features": int(X.shape[1]),
+        "max_features": max_features,
+        "ngram_range": list(ngram_range),
+        "sublinear_tf": sublinear_tf,
+        "min_df": min_df,
+        "train_shards": [train_shard_start, train_shard_end],
+        "select_shards": [select_shard_start, select_shard_end],
+        "audit_shards": [audit_shard_start, audit_shard_end],
+        "n_train_notes": int(train_mask.sum()),
+        "n_emitted_notes": int(emit_mask.sum()),
+        # A sample, not the full vocabulary: the vocabulary is derived from PHI
+        # note text and the full list belongs in the run's own artefacts, not in
+        # a manifest that travels.
+        "vocabulary_sample": feature_names[:50],
+        "arms": arms,
+    }
+    (output_dir / "tfidf_source_manifest.json").write_text(
+        json.dumps(manifest, indent=2, default=str)
+    )
+    logger.info("TF-IDF sources for %d arms written to %s", len(arms), output_dir)
+    return manifest

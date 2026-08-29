@@ -1,0 +1,8 @@
+# Forced-binary YES/NO concordance for vanilla. PARTIAL removed from the option set.
+# Explanations held fixed; only the option set changes.
+auto_interp_dir: /out/auto_interp/vanilla_test_split
+output_dir: /out/auto_interp/vanilla_test_split/binary_eval
+judges:
+# Sonnet already completed and wrote its verdicts; only DeepSeek is missing.
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+logging_level: INFO

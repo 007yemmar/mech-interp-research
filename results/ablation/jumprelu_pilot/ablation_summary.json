@@ -1,0 +1,117 @@
+{
+  "sae_name": "jumprelu_pilot",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 4911,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 12,
+  "n_features_distinct": 12,
+  "n_sig_q05": 11,
+  "median_cliffs_delta_grounded": 0.2761799070653922,
+  "median_cliffs_delta_controls": 0.04765124381956215,
+  "mean_loss_clean": 1.6347653633087866,
+  "mean_loss_recon": 1.6435573873076168,
+  "mean_recon_tax": 0.008792023998830254,
+  "config": {
+    "sae_name": "jumprelu_pilot",
+    "sae_checkpoint_dir": "/out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000",
+    "sae_hf_repo_id": null,
+    "sae_hf_filename": null,
+    "is_centered": true,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "centered_activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "mean_path": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt",
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 6701,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.8643
+      },
+      {
+        "feature_idx": 15821,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.8571
+      },
+      {
+        "feature_idx": 2265,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8522
+      },
+      {
+        "feature_idx": 4126,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.8385
+      },
+      {
+        "feature_idx": 15873,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8308
+      },
+      {
+        "feature_idx": 13990,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.827
+      },
+      {
+        "feature_idx": 9163,
+        "code": "icd9_42731",
+        "kind": "grounded",
+        "r_pb": 0.8172
+      },
+      {
+        "feature_idx": 12473,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.8112
+      },
+      {
+        "feature_idx": 12655,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.8106
+      },
+      {
+        "feature_idx": 11307,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.7994
+      },
+      {
+        "feature_idx": 3921,
+        "code": "icd9_25000",
+        "kind": "random_control",
+        "r_pb": null
+      },
+      {
+        "feature_idx": 7731,
+        "code": "icd9_41401",
+        "kind": "low_r_control",
+        "r_pb": 0.1001
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": null,
+    "output_dir": "/out/ablation/jumprelu_pilot",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}
