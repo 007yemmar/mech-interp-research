@@ -23,6 +23,7 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import yaml
@@ -557,3 +558,89 @@ def icd9_chapter(code) -> str:
         if lo <= num <= hi:
             return name
     return "unknown"
+
+
+def sample_tokens_note_granular(config: dict[str, Any], held_out_start: int, log: Any):
+    """FULL-note activation rows + their note ids, from SELECTION shards.
+
+    Lives here rather than in a Modal entrypoint so every importer can share it:
+    importing one entrypoint module from another registers both @app.local_entrypoint
+    functions on the same app and Modal rejects the duplicate name.
+
+    Sampling MUST be at note granularity, not token granularity. The
+    pre-fix version drew `calibration_tokens_per_shard` rows uniformly at
+    random across an entire shard — at tokens_per_shard=500_000 (the 50k
+    extraction config) and ~3,089 tokens/note, a 40_000-row sample covers
+    roughly 8% of any note it touches. A note's max over that 8% slice
+    systematically understates its true (all-tokens) max, so
+    calibrate_thresholds_note_level's bisection — which assumes the sampled
+    per-note max approximates the full-note max the downstream audit
+    pipeline actually pools over — drives theta down until far more tokens
+    clear it than should, and every arm over-fires relative to Arm C once
+    applied to full notes. This is the same note-vs-token mismatch Ruling 1
+    exists to eliminate, reintroduced one layer down.
+
+    So: pick a budget of whole notes per shard (`calibration_notes_per_shard`,
+    default 50 — a few hundred notes total across the default 6 shards is
+    ample resolution for calibrating to a ~0.675 target rate) and take EVERY
+    row in row_start:row_end for each selected note — never a sub-slice.
+
+    Returns (token_sample, note_ids): note_ids[i] is the note_idx (from
+    metadata.jsonl) that token_sample[i] belongs to.
+    """
+    import numpy as np
+    from safetensors.numpy import load_file
+
+    from mech_interp_research.icd_eval import load_metadata
+    from mech_interp_research.necessity_stats import split_by_shard
+
+    acts = Path(config["activations_dir"])
+    n_shards = int(config.get("calibration_n_shards", 6))
+    notes_per_shard = int(config.get("calibration_notes_per_shard", 50))
+    rng = np.random.default_rng(int(config.get("seed", 42)))
+
+    metadata = load_metadata(acts)
+    # Selection/audit boundary via the one canonical implementation
+    # (necessity_stats.split_by_shard) rather than a third inline spelling
+    # of "< held_out_start" parsed out of shard filenames.
+    sel_mask, _ = split_by_shard(metadata, held_out_shard_start=held_out_start)
+    eligible_shard_ids = set(int(s) for s in metadata.loc[sel_mask, "shard"].unique())
+    shard_files = sorted(acts.glob("shard_*.safetensors"))
+    eligible = [p for p in shard_files if int(p.stem.split("_")[1]) in eligible_shard_ids]
+    chosen = rng.choice(len(eligible), size=min(n_shards, len(eligible)), replace=False)
+
+    token_chunks = []
+    note_id_chunks = []
+    n_notes_total = 0
+    for i in sorted(chosen):
+        shard_path = eligible[i]
+        shard_idx = int(shard_path.stem.split("_")[1])
+        shard_meta = metadata[metadata["shard"] == shard_idx]
+        take_notes = min(notes_per_shard, len(shard_meta))
+        if take_notes == 0:
+            continue
+        note_pos = rng.choice(len(shard_meta), size=take_notes, replace=False)
+        selected_notes = shard_meta.iloc[note_pos]
+
+        arr = load_file(str(shard_path))["activations"].astype(np.float32)
+        for _, note_row in selected_notes.iterrows():
+            row_start, row_end = int(note_row["row_start"]), int(note_row["row_end"])
+            if row_end <= row_start:
+                continue
+            token_chunks.append(arr[row_start:row_end])
+            note_id_chunks.append(
+                np.full(row_end - row_start, int(note_row["note_idx"]), dtype=np.int64)
+            )
+            n_notes_total += 1
+        del arr
+
+    token_sample = np.concatenate(token_chunks, axis=0)
+    note_ids = np.concatenate(note_id_chunks, axis=0)
+    log.info(
+        "Calibration token sample: %s rows across %d FULL notes (%d shards x up to %d notes/shard)",
+        token_sample.shape,
+        n_notes_total,
+        len(chosen),
+        notes_per_shard,
+    )
+    return token_sample, note_ids

@@ -1,0 +1,28 @@
+# Rishit's probe_balanced directions -> pseudo-SAE, thresholds calibrated at import.
+#
+# Imports HIS directions.npy rather than rebuilding, because a rebuild would
+# produce different vectors (his manifest records shrinkage_setting:
+# ledoit_wolf) and the existing audit's correlation matrices would then describe
+# directions this checkpoint does not contain -- putting r values in the judge's
+# prompt that belong to something else.
+#
+# He shipped no thresholds, so they are calibrated here to the reference SAE's
+# NOTE-level detection rate, the same path build_feature_source uses.
+
+arm: probe_balanced
+directions_npy: /out/necessity/probe_directions/probe_balanced/directions.npy
+output_dir: /out/sources/probe_bal_cal
+
+expect_d_model: 2304
+held_out_shard_start: 281
+
+# Inputs for note-level calibration (no thresholds_npy supplied).
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
+calibration_n_shards: 6
+calibration_notes_per_shard: 50
+seed: 42
+
+nonfinite_threshold_policy: inert
+logging_level: INFO

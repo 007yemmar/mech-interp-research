@@ -1,0 +1,51 @@
+# S2: explanations + Sonnet concordance for supervised LR probe (balanced).
+#
+# NON-SAE source from the necessity suite. Tests whether concordance is
+# SAE-specific or merely tracks |r|: if a non-SAE direction at the same
+# correlation earns the same verdicts, concordance measures correlation
+# strength rather than anything the SAE contributes.
+#
+# Pairing is BY CONSTRUCTION -- one direction per code, in code order --
+# not argmax. Argmax disagrees with the built-for code on 15 of 46 here,
+# and those disagreements are clinically adjacent, so argmax would score a
+# correct explanation as NO and record it as judge failure.
+#
+# Uses Rishit's own directions with Rishit's own audit, so the |r| quoted to
+# the judge belongs to the vectors in this checkpoint.
+sae_checkpoint: /out/sources/probe_bal_cal
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/necessity/direction_audit/probe_lr_balanced
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/judgetest/probe_bal_cal
+shard_ckpt_dir: /out/necessity/probe_directions/probe_balanced/shard_ckpt
+
+explicit_features: [[0, "icd9_4019"], [1, "icd9_2724"], [2, "icd9_53081"], [3, "icd9_4280"], [4, "icd9_25000"], [5, "icd9_42731"], [6, "icd9_41401"], [7, "icd9_V1582"], [8, "icd9_5849"], [9, "icd9_311"], [10, "icd9_2449"], [11, "icd9_40390"], [12, "icd9_2859"], [13, "icd9_V5861"], [14, "icd9_3051"], [15, "icd9_2720"], [16, "icd9_5990"], [17, "icd9_32723"], [18, "icd9_V5867"], [19, "icd9_5859"], [20, "icd9_30000"], [21, "icd9_V4582"], [22, "icd9_412"], [23, "icd9_V5866"], [24, "icd9_49390"], [25, "icd9_496"], [26, "icd9_27800"], [27, "icd9_V4581"], [28, "icd9_2761"], [29, "icd9_73300"], [30, "icd9_486"], [31, "icd9_V4986"], [32, "icd9_2749"], [33, "icd9_41400"], [34, "icd9_V1251"], [35, "icd9_2851"], [36, "icd9_33829"], [37, "icd9_V1254"], [38, "icd9_27651"], [39, "icd9_2762"], [40, "icd9_60000"], [41, "icd9_56400"], [42, "icd9_3572"], [43, "icd9_5856"], [44, "icd9_42789"], [45, "icd9_2875"]]
+
+# anthropic (default) or openrouter. See docs: OpenRouter on this account can
+# currently only reach deepseek/deepseek-chat; every other provider 403s.
+llm_backend: anthropic
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+# Fuzzing/Detection measure explanation QUALITY (Paulo et al.), not whether
+# the judge discriminates, which is the only question this suite asks. They
+# are two of the four calls per feature; dropping them halves the spend and
+# costs nothing here. The remaining two are load bearing: explain produces the
+# explanation, concordance writes the concordance_results.csv that
+# concordance_multi_judge re-judges with the panel.
+scorers: []
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
+checkpoint_dir: null
+logging_level: INFO

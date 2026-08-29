@@ -1,0 +1,20 @@
+# R1 (verbatim Table-2 concordance prompt) on the random_hard CONTROL arm.
+#
+# DeepSeek ONLY. Sonnet's verdicts for this arm already exist: auto_interp's
+# concordance call IS the verbatim Table-2 prompt, so stage 1 produced them
+# (random_hard 2% YES / 80.3% YES+PARTIAL; keyword 82% / 100%). Re-running
+# Sonnet here would spend 339 calls reproducing numbers already in hand.
+#
+# DeepSeek is the right second judge rather than a mere replicate: the published
+# Table R1 notes it "reaches 96% via heavy PARTIAL", so a floor measured under
+# the MOST lenient judge is the strongest form of the leniency argument the
+# rebuttal already concedes.
+
+auto_interp_dir: /out/auto_interp/judgetest/probe_bal_cal
+output_dir: null
+judges:
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+thresholds: [0.3, 0.5]
+max_workers: 4
+client_max_retries: 6
+logging_level: INFO

@@ -1,0 +1,46 @@
+# S2: explanations + Sonnet concordance for PCA directions (unsupervised).
+#
+# The fair necessity test: PCA sees no labels, exactly like the SAE. Pairing is
+# ARGMAX, not by-construction -- with k=2304 unsupervised components there is no
+# code a component was 'built for'.
+#
+# Top 46 by |r| to match the one-per-code sources' n. PCA caps at |r| 0.425,
+# essentially the random-matched ceiling of 0.432, so it cannot reach the range
+# where the SAE lives -- itself a result.
+sae_checkpoint: /out/sources/pca_note
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/necessity/pca/seed0/audit_note_matched
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/judgetest/pca_note
+shard_ckpt_dir: /out/necessity/pca/seed0/shard_ckpt_audit
+
+explicit_features: [[3, "icd9_5849"], [6, "icd9_4280"], [8, "icd9_5849"], [15, "icd9_4280"], [16, "icd9_4280"], [19, "icd9_4280"], [21, "icd9_4280"], [24, "icd9_4280"], [26, "icd9_4280"], [27, "icd9_4280"], [30, "icd9_4280"], [37, "icd9_4280"], [42, "icd9_4280"], [44, "icd9_5849"], [49, "icd9_V5866"], [50, "icd9_4280"], [52, "icd9_5849"], [57, "icd9_5849"], [59, "icd9_5849"], [62, "icd9_4280"], [65, "icd9_V4986"], [69, "icd9_4280"], [71, "icd9_5990"], [74, "icd9_5990"], [81, "icd9_5849"], [82, "icd9_V5866"], [88, "icd9_5849"], [92, "icd9_V5866"], [97, "icd9_4280"], [103, "icd9_5849"], [105, "icd9_V4986"], [108, "icd9_2449"], [110, "icd9_4280"], [111, "icd9_5849"], [118, "icd9_4280"], [128, "icd9_V5867"], [132, "icd9_V5867"], [150, "icd9_2724"], [157, "icd9_V4986"], [158, "icd9_41401"], [191, "icd9_V4582"], [203, "icd9_4280"], [216, "icd9_4280"], [317, "icd9_32723"], [553, "icd9_4280"], [1348, "icd9_5990"]]
+
+# anthropic (default) or openrouter. See docs: OpenRouter on this account can
+# currently only reach deepseek/deepseek-chat; every other provider 403s.
+llm_backend: anthropic
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20
+n_contexts_test: 10
+max_tokens_context: 30
+
+# Fuzzing/Detection measure explanation QUALITY (Paulo et al.), not whether
+# the judge discriminates, which is the only question this suite asks. They
+# are two of the four calls per feature; dropping them halves the spend and
+# costs nothing here. The remaining two are load bearing: explain produces the
+# explanation, concordance writes the concordance_results.csv that
+# concordance_multi_judge re-judges with the panel.
+scorers: []
+
+concordance_model: claude-sonnet-4-6
+concordance_thresholds: [0.3, 0.4, 0.5]
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+model_name: google/gemma-2-2b
+# NOTE: run_auto_interp processes features SERIALLY — there is no thread pool,
+# executor or rate limiter in auto_interp.py, so no max_workers knob exists. A
+# key of that name is silently swallowed by run_auto_interp(**_kwargs). Serial
+# execution is also why no 429 protection is needed; the Anthropic SDK retries.
+checkpoint_dir: null
+logging_level: INFO

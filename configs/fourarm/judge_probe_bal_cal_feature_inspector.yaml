@@ -1,0 +1,28 @@
+# Judge-validity contexts for the probe_bal_cal NON-SAE source (Rishit's necessity suite).
+#
+# Uses HIS directions and HIS audit directory together, so the |r| quoted to the
+# judge belongs to the vectors in this checkpoint. Rebuilding the directions
+# locally would have produced different vectors under a different shrinkage
+# estimator, and the mismatch would have been invisible in the output.
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+sae_checkpoint: /out/sources/probe_bal_cal
+icd_csv_path: /data/sample_50k.csv
+eval_output_dir: /out/necessity/direction_audit/probe_lr_balanced
+output_dir: /out/necessity/direction_audit/probe_lr_balanced/feature_inspection
+shard_ckpt_dir: /out/necessity/probe_directions/probe_balanced/shard_ckpt
+
+model_name: google/gemma-2-2b
+max_length: 8192
+n_pairs: 46
+top_k: 50
+context_window: 5
+n_shards: 20
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+text_col: note_text
+rng_seed: 42
+logging_level: INFO

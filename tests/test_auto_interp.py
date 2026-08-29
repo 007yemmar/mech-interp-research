@@ -1491,3 +1491,43 @@ def test_anthropic_client_sends_workspace_header_when_set(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID")
     plain = make_llm_client("anthropic")
     assert "anthropic-workspace-id" not in plain.default_headers
+
+
+def test_hard_negative_slate_draws_from_the_same_chapter():
+    """same_chapter=True must invert the distractor rule, not merely relax it.
+
+    The default slate requires a DIFFERENT ICD-9 chapter, so hit@1 only measures
+    organ-system-level discrimination -- a limitation the published scope note
+    concedes. The hard-negative variant draws distractors from the correct
+    code's own chapter (CHF vs atrial fibrillation, not CHF vs a renal code),
+    and a silent fallback to cross-chapter would make the harder condition look
+    identical to the easy one.
+    """
+    from mech_interp_research.concordance_multi_judge import _ch_ok
+
+    # Cross-chapter (default): same chapter rejected, different accepted.
+    assert _ch_ok("circulatory", "genitourinary", same_chapter=False)
+    assert not _ch_ok("circulatory", "circulatory", same_chapter=False)
+
+    # Hard negative: exactly reversed.
+    assert _ch_ok("circulatory", "circulatory", same_chapter=True)
+    assert not _ch_ok("circulatory", "genitourinary", same_chapter=True)
+
+
+def test_binary_parser_resolves_and_flags_ambiguity():
+    """Forced-binary parsing must not silently default to one side.
+
+    This arm exists to measure whether PARTIAL is real or an artifact of being
+    offered. Folding unparseable replies into NO would inflate that contrast, so
+    ambiguous output has to surface as UNKNOWN.
+    """
+    from mech_interp_research.concordance_multi_judge import parse_binary_response
+
+    assert parse_binary_response("YES | describes heart failure")["verdict"] == "YES"
+    assert parse_binary_response("NO | unrelated")["verdict"] == "NO"
+    # Bare word, no delimiter.
+    assert parse_binary_response("no")["verdict"] == "NO"
+    # Both tokens present and no leading verdict -> not guessable.
+    assert parse_binary_response("could be YES or NO here")["verdict"] == "UNKNOWN"
+    assert parse_binary_response("")["verdict"] == "UNKNOWN"
+    assert parse_binary_response("YES | x")["rationale"] == "x"

@@ -35,6 +35,57 @@ from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
 
 
+# Annotations omitted: numpy is imported inside the Modal function, not at
+# module scope, so a module-level np.ndarray annotation would not resolve.
+def _calibrate_from_sae(config, W, log):
+    """Note-level thresholds for a source that shipped directions but no thresholds.
+
+    Reuses build_feature_source's token sampler and the cached Arm-C selection,
+    so nothing already computed is recomputed and the calibration is the same
+    code path the purpose-built arms use.
+    """
+    import json
+
+    import numpy as np
+
+    from mech_interp_research.feature_sources import (
+        calibrate_thresholds_note_level,
+        sample_tokens_note_granular,
+    )
+    from mech_interp_research.necessity_stats import sae_note_level_densities
+
+    held_out_start = int(config.get("held_out_shard_start", 281))
+
+    # The Arm-C (real SAE) latent per code, cached by build_feature_source. Read
+    # rather than re-derived: re-deriving costs a full selection pass and could
+    # pick a different latent if anything upstream moved.
+    arm_c_path = Path(config["arm_c_selected_features_path"])
+    feature_ids = json.loads(arm_c_path.read_text())["feature_ids"]
+
+    target_rates = sae_note_level_densities(
+        config["sae_shard_ckpt_dir"], feature_ids, held_out_shard_start=held_out_start
+    )
+    k = W.shape[1]
+    if len(target_rates) != k:
+        raise ValueError(
+            f"Source has k={k} directions but the Arm-C reference supplies "
+            f"{len(target_rates)} target rates. Note-level calibration matches "
+            "each direction to one reference latent, so this path only applies "
+            "to one-direction-per-code sources. Supply thresholds_npy instead."
+        )
+
+    token_sample, note_ids = sample_tokens_note_granular(config, held_out_start, log)
+    theta, measured = calibrate_thresholds_note_level(W, token_sample, note_ids, target_rates)
+    log.info(
+        "Calibrated %d thresholds to the SAE's note-level rate "
+        "(target median %.3f, achieved median %.3f)",
+        k,
+        float(np.median(target_rates)),
+        float(np.median(measured)),
+    )
+    return theta.astype(np.float32)
+
+
 @app.function(
     image=image,
     cpu=DEFAULT_CPU,
@@ -91,14 +142,29 @@ def import_source_remote(config: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         directions_path = Path(config["directions_npy"])
-        thresholds_path = Path(config["thresholds_npy"])
         W = np.load(directions_path).astype(np.float32)
-        theta = np.load(thresholds_path).astype(np.float32)
         b_enc = None
-        provenance = {
-            "imported_from": str(directions_path),
-            "thresholds_from": str(thresholds_path),
-        }
+        provenance = {"imported_from": str(directions_path)}
+
+        thresholds_cfg = config.get("thresholds_npy")
+        if thresholds_cfg:
+            theta = np.load(Path(thresholds_cfg)).astype(np.float32)
+            provenance["thresholds_from"] = str(thresholds_cfg)
+        else:
+            # A source that shipped directions but no thresholds (the whitened
+            # diff-in-means and probe arms) is calibrated here rather than being
+            # rebuilt. Rebuilding would produce DIFFERENT vectors -- the existing
+            # audit's correlation matrices would then describe directions the
+            # checkpoint does not contain, and the r values quoted to the judge
+            # would silently belong to something else.
+            #
+            # Calibration target is the reference SAE's NOTE-level detection
+            # rate, not a token-level density: correlation is computed after
+            # max-pooling, so note-level rate is the quantity that has to match.
+            # Identical to the path build_feature_source uses, reusing its token
+            # sampler so the two cannot drift.
+            theta = _calibrate_from_sae(config, W, log)
+            provenance["thresholds_from"] = "calibrated_note_level_at_import"
 
     # A [k, d_model] matrix is the transpose of what the contract wants; accept
     # it rather than silently writing a mis-shaped encoder.

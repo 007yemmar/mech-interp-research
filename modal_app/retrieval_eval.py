@@ -34,7 +34,7 @@ DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
     memory=16384,
     timeout=10800,
     secrets=[
-        modal.Secret.from_name("anthropic-api-key"),
+        modal.Secret.from_name("anthropic-api-key-mohit"),
         modal.Secret.from_name("openrouter-api-key"),
         hf_secret,
     ],
@@ -122,6 +122,12 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
 
     n_distractors = config.get("n_distractors", 7)
     r_unrelated = config.get("r_unrelated", 0.05)
+    # Hard-negative slate: draw distractors from the correct code's OWN ICD-9
+    # chapter instead of a different one. The published scope note concedes the
+    # cross-chapter slate measures organ-system-level discrimination only; this
+    # is the harder test it points at (428.0 CHF vs 427.31 atrial fibrillation,
+    # not CHF vs a renal code).
+    same_chapter = bool(config.get("same_chapter_distractors", False))
     feats = df.to_dict("records")
     log.info(
         "Retrieval eval: %d features x %d judge(s), K=%d distractors",
@@ -141,6 +147,7 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
             prevalence=prevalence,
             n_distractors=n_distractors,
             r_unrelated=r_unrelated,
+            same_chapter=same_chapter,
             seed=fid,
         )
         prompt = build_retrieval_prompt(rec["explanation"], slate)
@@ -200,6 +207,7 @@ def run_retrieval_remote(config: dict[str, Any]) -> dict[str, Any]:
         for t in thresholds:
             summary[f"r>{t}"] = _block([r for r in jr if abs(r["r_pb"]) > t])
         summary["n_distractors"] = n_distractors
+        summary["same_chapter_distractors"] = same_chapter
         summary["design"] = (
             "1 correct + K unrelated cross-chapter distractors + none; hit@1 vs 1/(K+2)"
         )

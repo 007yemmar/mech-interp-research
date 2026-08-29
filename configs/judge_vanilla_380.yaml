@@ -1,0 +1,62 @@
+# Published 380-feature rule applied to the vanilla SAE, on held-out shards.
+#
+# Same selection (280 strong at r>0.4 + 100 weak at 0.1-0.3), same prompts and
+# thresholds as the published jumprelu run, so results drop straight into the
+# R1/R2 tables. For vanilla: 291 features clear r>0.4 (jumprelu: 276), max |r| 0.859 vs 0.864 --
+# a like-for-like 380-feature replication of the published run.
+
+# --- paths ---
+sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split
+# 31 held-out shards, not the 312-shard full checkpoint: auto_interp's shard
+# fan-out is bounded only by what note_vectors covers, and the full checkpoint
+# drove an 83-minute extraction that never survived to the explainer.
+shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+output_dir: /out/auto_interp/vanilla_test_split
+
+# --- feature selection ---
+n_strong_grounded: 280       # all r > 0.4
+n_weak_grounded: 100         # random sample from r = 0.1-0.3 (BH-significant)
+# Noise-floor tiers OFF. The published config carries n_non_grounded: 1000 and
+# n_dead: 100, which inflated the selection to 616 (vanilla) and 1213
+# (gemmascope) features. Those tiers have no ICD code, so they yield no
+# concordance verdict and never enter the banded tables -- ~60% and ~90% of the
+# calls respectively bought nothing reportable. They are already established
+# for jumprelu, and the architecture question is answered by the grounded
+# features alone. Fewer features also shrinks the shard union
+# select_shards_for_features returns, so extraction shortens too.
+n_non_grounded: 0
+n_dead: 0
+random_seed: 42
+
+# --- explanation ---
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20         # activating contexts shown to the explainer
+n_contexts_test: 10          # held out for scoring (5 pos, 5 neg)
+max_tokens_context: 30       # +/- tokens around trigger token
+
+# --- scoring ---
+# Fuzzing/Detection do not affect the concordance verdict and are half the
+# calls; the published run included them, this one does not.
+scorers: []
+
+# --- post-processing ---
+concordance_model: claude-sonnet-4-6
+concordance_thresholds:
+  - 0.3
+  - 0.4
+  - 0.5
+
+# --- ICD descriptions (for concordance prompts) ---
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+# --- tokenizer ---
+model_name: google/gemma-2-2b
+
+# --- resume ---
+checkpoint_dir: null         # auto-detected from output_dir
+
+logging_level: INFO

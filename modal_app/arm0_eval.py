@@ -36,7 +36,7 @@ DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
     memory=8192,
     timeout=7200,
     secrets=[
-        modal.Secret.from_name("anthropic-api-key"),
+        modal.Secret.from_name("anthropic-api-key-mohit"),
         modal.Secret.from_name("openrouter-api-key"),
         hf_secret,
     ],
@@ -82,7 +82,20 @@ def run_arm0_remote(config: dict[str, Any]) -> dict[str, Any]:
         api_key=api_key,
         max_retries=config.get("client_max_retries", 6),
     )
-    judges = build_judges(config["judges"], openrouter_client=openrouter)
+    # An anthropic-backed judge is built on demand, mirroring retrieval_eval.
+    # Without this, arm0_eval could only reach OpenRouter -- and this account's
+    # OpenRouter key is 403'd on anthropic/* and openai/*, leaving Sonnet
+    # unreachable for the very prompt the published Table 2 used.
+    anthropic_client = None
+    if any(j.get("backend") == "anthropic" for j in config["judges"]):
+        import anthropic
+
+        anthropic_client = anthropic.Anthropic(max_retries=config.get("client_max_retries", 6))
+    judges = build_judges(
+        config["judges"],
+        anthropic_client=anthropic_client,
+        openrouter_client=openrouter,
+    )
     if not judges:
         raise ValueError("no live judges — every entry is 'reuse'; add an openrouter judge")
 

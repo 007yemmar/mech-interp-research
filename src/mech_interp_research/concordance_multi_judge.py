@@ -93,6 +93,22 @@ def _describe(code: str, code_descriptions: dict) -> str:
     return bare
 
 
+def _ch_ok(cand_ch, correct_ch, same_chapter: bool) -> bool:
+    """Chapter admissibility for a distractor.
+
+    Default (same_chapter=False) keeps the published cross-chapter rule: a
+    distractor must sit in a DIFFERENT ICD-9 chapter, so the slate spans organ
+    systems and hit@1 measures coarse discrimination.
+
+    same_chapter=True inverts it into a HARD-NEGATIVE slate drawn from the
+    correct code's own chapter -- e.g. distinguishing 428.0 congestive heart
+    failure from 427.31 atrial fibrillation rather than from a renal code. The
+    published scope note already concedes the cross-chapter slate tests only
+    organ-system-level discrimination; this is the harder test it points at.
+    """
+    return cand_ch == correct_ch if same_chapter else cand_ch != correct_ch
+
+
 def build_slate(
     feature_idx, r_pb, code_names, code_descriptions, n_candidates=5, n_hard_neg=3, seed=42
 ):
@@ -179,6 +195,61 @@ def judge_deanchored(judge, explanation, code, description) -> dict:
         explanation=explanation, code=code, description=description
     )
     return parse_deanchored_response(judge.complete(prompt))
+
+
+BINARY_CONCORDANCE_PROMPT = """\
+A sparse autoencoder feature has been auto-interpreted as:
+"{explanation}"
+
+Consider the ICD-9 diagnosis code {code} ({description}).
+
+Does the explanation describe the same clinical concept as the code?
+You MUST answer YES or NO. There is no partial option: if the explanation
+describes a related but different concept (a treatment for the condition, a
+symptom of it, a broader category containing it, or a neighbouring diagnosis),
+that is NO.
+
+Format: <YES or NO> | <one-sentence rationale>"""
+
+
+def parse_binary_response(raw: str) -> dict:
+    """Parse a forced-binary reply into {verdict, rationale}.
+
+    An unparseable reply becomes UNKNOWN rather than defaulting to either side:
+    silently folding failures into NO would inflate the very contrast this arm
+    exists to measure.
+    """
+    text = (raw or "").strip()
+    head = text.split("|", 1)[0].strip().upper()
+    rationale = text.split("|", 1)[1].strip() if "|" in text else ""
+    if head.startswith("YES"):
+        verdict = "YES"
+    elif head.startswith("NO"):
+        verdict = "NO"
+    else:
+        up = text.upper()
+        # Fall back to first mention, but only if exactly one of the two appears.
+        has_y, has_n = "YES" in up, "NO" in up
+        verdict = "YES" if (has_y and not has_n) else ("NO" if (has_n and not has_y) else "UNKNOWN")
+    return {"verdict": verdict, "rationale": rationale}
+
+
+def judge_binary(judge, explanation, code, description) -> dict:
+    """Forced-choice YES/NO concordance -- PARTIAL removed from the option set.
+
+    exact-YES measures "YES vs (PARTIAL or NO)" *while PARTIAL was on offer*. This
+    asks whether PARTIAL is a real third category or an artifact of providing it:
+    features that drew PARTIAL must now resolve one way or the other. If binary-YES
+    tracks exact-YES, PARTIAL was genuine; if it climbs toward YES+PARTIAL, the
+    option itself was manufacturing the verdict.
+
+    Also de-anchored (no r_pb), so a YES cannot be propped up by a stated
+    correlation.
+    """
+    prompt = BINARY_CONCORDANCE_PROMPT.format(
+        explanation=explanation, code=code, description=description
+    )
+    return parse_binary_response(judge.complete(prompt))
 
 
 def judge_original(judge, explanation, icd_code, icd_description, r_pb) -> dict:
@@ -705,6 +776,7 @@ def build_discriminative_slate(
     n_distractors=7,
     r_unrelated=0.05,
     seed=0,
+    same_chapter=False,
 ):
     """Slate = 1 correct code + K unrelated cross-chapter distractors + 'none'.
 
@@ -728,10 +800,10 @@ def build_discriminative_slate(
     pool = [
         c
         for i, c in enumerate(bare)
-        if c != cstar and icd9_chapter(c) != cstar_ch and absr[i] < r_unrelated
+        if c != cstar and _ch_ok(icd9_chapter(c), cstar_ch, same_chapter) and absr[i] < r_unrelated
     ]
     if len(pool) < n_distractors:  # relax the |r| filter if the pool is too small
-        pool = [c for c in bare if c != cstar and icd9_chapter(c) != cstar_ch]
+        pool = [c for c in bare if c != cstar and _ch_ok(icd9_chapter(c), cstar_ch, same_chapter)]
 
     by_ch: dict[str, list[str]] = {}
     for c in pool:
