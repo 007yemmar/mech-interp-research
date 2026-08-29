@@ -1,0 +1,136 @@
+# Causal ablation SMOKE — RANDOM-MATCHED directions, MEAN-ABLATION, 250 notes, 4 targets.
+#
+# Validates the pseudo-SAE ablation path end-to-end before committing ~3 h of
+# A100 to the full run. The random-matched directions are imported as a
+# pseudo-SAE (W_dec = W_enc.T, b_dec = 0) by
+#   modal run modal_app/import_direction_source.py \
+#       --config-file configs/import_random_matched.yaml
+# which writes /out/sources/random_matched_note. Run that FIRST if the volume
+# does not already have it:
+#   modal volume ls sae-artifacts sources/random_matched_note/
+#
+# Nothing in ablation.py changes. The note-level gate is implicit: the
+# checkpoint's thresholds are note-level, and
+#   max_t a_j(t) > tau_j   <=>   at least one token has z_j > 0
+# so a note below its threshold contributes no subtraction and delta = 0, while
+# a passing note is ablated at exactly the tokens that produced the pooled max.
+#
+# WHAT THIS SMOKE IS FOR — in priority order:
+#
+#   1. RECONSTRUCTION TAX (the go/no-go).
+#      decode(z) = sum_j z_j . D_j over only ~L0 active directions, with
+#      b_dec = 0, is a poor reconstruction of a 2304-dim residual. GemmaScope's
+#      tax is 0.648 nats and already 22x vanilla's 0.029.
+#        - mean_recon_tax <~ 1 nat  -> keep the l_recon baseline; nats stay
+#          comparable with the SAE arms.
+#        - mean_recon_tax >> 1 nat  -> the l_recon baseline is unusable; switch
+#          the full run to raw-stream ablation and report Cliff's delta only.
+#      Do not start the full run until this number is in hand.
+#
+#   2. CENTERING. D and tau were built on the CENTERED activation stream; the
+#      forward hook sees the uncentered residual. is_centered: true subtracts mu
+#      before encode and adds it back before the splice — but a pseudo-SAE has
+#      b_dec = 0, unlike a trained SAE, so verify rather than assume. A centering
+#      error shows up as a large recon tax AND near-zero firing.
+#
+#   3. REALISED FIRING. The two grounded directions should fire on roughly their
+#      audited note-level density. mean_target_activation_pos near 0 (never
+#      fires) or firing on every note means the threshold was mis-applied.
+#
+#   4. m_j ESTIMATION. mean-ablation needs per-latent mean activations; confirm
+#      the log prints a sane non-negative range for the 4 targets.
+#
+#   5. PLUMBING. Checkpoint loads, ablation_results.csv + ablation_summary.json
+#      written, per-shard resume works.
+#
+# Cliff's delta at n=250 is DIRECTIONAL ONLY — do not read effect sizes here.
+# Controls are provisional (see the targets block).
+#
+# Expected runtime: ~40 min on A100-40GB.
+#
+# Run:
+#   modal run modal_app/ablation.py --config-file configs/ablation_smoke_random_matched.yaml
+
+# --- Source identity (pseudo-SAE, not a trained SAE) -----------------------
+sae_name: random_matched_smoke
+sae_checkpoint_dir: /out/sources/random_matched_note
+sae_hf_repo_id: null
+sae_hf_filename: null
+
+# Directions and thresholds were derived on the centered stream, exactly as the
+# vanilla/JumpReLU SAEs were, so the same centering path applies.
+is_centered: true
+
+# --- Intervention: mean-ablation only --------------------------------------
+# Zero-ablation is not run for this source. On the matched 30 SAE targets the
+# two interventions are statistically indistinguishable (paired Wilcoxon
+# p = 0.371) and mean-ablation is not exposed to the out-of-distribution
+# objection.
+intervention: mean
+mean_act_path: null        # null -> estimate m_j from the shards below
+mean_act_n_shards: 2       # small sample for a fast smoke
+mean_act_max_tokens: 100000
+
+# --- Activations / model (identical to every other ablation run) -----------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets ---------------------------------------------------------------
+# Grounded: the top 2 (direction, code) pairs from the note_matched audit
+#   results/necessity/random_matched/seed0/audit_note_matched/grounding_summary.json
+# Note the grounding ceiling: 0.4322 here vs the vanilla SAE's 0.8595. That gap
+# is a result, not a defect — see docs/causal_ablation_positioning.md section F1.
+#
+# Controls: PROVISIONAL. The full per-direction correlation table is not local
+# (top_associations.csv lives on Modal). These two indices were not among any
+# top-200 association, and random directions have median max |r| = 0.099, so
+# they are near-certainly low-r — adequate for a smoke. BEFORE THE FULL RUN,
+# replace them with directions verified as max |r| < 0.05 (random control) and
+# |r| in [0.05, 0.10] (low-r control) from
+#   necessity/random_matched/seed0/audit_note_matched/top_associations.csv
+targets:
+  - feature_idx: 14681
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.4322
+  - feature_idx: 11717
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3618
+  - feature_idx: 601
+    code: icd9_25000
+    kind: random_control
+    r_pb: null
+  - feature_idx: 15330
+    code: icd9_5849
+    kind: low_r_control
+    r_pb: null
+
+# --- Forward / measurement (identical to the SAE arms) ---------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: 250
+
+# --- Output ----------------------------------------------------------------
+output_dir: /out/ablation/random_matched_smoke
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

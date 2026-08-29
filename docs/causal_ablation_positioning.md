@@ -465,6 +465,86 @@ GemmaScope clears it partially, and the surviving effect is **specific**
 
 ---
 
+## Framing notes for the ablation section
+
+### F1. Disclose the grounding gap before reporting cross-method effects
+
+The best-vs-best comparison is confounded by grounding strength and must say so
+in its own paragraph rather than in a footnote. Draft text:
+
+> Best-vs-best comparison is confounded by grounding strength: the SAE's top-10
+> features reach |r| = 0.83–0.86, whereas the strongest covariance-matched
+> random direction reaches 0.43 and the strongest difference-in-means direction
+> 0.70. No r-matched comparison is available at the SAE's grounding level,
+> because neither alternative produces directions that ground that strongly —
+> itself a result. Causal effects are therefore reported alongside each target's
+> |r|, and the comparison should be read as "best available from each method,"
+> not as a matched contrast.
+
+Peak `|r_pb|` by source, for the table that paragraph refers to:
+
+| Source | k | max \|r\| | selected median \|r\| |
+|---|---|---|---|
+| SAE (JumpReLU / vanilla) | 18,432 | 0.864 / 0.860 | 0.574 |
+| TF-IDF (value / binary) | 10,000 | 0.848 / 0.831 | 0.52 / 0.53 |
+| difference-in-means (full whitening) | 46 | 0.699 | 0.340 |
+| LR probe (unweighted) | 46 | 0.637 | 0.333 |
+| GemmaScope | 16,384 | 0.545 | 0.309 |
+| random-matched (`note_matched`) | 18,432 | 0.432 | 0.191 |
+| PCA (`note_matched`) | 2,304 | 0.425 | 0.132 |
+
+### F2. Ten to thirty interventions is the field norm — say so
+
+Causal ablation is GPU-heavy and reviewers unfamiliar with the cost may read a
+30-target study as thin. It is not. Comparable published counts:
+
+| Paper | Interventions |
+|---|---|
+| Bau et al., PNAS 2020 (the founding design) | **20 units per class**; 4 in the headline single-class case |
+| Marks et al., Sparse Feature Circuits / SHIFT, ICLR 2025 | **55 features**, ablated *jointly* as one intervention, from a 67-feature circuit; circuits are "<100 nodes" |
+| Arditi et al., NeurIPS 2024 | **one direction**, evaluated across 13 models |
+| Cho et al., 2026 (preprint) | 3.9M features — not comparable: single-token Δlogit readout, no full forward per intervention |
+
+**The distinction to draw explicitly.** SFC ablates 55 features *together* and
+measures one downstream effect: one causal experiment. This work runs 30
+**independent** per-feature tests, each with its own Mann–Whitney U, effect
+size, and place in the FDR family. By count of separate causal experiments it
+already exceeds every LM-scale paper in this line, and that framing should
+appear in the text rather than being left for a reviewer to work out.
+
+This also justifies staging new arms at top-10 first: 10–20 is squarely within
+convention, and ranks 11–30 are a config-level extension if the first tranche
+proves informative.
+
+### F3. Mean-ablation is the primary intervention — keep the bookkeeping straight
+
+Zero-ablation invites the out-of-distribution objection (clamping a latent to an
+unreachable zero) and buys nothing: on the matched 30 targets the two
+interventions are statistically indistinguishable (paired Wilcoxon *p* = 0.371),
+and specificity is if anything cleaner under mean-ablation (0 off-target
+significant vs 2). New arms therefore run mean-ablation only.
+
+**Consequence for every cross-method table:** the SAE comparator must be
+`vanilla_meanabl`, **not** `vanilla_pilot`. Comparing a mean-ablated random arm
+against the zero-ablated SAE headline is an intervention mismatch. The matched
+SAE numbers are:
+
+| | median δ |
+|---|---|
+| `vanilla_meanabl`, top-10 subset | **0.3124** |
+| `vanilla_meanabl`, all 30 | **0.1687** |
+
+Report `vanilla_pilot`'s 0.300 as the paper's zero-ablation headline if desired,
+but never as the comparator for a mean-ablated arm.
+
+**Caveat to state once.** Mean-ablation subtracts `(zⱼ − mⱼ)·W_dec[j]` with no
+non-negativity clamp, so on notes where the latent is silent it *adds*
+`mⱼ·W_dec[j]`. Zero-ablation is a strict no-op there. The negative arm is
+therefore perturbed under mean-ablation, which is why it is a different
+contrast rather than a gentler version of the same one.
+
+---
+
 ## Most valuable experiments
 
 Ordered by value per unit of cost. All extend the existing ablation path; none
