@@ -1,0 +1,51 @@
+# BOS-FREE audit of the diff-in-means direction arms.
+#
+# Identical to necessity_audit_directions.yaml except the sources point at
+# /out/necessity/diff_in_means_whitened_nobos/ and the output goes to a fresh
+# directory. The probe arms are omitted: probe_directions has not been rebuilt
+# from the BOS-free pool yet, and auditing BOS-inclusive probes alongside
+# BOS-free diff-in-means would put two different pooling conventions in one
+# table.
+#
+# Row 0 of every note is Gemma's <bos> (||x|| = 2528.6 against a ~162 median).
+# Under max-pooling it floors the note value, which can inflate point-biserial
+# by collapsing within-negative variance. See
+# docs/2026-08-29-bos-contamination-audit.md.
+#
+# Run:
+#   modal run modal_app/necessity_audit.py \
+#       --config-file configs/necessity_audit_directions_nobos.yaml
+
+icd_csv_path: /data/sample_50k.csv
+code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+output_dir: /out/necessity/direction_audit_nobos
+select_shard_start: 0
+select_shard_end: 31
+audit_shard_start: 281
+audit_shard_end: 312
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+audit_config:
+  r_threshold: 0.1
+  fdr_q: 0.05
+  mono_thresholds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+  min_off_pos: 10
+  min_pool: 10
+  restrict_c_negative: true
+  top_n_associations: 200
+  selection: identity
+
+sources:
+  - name: diff_in_means_none
+    checkpoint_dir: /out/necessity/diff_in_means_whitened_nobos/dm_none/shard_ckpt
+
+  - name: diff_in_means_diagonal
+    checkpoint_dir: /out/necessity/diff_in_means_whitened_nobos/dm_diagonal/shard_ckpt
+
+  - name: diff_in_means_full
+    checkpoint_dir: /out/necessity/diff_in_means_whitened_nobos/dm_full/shard_ckpt
+
+logging_level: INFO
