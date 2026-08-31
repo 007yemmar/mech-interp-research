@@ -1,0 +1,30 @@
+# Post-hoc specificity analyses (#2/#3/#4/#5) on the random-matched FULL run.
+#
+# The posthoc code is baseline-agnostic — it reads ablation_summary.json +
+# shard_results/ from whatever ablation_output_dir it's pointed at, so it runs
+# on a directional-ablation arm (baseline: "clean") identically to the
+# reconstruction-based SAE arms (baseline: "recon"). mean_recon_tax is 0.0 by
+# construction here, so ratio_to_recon_tax in effect_size_calibration is NaN
+# for every row (src/mech_interp_research/ablation_posthoc.py:409, guarded by
+# `if recon_tax else float("nan")` — confirmed no divide-by-zero). No GPU, no
+# forward passes.
+#
+# Run:
+#   modal run modal_app/ablation_posthoc.py --config-file configs/ablation_posthoc_random_matched.yaml
+
+ablation_output_dir: /out/ablation/random_matched_full
+
+icd_csv_path: /data/sample_50k.csv
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+held_out_shard_start: 281
+held_out_shard_end: 312
+shard_checkpoint_subdir: shard_results
+output_subdir: posthoc_specificity
+
+restrict_true_negative: true
+min_off_target_pos: 10
+
+logging_level: INFO
