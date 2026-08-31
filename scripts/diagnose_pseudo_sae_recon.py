@@ -105,6 +105,20 @@ def diagnose(
             f"   BOS over: {bool(over[0])}\n"
         )
 
+    # The non-BOS tail is what decides whether a BOS patch is sufficient. On the
+    # first 5-note sample non-BOS maxima reached 50,579 -- 77% of fp16's ceiling
+    # -- so a larger sample was always likely to cross it. Report the margin.
+    rest = sorted(o["amax_rest_max"] for o in out)
+    print(
+        f"non-BOS max|x_hat| across {len(rest)} notes: "
+        f"median={rest[len(rest)//2]:.0f}  p90={rest[int(.9*len(rest))]:.0f}  "
+        f"max={rest[-1]:.0f}   (fp16 ceiling {FP16_MAX:.0f})"
+    )
+    n_rest_over = sum(1 for r in rest if r > FP16_MAX)
+    print(f"notes whose NON-BOS tokens exceed fp16: {n_rest_over}/{len(rest)}")
+    print(f"headroom of the worst non-BOS note: {FP16_MAX / max(rest[-1], 1e-9):.2f}x")
+    print()
+
     n_bos_over = sum(o["bos_over"] for o in out)
     n_any_over = sum(o["n_tokens_over_fp16"] > 0 for o in out)
     print("=" * 62)
