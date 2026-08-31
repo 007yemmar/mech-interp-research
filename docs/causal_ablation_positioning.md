@@ -403,6 +403,12 @@ established (TPP, SHIFT), but a calibrated floor derived from the off-target
 null is not, and it directly answers the significance-is-not-necessity failure
 mode documented in Cho et al. (2026).
 
+**Update.** This floor is now also *measured* directly, not just derived —
+see "Most valuable experiments" §2 below. It revises the reading: `δ*₉₅`
+undershoots a genuinely null source's actual |δ| distribution, so the
+load-bearing criterion for every count above is BH-significance, not
+`δ > δ*₉₅` on its own.
+
 ---
 
 ## 3. Specificity
@@ -516,13 +522,24 @@ This also justifies staging new arms at top-10 first: 10–20 is squarely within
 convention, and ranks 11–30 are a config-level extension if the first tranche
 proves informative.
 
-### F3. Mean-ablation is the primary intervention — keep the bookkeeping straight
+### F3. Mean-ablation is the primary intervention for SAE-feature arms — keep the bookkeeping straight
 
 Zero-ablation invites the out-of-distribution objection (clamping a latent to an
 unreachable zero) and buys nothing: on the matched 30 targets the two
 interventions are statistically indistinguishable (paired Wilcoxon *p* = 0.371),
 and specificity is if anything cleaner under mean-ablation (0 off-target
-significant vs 2). New arms therefore run mean-ablation only.
+significant vs 2). New SAE-feature arms therefore run mean-ablation only.
+
+**Scope note — this does not extend to directional (projection) ablation.**
+Zero- vs mean-*ablation* here means clamping the SAE latent `zⱼ` to 0 or to
+its mean `mⱼ` before `decode`. Zero- vs mean-*projection* (§2/§3 above, "Most
+valuable experiments") is a different operation: `x' = x − (x·d)d` removes
+the component along `d` entirely, leaving `x'` in the span of everything
+else, rather than clamping a latent to a value it never takes. The
+out-of-distribution objection this section raises for SAE features is
+substantially weaker there, which is why the random-matched and
+difference-in-means arms use `intervention: zero` (Arditi et al.'s operator)
+as primary, not mean-projection.
 
 **Consequence for every cross-method table:** the SAE comparator must be
 `vanilla_meanabl`, **not** `vanilla_pilot`. Comparing a mean-ablated random arm
@@ -562,39 +579,190 @@ inert" is a claim about magnitude only; a reviewer can ask whether the 7 that do
 fire are firing specifically. Completing this makes the contrast symmetric with
 vanilla's. Cheapest item on the list by a wide margin.
 
-### 2. Ablation on covariance-matched random directions — *~5 h A100*
+### 2. Ablation on covariance-matched random directions (`random_matched`) — DONE
 
-The A4 necessity baseline (`random_matched.py`) already produces L0-calibrated
-random directions; this runs them through the ablation path instead of the
-grounding path.
+**Why not the SAE's reconstruction protocol.** `ablation.py`'s default
+protocol splices `decode(z)` at layer 16 and measures `l_abl = CE(recon −
+feature j)` against `l_recon = CE(recon)`. That assumes `decode(z)` is a
+faithful reconstruction of `x`; a trained SAE earns that (EV ≈ 0.90, tax
+0.029 nats for vanilla). A pseudo-SAE built by packaging 18,432
+covariance-matched random directions as a `W_enc`/`W_dec` pair does not:
+`decode(z)` sums 18,432 direction contributions and at `<bos>` overflows
+fp16 (`max|x̂| = 2.1e6` vs 65,504), NaN-ing every note. The same
+reconstruction protocol applied to 46 difference-in-means directions instead
+produced a 7.47-nat reconstruction tax — 4.6× the base loss — turning every
+downstream δ into noise on a destroyed baseline.
 
-**What it adds.** Two things. It converts `δ*₉₅` from an off-target-derived
-floor into a **directly matched null** — same intervention, same notes, same
-statistics, directions that are random by construction. And it answers "is the
-SAE doing the work, or would any direction of comparable norm and sparsity
-show this?" causally, which is currently answered only correlationally. This is
-the strongest single addition available: it upgrades the floor from a derived
-quantity to a measured one, and the SAE-necessity argument from grounding-level
-to causal-level.
+**Directional ablation.** The fix is to intervene on the *raw* residual
+stream instead of an SAE reconstruction — the standard treatment for a single
+direction rather than a dictionary feature (directional ablation, Arditi et
+al., NeurIPS 2024; the same projection underlies amnesic probing, Elazar et
+al., TACL 2021, and INLP, Ravfogel et al., 2020):
 
-### 3. Ablation on difference-in-means directions — *~5 h A100 + implementation*
+```
+x' = x − (x · d) d          d unit-norm      (intervention: zero)
+```
 
-One label-supervised unit direction per code from `diff_in_means_baseline.py`,
-ablated by projection removal from the residual stream.
+No reconstruction is spliced, so there is no reconstruction tax to begin
+with; subtracting one component leaves `‖x'‖ ≤ ‖x‖`, so fp16 cannot overflow
+regardless of dictionary size; there is no threshold gating, so the
+note-level `τ` calibrated for grounding is never misapplied as a token-level
+firing rule; and the control condition is well-defined at any k ("project out
+a random direction"). `intervention: zero` is used throughout — mean-projection
+is implemented but not exercised, since F3's out-of-distribution argument for
+mean-ablation is already weaker for a single projection than for an SAE
+feature.
 
-**What it adds.** The reviewer's first question — *would a supervised direction
-do the same job without an SAE?* — asked causally rather than correlationally.
-If SAE latents show larger or more specific effects than diff-in-means
-directions, that is the clearest justification for the SAE that the paper can
-offer. If they tie, that is worth knowing before a reviewer finds it.
+**Baseline consequence.** With no reconstruction pass, `δ = l_abl − l_clean`,
+not `l_abl − l_recon`; `mean_recon_tax = 0.0` by construction and the run
+summary records `baseline: "clean"`. **Absolute nats are therefore not
+comparable with the SAE arms**, which carry their own reconstruction tax
+(0.029–0.648 nats depending on SAE). **Cliff's δ is** — it is a within-arm
+rank contrast, so a per-arm additive baseline offset cancels. Every
+cross-arm claim below is stated in δ, never nats.
 
-**Implementation caveat (applies to items 2 and 3).** `ablation.py` subtracts
-`zⱼ·W_dec[j]` from the SAE *reconstruction*, so its baseline is `ℓ_recon`.
-A non-SAE direction is ablated from the *raw* residual stream, where no
-reconstruction tax exists and the baseline is `ℓ_clean`. Absolute nats are
-therefore **not** comparable across arms. Cliff's δ is — it is computed from the
-positive-vs-negative rank contrast within each arm, so it survives the differing
-baselines. Report δ for cross-arm comparison and keep nats within-arm only.
+**Results (`random_matched_full`, 4,911 held-out notes, 12 targets).**
+Targets: top-10 grounded features by `|r_pb|` from the A4 necessity audit
+(`necessity/random_matched/seed0/audit_note_matched`), screened by
+`select_ablation_targets.py` for row-0/BOS-only firing (all 10 pass at
+`row0only = 0.00`) + 1 random control (`max|r| < 0.05`) + 1 low-r control
+(`|r| ∈ [0.05, 0.10]`), both screened the same way. Eight of the ten grounded
+features associate with `icd9_4280` (heart failure) — the same top-|r|
+selection skew already documented for `vanilla_pilot`'s `icd9_2449` cluster,
+not a property of this source.
+
+| | grounded (n=10) | controls (n=2) |
+|---|---|---|
+| median Cliff's δ | **−0.0958** | **−0.0830** |
+| range of \|δ\| | 0.010–0.184 | 0.083, 0.083 |
+| BH-significant (q=0.05) | **0/10** | 0/2 |
+
+**Grounded and control are statistically indistinguishable** — the necessity
+claim working as designed: a direction correlating with a code by
+construction (covariance-matching, not learning) shows no differential causal
+effect versus a direction that correlates with nothing. Contrast the SAE:
+on-target 0.352 vs off-target 0.025, a 12.4× separation (§3 above).
+
+**Off-target** (588 tests — 12 targets × 49 off-codes, the same family size
+as `vanilla_pilot`'s headline 588): 9/588 significant (7/490 grounded, 2/98
+controls), `median_specificity_ratio = −1.53`. Not the 0/588 the vanilla SAE
+achieves — a genuinely null source still produces *some* spurious off-target
+hits at this scale, concentrated on rare codes (`icd9_V270`, n_pos = 30;
+`icd9_V6284`, n_pos = 75). That is itself informative: it calibrates how much
+off-target contamination should be read as sampling noise rather than a
+specificity failure, before comparing it against the SAE's zero.
+
+**Length-matched:** residualizing on `log(n_tokens)` collapses the raw mean δ
+(−0.090) to −0.0054 — **94% attenuation** — and 0/10 grounded targets remain
+significant after adjustment. (Two controls flip to significant
+post-adjustment, δ_adj ≈ +0.06–0.07; noted rather than explained away — BH is
+not re-applied across this family, and at n ≈ 700–4,200 per group some
+post-hoc significance among genuinely null directions is expected under
+repeated testing.) Essentially the entire raw effect in this arm is a length
+confound, consistent with there being no real signal underneath it.
+
+**Calibration:** `ratio_to_recon_tax` is `NaN` for every row by construction
+(`recon_tax = 0.0`; confirms the `if recon_tax else float("nan")` guard in
+`ablation_posthoc.py:409` — no divide-by-zero). `pct_of_base_loss` ranges
+0.22%–13.5%, uninformative on its own without the BH result alongside it.
+
+**What this revises.** `δ*₉₅ = 0.0732` (§2 above) was *derived* from
+off-target (feature, wrong-code) pairs within the SAE arms. This run supplies
+the *measured* equivalent — actual ablation of directions that are null by
+construction — and it lands materially higher: 0.0732 sits near the **25th
+percentile**, not the 95th, of this arm's |δ| distribution (0.010–0.184).
+The safeguard that held: `n_sig_q05 = 0/12` throughout, so BH correctly
+refused significance despite those magnitudes. **The paper's actual claims
+survive** — every SAE-arm significance count is unaffected — but any place
+the text uses "`δ` above `δ*₉₅`" as a stand-in for "exceeds the noise floor,"
+independent of the BH result, needs to drop that framing. BH significance is
+the load-bearing criterion; `δ*₉₅` was too small an estimate of where
+chance-level effect sizes land for a genuinely null source at this sample
+size.
+
+### 3. Ablation on difference-in-means directions (`dim_full`) — DONE
+
+Uses the identical directional-ablation technique described in §2 above (same
+projection intervention, same `l_clean` baseline, same reason the
+reconstruction protocol is inapplicable — the 46-direction dictionary's own
+attempt at it produced a 7.47-nat reconstruction tax, §2). One
+label-supervised unit direction per code from `diff_in_means_baseline.py`,
+ablated by projecting it out of the raw residual stream on the same held-out
+notes and statistics as every other arm.
+
+**Controls are weak, not null — a structural property of k=46.**
+`select_ablation_targets.py`'s strict null pools (`max|r| < 0.05`,
+`|r| ∈ [0.05, 0.10]`) are both empty for this source: every one of the 46
+directions is built from one code's labels, and with 46 comorbid codes in
+the panel even the weakest survivor of the row0-only screen still reaches
+`r ≈ 0.19`. (Screening all 46 directions rather than the usual top-10 found
+21/46 clear the screen at all.) The two `low_r_control` targets below are
+the lowest-|r| survivors — 0.198 and 0.194 — not a genuinely uncorrelated
+direction the way `random_matched`'s controls are. Unlike random-matched
+(§2), this arm has no direction that fails to correlate with *anything*.
+
+**Results (`diff_in_means_full`, 4,911 held-out notes, 12 targets: 10
+grounded + 2 `low_r_control`).**
+
+| | grounded (n=10) | controls (n=2) |
+|---|---|---|
+| median Cliff's δ | **0.0550** | −0.0160 |
+| BH-significant (q=0.05) | **4/10** | 0/2 |
+
+Unlike random-matched, this arm produces genuine on-target signal — but it
+is not uniform: 4 of 10 grounded targets are strongly positive and
+BH-significant (δ = 0.161, 0.235, 0.082, 0.068 for `icd9_5856`,
+`icd9_V5867`×2, `icd9_2851`), while the other 6 range from weakly positive
+to clearly negative (`icd9_2749`: −0.114; `icd9_4280`: −0.095), the reverse
+of the causal-necessity direction. Selecting by |r_pb| alone therefore
+produces a mixed causal population for this source, in contrast to the SAE's
+top-10, which reaches 9–10/10 BH-significant with a consistent sign.
+
+**Off-target** (588 tests, same family size as vanilla_pilot and
+random_matched_full): **20/588 significant** (19/490 grounded, 1/98
+controls) — worse than random-matched's 9/588 and far worse than the SAE's
+0/588. `median_specificity_ratio = 1.165`: on-target and off-target effects
+are of comparable magnitude on the median, not separated the way the SAE's
+12.4× is. One feature (27, `icd9_V4581`) alone accounts for 7 off-target
+hits, nearly all on cardiometabolic comorbidities of its own code
+(`icd9_25000`, `icd9_4280`, `icd9_42731`, `icd9_41401`, `icd9_5849`) — the
+acuity/comorbidity confound the codebase's own pooling caveats warn about,
+now showing up causally rather than just correlationally.
+
+**Length-matched:** residualizing on `log(n_tokens)` does *not* attenuate
+this arm's effect — mean adjusted δ (0.0553) is if anything slightly larger
+than raw (0.0454), and the same 4/10 targets remain significant after
+adjustment. This is the opposite of random-matched, where 94% of the raw
+effect was a length confound. Whatever signal this arm has is not a
+length artifact.
+
+**Calibration:** raw effect sizes are tiny in absolute nats — grounded mean
+`delta_pos_nats` ranges 0.0000045–0.0007, roughly 10–100× smaller than
+random-matched's grounded nats despite comparable Cliff's δ magnitudes (both
+arms share the `l_clean` baseline, so their nats *are* directly comparable to
+each other, unlike either arm vs. the SAE). `pct_of_base_loss` tops out at
+0.043%. `ratio_to_recon_tax` is `NaN` throughout (`recon_tax = 0.0`, same
+guard as random-matched). Read alongside Cliff's δ: significance here comes
+from a small-variance, small-magnitude signal, not a large practical effect —
+consistent with the through-line that these are label-supervised summary
+directions, not directions the model's forward pass was shaped around.
+
+**Verdict — does the SAE win?**
+
+| | on-target median δ | BH-sig | off-target sig (of 588) | specificity ratio |
+|---|---|---|---|---|
+| `vanilla_pilot` (SAE, top-10) | **0.352** | 10/10 | **0/588** | **12.4×** |
+| `diff_in_means_full` (10 grounded) | 0.055 | 4/10 | 20/588 | 1.165 |
+| `random_matched_full` (10 grounded) | −0.096 | 0/10 | 9/588 | −1.53 (negative) |
+
+Yes, decisively, on the axis that matters. Diff-in-means does not match or
+tie the SAE — it produces some genuine, length-robust causal signal (unlike
+random-matched, which produces none), but at roughly **1/6** the on-target
+effect size and **1/11** the specificity ratio, with 20× the off-target
+contamination of the SAE. This is the cleanest evidence in the paper for the
+`icd_eval.py`/necessity-audit framing already established correlationally:
+a label-supervised direction captures something real but diffuse and
+comorbidity-entangled, while the SAE isolates something causally sharper.
 
 ### 4. TPP (targeted probe perturbation) — *hours, mostly CPU*
 

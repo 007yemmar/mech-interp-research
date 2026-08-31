@@ -275,31 +275,120 @@ learns not to spend a latent on it.
 
 ---
 
-## 6. Conclusions
+## 6. The re-pool result — the prediction failed
+
+Before running the correction, two predictions were recorded: the constructed
+arms' r should **fall** (BOS was manufacturing separation), and the SAE's margin
+should **widen**. Both were wrong.
+
+Paired, same 46 codes, same held-out split:
+
+| method | r before | r after | Δr | spec before | spec after |
+|---|---|---|---|---|---|
+| diff-in-means (LDA) | 0.3395 | 0.3412 | **+0.002** | 5.68 | 5.67 |
+| diff-in-means (diagonal) | 0.1266 | 0.1266 | **+0.00003** | 1.369 | 1.366 |
+| **diff-in-means (plain)** | 0.1209 | **0.0605** | **−0.060** | 1.25 | **0.86** |
+| random (dense) | 0.2186 | 0.2272 | **+0.009** | 3.00 | 3.05 |
+| random (L0-matched) | 0.1491 | 0.1466 | **−0.003** | 2.12 | 1.98 |
+
+Four of five moved by less than 0.01; two moved **up**. Removing BOS from the
+pool does not change the grounding comparison.
+
+### Why the earlier evidence pointed the wrong way
+
+The §3 screen found 12 of 22 `dim_full` candidates clearing threshold at BOS and
+nowhere else, and that result is real. But it is **token-level** — does
+`x_token · d` exceed the pseudo-SAE threshold `τ` — while grounding is
+**pooled-level**: `r_pb(X_pooled · d_c, y)`. Those are different quantities, and
+the gap between them was flagged twice without being closed. It is now closed
+empirically: the pooled grounding is insensitive to BOS; the token-level firing
+pattern is not.
+
+The consequence is a scope split, not a retraction:
+
+- **Grounding** — BOS-insensitive. The published table stands.
+- **Ablation** — the token-level finding holds in full. The fp16 overflow is
+  real (`max|x̂|` = 2.1M at BOS), and target selection must still screen for
+  row0-only directions, or the arm ablates a constant.
+
+### The one real effect: the plain diff-in-means baseline
+
+`diff_in_means_none` is the exception, and a large one: r halves and specificity
+falls **below 1.0** — off-target correlation now exceeds on-target, so the
+directions carry less signal for their own code than for others.
+
+Consistent with the arm being unwhitened. Plain diff-in-means works in raw
+activation units, so dimensions where BOS wins the max carry outsized magnitude
+and dominate the raw mean difference. Diagonal and full whitening normalise that
+scale away, which is why they barely move. It also offers a candidate
+explanation for the collapse already documented in
+`results/necessity/diff_in_means/SUPERSEDED.md` — 46 directions with mean
+pairwise |cos| = 0.685 and effective dimensionality 1.89 — that the ~2 shared
+axes were substantially BOS.
+
+*That last point is a hypothesis.* Confirming it means recomputing effective
+dimensionality on the BOS-free directions, which is not stored in the manifest
+and would have to be derived from `directions.npy`. Given the arm is already
+superseded, it is a footnote rather than a task.
+
+### Revised scope
+
+| Item | Before this run | After |
+|---|---|---|
+| Re-pool + re-audit constructed arms for the paper | required | **not required** — no material change |
+| Published grounding table | possibly affected | **unchanged** |
+| SAE margin over baselines | expected to widen | **unchanged** |
+| Ablation target screening | required | **still required** |
+| fp16 BOS overflow fix | required | **still required** |
+| Baseline 3 AUC re-check | predicted to rise | not yet measured |
+
+The correction cost one re-pool and produced a robustness result rather than a
+revision: *grounding is insensitive to BOS for every arm except the unwhitened
+diff-in-means baseline, which is already superseded.* That is a weaker claim
+than the one predicted, and worth one sentence in the paper rather than a
+section.
+
+---
+
+## 7. Conclusions
 
 1. **Published SAE grounding is safe.** 0 of 60 top-grounded latents in either
    domain-trained SAE fire at BOS. Peak r, monospecificity and the concordance
    join are unaffected.
-2. **The comparison arms are not safe**, and the error inflates them. Correcting
-   it should *widen* the SAE's margin, not narrow it.
+2. **The comparison arms' grounding turned out to be safe too** — measured, not
+   assumed. Re-pooling without BOS moved four of five arms by <0.01 (§6). The
+   prediction that BOS inflated them was wrong. The exception is the unwhitened
+   diff-in-means baseline, already superseded, whose r halves.
 3. **GemmaScope is contaminated in a concentrated way**: 17 of 60 grounded
    latents fire at BOS, 9 of them substantially, and the other 43 are clean.
-   Its comparison-table row should be recomputed on a BOS-free pool, or the
-   affected latents named. Its peak |r| = 0.545 is not itself among the
-   affected set (latent 2121, `c_j` = 0), so the headline is not at risk.
-4. This is a difference in kind between trained and constructed feature sources,
-   and it is a defensible point in its own right: a trained sparse encoder
-   learns to ignore a constant high-magnitude token; random, PCA and
-   label-constructed directions cannot.
+   Whether that moves its comparison-table row is untested — it was not
+   re-pooled, and §6 shows firing-level contamination need not translate into
+   a grounding shift. Its peak |r| = 0.545 is not among the affected set
+   (latent 2121, `c_j` = 0), so the headline is not at risk either way.
+4. **There is a difference in kind between trained and constructed sources, but
+   it is about firing, not about grounding.** A trained sparse encoder learns
+   to ignore a constant high-magnitude token (0.1% of vanilla latents fire at
+   BOS); random and label-constructed directions have no mechanism to avoid it
+   (7,183 of 18,432 fire there at once). That difference is stark at the token
+   level and drives the ablation problems in §3 — but it does **not** show up
+   in the grounding comparison, because max-pooling plus a correlation is
+   robust to it. State the claim at the level where it was measured.
+5. **The cost of being wrong here was one re-pool.** The prediction was
+   recorded before the run, which is what made it a test rather than a story
+   fitted afterwards. The same discipline is why the metric error in §4 was
+   caught: both were cases of a plausible mechanism not surviving measurement.
 
-## 7. Actions
+## 8. Actions
 
 | Step | Status |
 |---|---|
 | `skip_first_token` on `project_and_pool`, `pool_raw_activations`, `encode_and_pool` (default `False`) | done, behaviourally verified |
 | Re-run GemmaScope measurement with `--no-subtract-b-dec` | done — no-op flag, figures unchanged and final |
 | Whitening hypothesis (§2) | refuted by existing evidence; no separate check needed |
-| Re-pool + re-audit random-matched and diff-in-means with `skip_first_token: true`, into **new** output dirs | pending |
+| Re-pool + re-audit random-matched and diff-in-means with `skip_first_token: true` | done — no material change (§6) |
+| Screen ablation targets for row0-only firing | still required — token-level effect is real |
+| fp16 BOS overflow fix at `ablation.py:835` | still required for the random-matched arm |
+| Re-check Baseline 3 AUC on the BOS-free pool | not yet measured |
 | Thread `skip_first_token` from `run_icd_eval` to `encode_and_pool` | deliberately not done — the SAE path is clean, so the switch stays unwired |
 
 Write corrected artifacts to new directories. The BOS-inclusive numbers are what
