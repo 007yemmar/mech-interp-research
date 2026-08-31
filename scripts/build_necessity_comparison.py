@@ -62,6 +62,21 @@ SOURCES: dict[str, Path] = {
     "GemmaScope SAE": NEC / "sae_audit" / "gemmascope",
     "vanilla SAE": NEC / "sae_audit" / "sae_vanilla",
     "JumpReLU SAE": NEC / "sae_audit" / "sae_jumprelu",
+    # BOS-free re-pool of the constructed arms. Row 0 of every note is
+    # Gemma's <bos> (||x|| = 2528.6 vs a ~162 median); under max-pooling it
+    # floors the note value, which can INFLATE point-biserial by collapsing
+    # within-negative variance. The SAE arms are NOT re-pooled: 0 of 60
+    # top-grounded latents fire at BOS in either domain-trained SAE, so
+    # their pooled values are unaffected. See
+    # docs/2026-08-29-bos-contamination-audit.md.
+    #
+    # These sit BESIDE the originals rather than replacing them: the
+    # before/after pair is the result, not the corrected number alone.
+    "diff-in-means (LDA) [no-BOS]": NEC / "direction_audit_nobos" / "diff_in_means_full",
+    "diff-in-means (diagonal) [no-BOS]": NEC / "direction_audit_nobos" / "diff_in_means_diagonal",
+    "diff-in-means (plain) [no-BOS]": NEC / "direction_audit_nobos" / "diff_in_means_none",
+    "random (dense) [no-BOS]": NEC / "random_matched_nobos" / "seed0" / "audit_dense",
+    "random (L0-matched) [no-BOS]": NEC / "random_matched_nobos" / "seed0" / "audit_l0_40.92",
 }
 
 # Pairs the paper actually argues about. Each SAE against each non-SAE family,
@@ -158,8 +173,11 @@ def _figure(per_code: pd.DataFrame) -> None:
     families = {
         "SAE": ["vanilla SAE", "JumpReLU SAE", "GemmaScope SAE"],
         "supervised direction": [
-            "diff-in-means (plain)", "diff-in-means (diagonal)", "diff-in-means (LDA)",
-            "probe LR (balanced)", "probe LR (unweighted)",
+            "diff-in-means (plain)",
+            "diff-in-means (diagonal)",
+            "diff-in-means (LDA)",
+            "probe LR (balanced)",
+            "probe LR (unweighted)",
         ],
         "unsupervised / null": ["PCA", "random (dense)", "random (L0-matched)"],
     }
@@ -169,15 +187,24 @@ def _figure(per_code: pd.DataFrame) -> None:
     for fam, members in families.items():
         sub = per_code[per_code["method"].isin(members)]
         ax.scatter(
-            sub["abs_on_target_r"], sub["mean_abs_off_r"],
-            s=16, alpha=0.55, c=colors[fam], marker=markers[fam], label=fam,
+            sub["abs_on_target_r"],
+            sub["mean_abs_off_r"],
+            s=16,
+            alpha=0.55,
+            c=colors[fam],
+            marker=markers[fam],
+            label=fam,
             edgecolors="none",
         )
     for m, c in (("vanilla SAE", "#0d3d5c"), ("diff-in-means (LDA)", "#7a2f12")):
         sub = per_code[per_code["method"] == m]
         ax.scatter(
-            sub["abs_on_target_r"], sub["mean_abs_off_r"],
-            s=22, facecolors="none", edgecolors=c, linewidths=0.9,
+            sub["abs_on_target_r"],
+            sub["mean_abs_off_r"],
+            s=22,
+            facecolors="none",
+            edgecolors=c,
+            linewidths=0.9,
         )
 
     ax.set_xlabel("on-target |r| (held-out, per code)")

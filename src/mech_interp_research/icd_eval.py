@@ -326,6 +326,7 @@ def encode_and_pool(
     metadata: pd.DataFrame,
     pooling: PoolingStrategy = "max",
     topk: int = 10,
+    skip_first_token: bool = False,
     shard_filter: list[int] | None = None,
     checkpoint_dir: str | Path | None = None,
     on_shard_complete: Callable[[int], None] | None = None,
@@ -338,6 +339,11 @@ def encode_and_pool(
         metadata: DataFrame from load_metadata().
         pooling: Pooling strategy.
         topk: k for topk_mean pooling.
+        skip_first_token: Drop row 0 (Gemma's <bos>) before pooling. Its
+            residual is ~15.6x a typical token's norm, so under max-pooling it
+            floors the note value at the latent's BOS activation. A floor can
+            INFLATE point-biserial, not just attenuate it, by collapsing
+            within-negative variance. Defaults False for reproducibility.
         shard_filter: If given, only process these shard indices.
         checkpoint_dir: If set, save per-shard results here and skip shards
             whose checkpoint files already exist (enables resume).
@@ -419,7 +425,9 @@ def encode_and_pool(
             row_start = int(note_row["row_start"])
             row_end = int(note_row["row_end"])
 
-            note_acts = shard_activations[row_start:row_end]  # [n_tok, d_model]
+            note_acts = shard_activations[
+                row_start + (1 if skip_first_token else 0) : row_end
+            ]  # [n_tok, d_model]
             if note_acts.shape[0] == 0:
                 logger.warning(
                     f"Empty activation slice for note_idx={note_row['note_idx']}, "

@@ -1,0 +1,50 @@
+# BOS-FREE re-pool. Identical to configs/raw_lr_baseline_solo.yaml except skip_first_token: true and a
+# fresh output_dir. Row 0 of every note is Gemma's <bos> (||x||=2528.6 vs a
+# ~162 median); under max-pooling it floors the note value. See
+# docs/2026-08-29-bos-contamination-audit.md. Writes to a NEW directory so the
+# BOS-inclusive artifacts the paper currently cites remain intact.
+
+# Raw-activation LR probe — Baseline 3 — SOLO mode (no SAE comparison).
+#
+# Run:
+#   modal run --detach modal_app/raw_lr_baseline.py --config-file configs/raw_lr_baseline_solo.yaml
+#
+# sae_results_csv: null tells run_raw_lr_baseline to skip Steps 6-9 (SAE
+# load, alignment, comparison, rename) and write only the per-code raw
+# AUCs. Use this when you want AUC_raw values now and will compare against
+# tfidf/SAE AUCs externally later.
+
+# --- paths ---------------------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_csv_path: /data/sample_50k.csv
+
+sae_results_csv: null    # SOLO MODE — no SAE-side comparison
+
+output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_nobos_solo
+checkpoint_dir: null    # null → <output_dir>/raw_shard_ckpt
+
+# --- pooling -------------------------------------------------------------
+pooling: max
+topk: 10
+shard_filter: null
+
+# --- classification settings -----------
+# lr_solver: 'lbfgs' is ~50-100× faster than 'saga' on dense activations
+# at the same L2 optimum. Default for evaluate_per_code_cv stays 'saga' so
+# TF-IDF/SAE baselines (which run on sparse features) are unchanged.
+lr_solver: lbfgs
+lr_max_iter: 1000
+cv_n_splits: 5
+random_state: 42
+delta_auc_threshold: 0.02    # unused in solo mode but harmless
+
+# --- label alignment (identical to icd_eval / tfidf_lr_baseline) --------
+join_key: admission_id
+icd_col_prefix: "icd9_"
+min_prevalence: 0.02
+max_codes: 50
+min_notes: 100
+
+logging_level: INFO
+
+skip_first_token: true
