@@ -764,6 +764,36 @@ contamination of the SAE. This is the cleanest evidence in the paper for the
 a label-supervised direction captures something real but diffuse and
 comorbidity-entangled, while the SAE isolates something causally sharper.
 
+**This is a best-vs-best comparison, not an |r|-matched one — state it as such.**
+Every arm contributes *its own* top-10 grounded features, so the rows sit at
+different correlation strengths by construction:
+
+| arm | \|r\| range of its top-10 | median \|r\| |
+|---|---|---|
+| `vanilla_pilot` | 0.822–0.860 | 0.831 |
+| `jumprelu_pilot` | 0.799–0.864 | 0.829 |
+| `gemma_scope_pilot` | 0.428–0.545 | 0.477 |
+| `diff_in_means_full` | 0.386–0.699 | — |
+| `random_matched_full` | 0.309–0.432 | — |
+
+Matching on |r| instead is not available: GemmaScope has **4** held-out features
+above |r| 0.5 and random-matched has **none** above 0.44 (§13.2 of
+`results/RESULTS2.md`), so no arm other than the two domain SAEs can populate a
+strength-matched top-10. The scarcity is itself the result — a source that
+cannot field ten strong features has already lost the comparison the audit is
+making — but it means a δ gap between rows is **not** attributable to
+architecture alone, and the |r| range belongs in the table wherever these rows
+are reported. The claim the design supports is "each method at its best", which
+is the right question for a necessity argument and the wrong one for an
+apples-to-apples effect-size estimate.
+
+The same caveat applies to the code panel: vanilla's and JumpReLU's top-10 both
+concentrate on three codes (`2449`, `5856`, `42731`), while GemmaScope's spans
+eight. Off-target specificity is measured against 49 other codes, and how much
+comorbidity leakage a target attracts depends on which code it started from — so
+the two domain SAEs are matched to each other by accident, and GemmaScope is not
+matched to either.
+
 ### 4. TPP (targeted probe perturbation) — *hours, mostly CPU*
 
 Zero the latent's column in the existing pooled feature matrix, re-score the

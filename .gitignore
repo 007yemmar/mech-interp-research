@@ -32,6 +32,13 @@ outputs/
 # results/ — only aggregate summary JSONs are tracked; row-level CSV / npz /
 # per-note artifacts pulled from Modal stay local (see results/README.md).
 
+# Overleaf paper working copy — local-only. Manuscript sources, figures and
+# build artifacts are synced through Overleaf, not this repo. Contents are
+# ignored wholesale, so nothing drafted there can be committed by accident
+# (it will contain figures derived from MIMIC-IV — see the PHI rules in
+# CLAUDE.md and results/README.md).
+paper_overleaf/
+
 # Modal local state
 .modal/
 
