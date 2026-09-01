@@ -1,0 +1,25 @@
+{
+  "ablation_output_dir": "/out/ablation/diff_in_means_full",
+  "n_targets": 12,
+  "n_grounded": 10,
+  "restrict_true_negative": true,
+  "off_target": {
+    "mean_on_target_delta": 0.045401858935777896,
+    "mean_abs_off_target_delta": 0.051943905657365785,
+    "median_specificity_ratio": 1.1651601928108288,
+    "total_off_target_sig_q05": 19
+  },
+  "length_matched": {
+    "mean_delta_raw": 0.045401858935777896,
+    "mean_delta_adjusted": 0.05528555862564135,
+    "mean_attenuation": -0.009883699689863443,
+    "n_sig_after_adjust": 4
+  },
+  "calibration": {
+    "base_loss": 1.6347653633087866,
+    "recon_tax": 0.0,
+    "mean_on_target_delta_nats": 0.0004349907000950106,
+    "mean_pct_of_base_loss": 0.026608754372834508,
+    "mean_ratio_to_recon_tax": NaN
+  }
+}

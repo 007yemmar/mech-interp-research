@@ -1,0 +1,131 @@
+{
+  "sae_name": "diff_in_means_full",
+  "n_held_out_notes": 4911,
+  "n_notes_with_text": 4911,
+  "n_notes_evaluated": 4911,
+  "n_notes_skipped_short_window": 0,
+  "n_targets": 12,
+  "n_features_distinct": 12,
+  "n_sig_q05": 4,
+  "median_cliffs_delta_grounded": 0.05502374447046578,
+  "median_cliffs_delta_controls": -0.01600343448224982,
+  "mean_loss_clean": 1.6347653633087866,
+  "mean_loss_recon": 1.6347653633087866,
+  "mean_recon_tax": 0.0,
+  "intervention": "zero",
+  "directional_ablation": true,
+  "baseline": "clean",
+  "config": {
+    "sae_name": "diff_in_means_full",
+    "sae_checkpoint_dir": "/out/sources/dim_full",
+    "sae_hf_repo_id": null,
+    "sae_hf_filename": null,
+    "is_centered": true,
+    "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "centered_activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered",
+    "mean_path": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt",
+    "model_name": "google/gemma-2-2b",
+    "layer": 16,
+    "held_out_shard_start": 281,
+    "held_out_shard_end": 312,
+    "icd_csv_path": "/data/sample_50k.csv",
+    "join_key": "admission_id",
+    "text_col": "note_text",
+    "icd_col_prefix": "icd9_",
+    "targets": [
+      {
+        "feature_idx": 43,
+        "code": "icd9_5856",
+        "kind": "grounded",
+        "r_pb": 0.6987
+      },
+      {
+        "feature_idx": 10,
+        "code": "icd9_2449",
+        "kind": "grounded",
+        "r_pb": 0.5463
+      },
+      {
+        "feature_idx": 18,
+        "code": "icd9_V5867",
+        "kind": "grounded",
+        "r_pb": 0.4888
+      },
+      {
+        "feature_idx": 32,
+        "code": "icd9_2749",
+        "kind": "grounded",
+        "r_pb": 0.464
+      },
+      {
+        "feature_idx": 35,
+        "code": "icd9_2851",
+        "kind": "grounded",
+        "r_pb": 0.457
+      },
+      {
+        "feature_idx": 27,
+        "code": "icd9_V4581",
+        "kind": "grounded",
+        "r_pb": 0.4234
+      },
+      {
+        "feature_idx": 11,
+        "code": "icd9_40390",
+        "kind": "grounded",
+        "r_pb": 0.4124
+      },
+      {
+        "feature_idx": 19,
+        "code": "icd9_4280",
+        "kind": "grounded",
+        "r_pb": 0.3994
+      },
+      {
+        "feature_idx": 42,
+        "code": "icd9_V5867",
+        "kind": "grounded",
+        "r_pb": 0.3953
+      },
+      {
+        "feature_idx": 33,
+        "code": "icd9_V4581",
+        "kind": "grounded",
+        "r_pb": 0.3864
+      },
+      {
+        "feature_idx": 15,
+        "code": "icd9_4019",
+        "kind": "low_r_control",
+        "r_pb": 0.198
+      },
+      {
+        "feature_idx": 44,
+        "code": "icd9_42789",
+        "kind": "low_r_control",
+        "r_pb": 0.1943
+      }
+    ],
+    "max_length": 8192,
+    "loss_window_frac": 0.25,
+    "min_loss_window_tokens": 32,
+    "batch_size": 1,
+    "max_notes": null,
+    "intervention": "zero",
+    "directional_ablation": true,
+    "mean_act_path": null,
+    "mean_act_n_shards": 2,
+    "mean_act_max_tokens": 100000,
+    "measure_sections": false,
+    "section_headers": [
+      "discharge diagnos[ie]s",
+      "final diagnos[ie]s",
+      "discharge diagnosis"
+    ],
+    "output_dir": "/out/ablation/diff_in_means_full",
+    "shard_checkpoint_subdir": "shard_results",
+    "save_per_note_records": true,
+    "seed": 42,
+    "logging_level": "INFO"
+  }
+}
