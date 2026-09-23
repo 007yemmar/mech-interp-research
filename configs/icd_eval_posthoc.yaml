@@ -7,7 +7,7 @@
 
 # --- paths ---------------------------------------------------------------
 # Output dir from the original icd_eval run (has correlation_matrices.npz)
-eval_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
+eval_output_dir: ${vanilla_eval}
 
 # Centered activation shards (only metadata.jsonl is read, not the shards)
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
@@ -16,7 +16,7 @@ activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260
 icd_csv_path: /data/sample_50k.csv
 
 # Where to write post-hoc results (sae-artifacts volume)
-posthoc_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc
+posthoc_output_dir: ${vanilla_eval}/posthoc
 
 # Per-shard encode checkpoints from the original run (auto-detected if null)
 checkpoint_dir: null

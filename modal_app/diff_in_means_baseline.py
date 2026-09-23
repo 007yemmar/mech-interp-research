@@ -16,6 +16,7 @@ import json
 import os
 from typing import Any
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image, raw_volume
 
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "8"))
@@ -62,10 +63,7 @@ def main(config_file: str, detach: bool = False) -> None:
     Usage:
         modal run modal_app/diff_in_means_baseline.py --config-file configs/diff_in_means_baseline.yaml
     """
-    import yaml
-
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     print(f"Dispatching diff-in-means off-target on: {config.get('raw_ckpt_dir')}")
 

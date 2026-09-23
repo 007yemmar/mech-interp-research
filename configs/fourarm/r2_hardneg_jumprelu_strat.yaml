@@ -12,7 +12,7 @@
 # the reachable second family.
 
 auto_interp_dir: /out/auto_interp/judgetest/jumprelu
-icd_eval_dir:    /out/necessity/sae_audit/sae_jumprelu
+icd_eval_dir:    ${necessity_audit}/sae_jumprelu
 icd_csv_path:    /data/sample_50k.csv
 icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
 output_dir: /out/auto_interp/judgetest/jumprelu/retrieval_eval_hardneg

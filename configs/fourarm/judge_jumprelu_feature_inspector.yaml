@@ -2,11 +2,11 @@
 # |delta r| = 0.0000), so any difference in the judge's verdicts is about the
 # CONTENT of the explanation rather than the correlation the prompt states.
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+sae_checkpoint: ${jumprelu_ckpt}
 icd_csv_path: /data/sample_50k.csv
 eval_output_dir: /out/judgetest/jumprelu
 output_dir: /out/judgetest/jumprelu/feature_inspection
-shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
 
 model_name: google/gemma-2-2b
 max_length: 8192

@@ -33,6 +33,7 @@ import json
 import os
 from typing import Any
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 
 DEFAULT_GPU = os.environ.get("MODAL_GPU", "A100-40GB")
@@ -87,10 +88,7 @@ def main(config_file: str, detach: bool = False) -> None:
         modal run modal_app/ablation.py --config-file configs/ablation_smoke.yaml
         modal run --detach modal_app/ablation.py --config-file configs/ablation_pilot_vanilla.yaml --detach
     """
-    import yaml
-
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     print(f"Dispatching ablation: sae_name={config.get('sae_name')} on GPU={DEFAULT_GPU}")
     print(

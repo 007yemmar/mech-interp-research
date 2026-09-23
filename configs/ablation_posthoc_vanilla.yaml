@@ -7,7 +7,7 @@
 # Run:
 #   modal run modal_app/ablation_posthoc.py --config-file configs/ablation_posthoc_vanilla.yaml
 
-ablation_output_dir: /out/ablation/vanilla_pilot
+ablation_output_dir: ${vanilla_ablation}
 
 icd_csv_path: /data/sample_50k.csv
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered

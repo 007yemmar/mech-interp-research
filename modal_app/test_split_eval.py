@@ -19,6 +19,7 @@ import json
 import os
 from typing import Any
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image, raw_volume
 
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
@@ -61,10 +62,7 @@ def main(config_file: str) -> None:
     Usage:
         modal run modal_app/test_split_eval.py --config-file configs/test_split_eval.yaml
     """
-    import yaml
-
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     print(f"Dispatching test-split grounding on: {config.get('eval_output_dir')}")
     result = run_test_split_grounding_remote.remote(config)

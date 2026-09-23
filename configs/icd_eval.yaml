@@ -10,14 +10,14 @@
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 
 # Trained SAE checkpoint dir — best/ = best eval-EV checkpoint (EV=0.889)
-sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+sae_checkpoint: ${vanilla_ckpt}
 
 # ICD binary label CSV on mimic-iv-raw volume.
 # train.csv already has admission_id + icd9_* one-hot columns.
 icd_csv_path: /data/sample_50k.csv
 
 # Where to write results (sae-artifacts volume)
-output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
+output_dir: ${vanilla_eval}
 
 # --- eval settings -------------------------------------------------------
 # Token pooling strategy per note: max | mean | topk_mean

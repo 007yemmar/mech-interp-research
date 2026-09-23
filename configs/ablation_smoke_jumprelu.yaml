@@ -24,7 +24,7 @@
 sae_name: jumprelu_smoke
 
 # JumpReLU SAE — best EV checkpoint (EV=0.899, L0=43.5), same as icd_eval/auto_interp
-sae_checkpoint_dir: "/out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000"
+sae_checkpoint_dir: "${jumprelu_ckpt}"
 sae_hf_repo_id: null
 sae_hf_filename: null
 

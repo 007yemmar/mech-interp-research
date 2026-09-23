@@ -47,11 +47,11 @@
 
 # --- inputs ----------------------------------------------------------------
 # Pooled raw centered layer-16 activations from the Baseline-3 run. SAE-independent.
-raw_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_nobos_solo/raw_shard_ckpt
+raw_ckpt_dir: ${vanilla_eval}/posthoc/raw_lr_baseline_nobos_solo/raw_shard_ckpt
 icd_csv_path: /data/sample_50k.csv
 
 # The same pinned 46-code panel every other source in the suite uses.
-code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+code_names_json: ${vanilla_eval}/code_names.json
 
 output_dir: /out/necessity/diff_in_means_whitened_nobos
 

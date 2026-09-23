@@ -26,12 +26,12 @@
 #   modal run --detach modal_app/ablation.py --config-file configs/ablation_pilot_vanilla_extended.yaml --detach
 #
 # Resume: re-running the same command picks up from the last completed shard.
-# Per-shard JSONs land in /out/ablation/vanilla_pilot_extended/shard_results/.
+# Per-shard JSONs land in ${vanilla_ablation_extended}/shard_results/.
 
 # --- SAE identity ----------------------------------------------------------
 sae_name: vanilla_pilot_extended
 
-sae_checkpoint_dir: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+sae_checkpoint_dir: ${vanilla_ckpt}
 sae_hf_repo_id: null
 sae_hf_filename: null
 is_centered: true
@@ -145,7 +145,7 @@ batch_size: 1
 max_notes: null  # full held-out set
 
 # --- Output (FRESH dir; do NOT collide with vanilla_pilot) -----------------
-output_dir: /out/ablation/vanilla_pilot_extended
+output_dir: ${vanilla_ablation_extended}
 shard_checkpoint_subdir: shard_results
 save_per_note_records: true
 

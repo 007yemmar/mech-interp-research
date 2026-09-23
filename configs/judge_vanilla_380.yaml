@@ -6,13 +6,13 @@
 # a like-for-like 380-feature replication of the published run.
 
 # --- paths ---
-sae_checkpoint: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+sae_checkpoint: ${vanilla_ckpt}
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-icd_eval_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split
+icd_eval_dir: ${vanilla_eval}/test_split
 # 31 held-out shards, not the 312-shard full checkpoint: auto_interp's shard
 # fan-out is bounded only by what note_vectors covers, and the full checkpoint
 # drove an 83-minute extraction that never survived to the explainer.
-shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split/shard_ckpt
+shard_ckpt_dir: ${vanilla_eval}/test_split/shard_ckpt
 icd_csv_path: /data/sample_50k.csv
 output_dir: /out/auto_interp/vanilla_test_split
 

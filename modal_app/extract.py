@@ -14,6 +14,7 @@ import json
 import os
 from typing import Any
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 
 # GPU is resolved at module import time. To change it for a run, set MODAL_GPU
@@ -53,12 +54,10 @@ def main(config_file: str) -> None:
     NOT drive dispatch. Set the MODAL_GPU env var to pick a GPU tier:
         MODAL_GPU=A10G uv run modal run modal_app/extract.py --config-file=...
     """
-    import yaml
 
     from mech_interp_research.config import _git_sha_short
 
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     # Resolve git SHA on the laptop — Modal containers have no git binary.
     # Without this, make_run_id's fallback labels every Modal run as "nogit".

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mech_interp_research.sae_config import SAETrainingConfig
+from mech_interp_research.sae_config import SAETrainingConfig, make_sae_run_id
 
 
 def _minimal_kwargs() -> dict:
@@ -73,3 +73,35 @@ def test_new_fields_have_expected_defaults() -> None:
     assert cfg.eval_every_n_steps == 2500
     assert cfg.early_stop_patience == 3
     assert cfg.resume_from is None
+
+
+# --- run ID: layer + seed disambiguation -----------------------------------
+
+L16 = "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered"
+L12 = L16.replace("_L16_", "_L12_")
+
+
+def test_run_id_contains_layer_and_seed() -> None:
+    run_id = make_sae_run_id(SAETrainingConfig(activations_dir=L16, seed=43))
+    assert run_id.startswith("sae_L16_d")
+    assert "_s43_" in run_id
+
+
+def test_seed_alone_changes_the_run_id() -> None:
+    # The regression: two vanilla runs identical but for the seed used to differ
+    # only by a UTC timestamp, and downstream configs name these dirs literally.
+    a = make_sae_run_id(SAETrainingConfig(activations_dir=L16, seed=42))
+    b = make_sae_run_id(SAETrainingConfig(activations_dir=L16, seed=43))
+    assert "_s42_" in a and "_s43_" in b
+    assert a != b
+
+
+def test_layer_alone_changes_the_run_id() -> None:
+    a = make_sae_run_id(SAETrainingConfig(activations_dir=L16, seed=42))
+    b = make_sae_run_id(SAETrainingConfig(activations_dir=L12, seed=42))
+    assert "sae_L16_" in a and "sae_L12_" in b
+
+
+def test_run_id_falls_back_when_layer_is_unparseable() -> None:
+    run_id = make_sae_run_id(SAETrainingConfig(activations_dir="/out/activations/scratch"))
+    assert run_id.startswith("sae_Lunk_d")

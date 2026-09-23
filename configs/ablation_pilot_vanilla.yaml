@@ -23,7 +23,7 @@
 # --- SAE identity ----------------------------------------------------------
 sae_name: vanilla_pilot
 
-sae_checkpoint_dir: /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best
+sae_checkpoint_dir: ${vanilla_ckpt}
 sae_hf_repo_id: null
 sae_hf_filename: null
 is_centered: true
@@ -105,7 +105,7 @@ batch_size: 1
 max_notes: null  # full held-out set (~4911 notes)
 
 # --- Output (FRESH directory; do NOT collide with smoke runs) --------------
-output_dir: /out/ablation/vanilla_pilot
+output_dir: ${vanilla_ablation}
 shard_checkpoint_subdir: shard_results
 save_per_note_records: true
 

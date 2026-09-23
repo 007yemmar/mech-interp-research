@@ -18,6 +18,7 @@ import json
 import os
 from typing import Any
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image, raw_volume
 
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "8"))
@@ -65,12 +66,10 @@ def run_necessity_audit_remote(config: dict[str, Any]) -> dict[str, Any]:
 @app.local_entrypoint()
 def main(config_file: str, detach: bool = False) -> None:
     """Load YAML config and dispatch to Modal."""
-    import yaml
 
     from mech_interp_research.necessity_audit import NecessityComparisonConfig
 
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     # Validated on the laptop too, so a typo never costs a container start.
     cfg = NecessityComparisonConfig.from_dict(config)

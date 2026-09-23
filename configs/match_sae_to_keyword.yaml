@@ -12,7 +12,7 @@
 #   uv run modal run modal_app/match_sae_to_target.py \
 #       --config-file configs/match_sae_to_keyword.yaml
 
-sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+sae_shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
 icd_csv_path: /data/sample_50k.csv
 
 # The keyword arm's own post-threshold |r| per code, measured on selection

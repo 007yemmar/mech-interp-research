@@ -18,7 +18,7 @@
 
 # --- SAE identity ----------------------------------------------------------
 sae_name: vanilla_meanabl
-sae_checkpoint_dir: "/out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/best"
+sae_checkpoint_dir: "${vanilla_ckpt}"
 sae_hf_repo_id: null
 sae_hf_filename: null
 is_centered: true
