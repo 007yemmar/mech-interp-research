@@ -12,9 +12,9 @@
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 icd_csv_path: /data/sample_50k.csv
 
-sae_results_csv: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/tfidf_lr_baseline/sae_cv_results.csv
+sae_results_csv: ${vanilla_eval}/posthoc/tfidf_lr_baseline/sae_cv_results.csv
 
-output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline
+output_dir: ${vanilla_eval}/posthoc/raw_lr_baseline
 checkpoint_dir: null    # null → <output_dir>/raw_shard_ckpt
 
 # --- pooling (MUST match the icd_eval run that produced sae_results_csv) -

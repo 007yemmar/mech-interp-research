@@ -8,8 +8,8 @@ whiten: full
 output_dir: /out/sources/dim_full
 
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-pooled_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
-sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+pooled_ckpt_dir: ${vanilla_eval}/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+sae_shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
 arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
 icd_csv_path: /data/sample_50k.csv
 

@@ -14,7 +14,7 @@ icd_csv_path: /data/sample_50k.csv
 
 sae_results_csv: null    # SOLO MODE — no SAE-side comparison
 
-output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo
+output_dir: ${vanilla_eval}/posthoc/raw_lr_baseline_solo
 checkpoint_dir: null    # null → <output_dir>/raw_shard_ckpt
 
 # --- pooling -------------------------------------------------------------

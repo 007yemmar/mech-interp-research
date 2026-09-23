@@ -9,9 +9,9 @@
 
 # --- paths ---------------------------------------------------------------
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-sae_checkpoint: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+sae_checkpoint: ${jumprelu_ckpt}
 icd_csv_path: /data/sample_50k.csv
-output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: ${jumprelu_eval}
 
 # --- shard selection -----------------------------------------------------
 # Diagnostics already done on eval shards — skip to avoid overwriting.

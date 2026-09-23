@@ -29,6 +29,7 @@ from typing import Any
 
 import modal
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image
 
 DEFAULT_GPU = os.environ.get("MODAL_GPU", "L4")
@@ -80,10 +81,8 @@ def main(config_file: str) -> None:
         modal run modal_app/train_sae.py --config-file configs/sae_train_2k.yaml
         MODAL_GPU=A100-40GB modal run modal_app/train_sae.py --config-file configs/sae_train_50k.yaml
     """
-    import yaml
 
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     cfg_gpu = config.get("gpu", DEFAULT_GPU)
     if cfg_gpu != DEFAULT_GPU:

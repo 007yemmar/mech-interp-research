@@ -6,17 +6,17 @@
 # Requires a completed icd_eval run (correlation_matrices.npz + shard_ckpt/).
 
 # --- paths ---------------------------------------------------------------
-eval_output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+eval_output_dir: ${jumprelu_eval}
 
 icd_csv_path: /data/sample_50k.csv
 
-output_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/posthoc/tfidf_lr_baseline
+output_dir: ${jumprelu_eval}/posthoc/tfidf_lr_baseline
 
 # Per-shard encode checkpoints (auto-detected if null)
 checkpoint_dir: null
 
 # Reuse TF-IDF CV checkpoints from vanilla SAE run (same 50k notes, same codes)
-tfidf_cv_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/tfidf_lr_baseline/cv_ckpt_tfidf
+tfidf_cv_ckpt_dir: ${vanilla_eval}/posthoc/tfidf_lr_baseline/cv_ckpt_tfidf
 
 # --- TF-IDF settings -----------------------------------------------------
 tfidf_max_features: 10000

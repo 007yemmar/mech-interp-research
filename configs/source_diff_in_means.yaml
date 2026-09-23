@@ -20,7 +20,7 @@ activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260
 
 # Pooled RAW (not SAE-encoded) activations per note, from the raw-LR
 # baseline's shard_ckpt -- the direction-construction input for this arm.
-pooled_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+pooled_ckpt_dir: ${vanilla_eval}/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
 
 # Reference JumpReLU SAE's own pooled-vector checkpoints. Used twice: (1) to
 # select Arm C's 46 (latent, code) pairs on the selection set -- the same
@@ -29,7 +29,7 @@ pooled_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw
 # arm_c_selected_features_path below); (2) to measure each selected latent's
 # NOTE-level detection rate, which is this arm's threshold calibration
 # target (Ruling 1 / spec Sec 5.5).
-sae_shard_ckpt_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+sae_shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
 arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
 
 icd_csv_path: /data/sample_50k.csv

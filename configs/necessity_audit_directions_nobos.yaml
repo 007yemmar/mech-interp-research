@@ -17,7 +17,7 @@
 #       --config-file configs/necessity_audit_directions_nobos.yaml
 
 icd_csv_path: /data/sample_50k.csv
-code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+code_names_json: ${vanilla_eval}/code_names.json
 output_dir: /out/necessity/direction_audit_nobos
 select_shard_start: 0
 select_shard_end: 31

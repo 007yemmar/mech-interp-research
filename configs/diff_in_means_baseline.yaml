@@ -12,7 +12,7 @@
 # --- diff-in-means feature space (raw pooled centered layer-16 acts) ------
 # The Baseline-3 raw_shard_ckpt (SAE-independent). Same max-pooling as the
 # SAE grounding. Directions are built on train shards, projected on held-out.
-raw_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+raw_ckpt_dir: ${vanilla_eval}/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
 
 # --- labels (PHI; on the mimic-iv-raw volume) -----------------------------
 icd_csv_path: /data/sample_50k.csv
@@ -31,9 +31,9 @@ held_out_shard_end: null      # null → through the last shard
 saes:
   - name: vanilla
     # vanilla SAE eval-id is the same dir that holds the raw_lr posthoc above
-    shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
-    correlation_npz: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/correlation_matrices.npz
-    code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+    shard_ckpt_dir: ${vanilla_eval}/shard_ckpt
+    correlation_npz: ${vanilla_eval}/correlation_matrices.npz
+    code_names_json: ${vanilla_eval}/code_names.json
 
 # --- off-target specificity params ----------------------------------------
 r_threshold: 0.1        # |r| bar for counting a significant off-target association

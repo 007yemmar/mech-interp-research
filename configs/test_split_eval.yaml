@@ -16,14 +16,14 @@
 
 # --- paths ---------------------------------------------------------------
 # Existing icd_eval output dir (has code_names.json + shard_ckpt/)
-eval_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
+eval_output_dir: ${vanilla_eval}
 
 # ICD-9 binary label CSV used in the original eval (mimic-iv-raw volume)
 icd_csv_path: /data/sample_50k.csv
 
 # Where to write the test-split artefacts. Mirrors the standard icd_eval layout
 # under a `test_split/` subdir of the source eval dir.
-output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split
+output_dir: ${vanilla_eval}/test_split
 
 # Override the source shard_ckpt/ dir (null = eval_output_dir/shard_ckpt)
 checkpoint_dir: null

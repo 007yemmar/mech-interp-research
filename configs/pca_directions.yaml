@@ -56,7 +56,7 @@ icd_csv_path: /data/sample_50k.csv
 # — both evals derived them by prevalence from sample_50k.csv at
 # min_prevalence=0.02, max_codes=50. So this path is a provenance choice, not a
 # numerical one; either produces the same audit.
-code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+code_names_json: ${vanilla_eval}/code_names.json
 
 output_dir: /out/necessity/pca/seed0
 
@@ -116,7 +116,7 @@ target_l0: [47.5655, 40.9157]
 # leaves the sparsity match nominal. Pointing at an SAE's shard_ckpt/ adds a
 # `note_matched` arm calibrated to its per-feature note-level distribution.
 # Read on the SELECTION shards only, so audit data never shapes the thresholds.
-sae_shard_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+sae_shard_ckpt_dir: ${vanilla_eval}/shard_ckpt
 
 # --- label join (identical to icd_eval and every other baseline) -----------
 join_key: admission_id

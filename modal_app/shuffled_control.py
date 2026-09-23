@@ -17,6 +17,7 @@ from typing import Any
 
 import modal
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "4"))
@@ -81,10 +82,7 @@ def run_shuffled_control_remote(config: dict[str, Any]) -> dict[str, Any]:
 @app.local_entrypoint()
 def main(config_file: str, detach: bool = False) -> None:
     """Load YAML config and dispatch to Modal."""
-    import yaml
-
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     print(f"Dispatching shuffled-explanation control: {config.get('auto_interp_dir')}")
 
