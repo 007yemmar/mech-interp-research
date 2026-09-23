@@ -1,0 +1,25 @@
+{
+  "ablation_output_dir": "/out/ablation/pca_full",
+  "n_targets": 12,
+  "n_grounded": 10,
+  "restrict_true_negative": true,
+  "off_target": {
+    "mean_on_target_delta": -0.009246159641833512,
+    "mean_abs_off_target_delta": 0.04978005108453547,
+    "median_specificity_ratio": -0.7485912774451591,
+    "total_off_target_sig_q05": 11
+  },
+  "length_matched": {
+    "mean_delta_raw": -0.009246159641833512,
+    "mean_delta_adjusted": 0.028182012172438032,
+    "mean_attenuation": -0.03742817181427154,
+    "n_sig_after_adjust": 3
+  },
+  "calibration": {
+    "base_loss": 1.6347653633087866,
+    "recon_tax": 0.0,
+    "mean_on_target_delta_nats": 0.0037677370806099147,
+    "mean_pct_of_base_loss": 0.2304757101645441,
+    "mean_ratio_to_recon_tax": NaN
+  }
+}
