@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from mech_interp_research.config import layer_tag_from_activations_dir
+
 
 @dataclass(frozen=True)
 class SAETrainingConfig:
@@ -104,6 +106,21 @@ def save_sae_config(config: SAETrainingConfig, path: str | Path) -> None:
 
 
 def make_sae_run_id(config: SAETrainingConfig) -> str:
-    """Build a collision-free SAE run ID encoding key hyperparameters."""
+    """Build a collision-free SAE run ID encoding key hyperparameters.
+
+    Layer and seed are in the name because two runs differing only in those are
+    otherwise separated by nothing but a UTC timestamp, while every downstream
+    config (icd_eval, feature_inspector, auto_interp, the necessity sources)
+    names these directories as literal path strings.
+
+    The vanilla SAE has one more seeded path than JumpReLU -- dead-neuron
+    resampling draws from the RNG ``torch.manual_seed(config.seed)`` sets, on
+    top of weight init and the two activation buffers -- so a seed replication
+    has more room to diverge here, not less.
+    """
     utc = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"sae_d{config.d_in}_e{config.expansion_factor}_l1{config.l1_coeff:.0e}_{utc}"
+    return (
+        f"sae_{layer_tag_from_activations_dir(config.activations_dir)}"
+        f"_d{config.d_in}_e{config.expansion_factor}"
+        f"_l1{config.l1_coeff:.0e}_s{config.seed}_{utc}"
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -79,3 +80,22 @@ def make_run_id(config: ExtractionConfig) -> str:
     sha = config.git_sha or _git_sha_short()
     utc = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"{model_slug}_L{config.layer}_{config.num_notes}notes_{sha}_{utc}"
+
+
+def layer_tag_from_activations_dir(activations_dir: str) -> str:
+    """Recover the source layer from an extraction run directory name.
+
+    The inverse of the ``_L<layer>_`` segment :func:`make_run_id` stamps, which
+    ``center.py`` preserves when it appends ``_centered``. It lives here, beside
+    the function that writes the name, so both SAE flavours read it the same way.
+
+    Reading the layer off the path is deliberate: neither ``SAETrainingConfig``
+    nor ``JumpReLUConfig`` carries a ``layer`` field, and adding one would create
+    a second place to state the same fact. Set to 16 while ``activations_dir``
+    points at an L12 run, it would produce a run ID that lies about its own data.
+
+    Returns ``"Lunk"`` for a hand-named directory that does not match. Omitting
+    the segment entirely would reintroduce the ambiguity it exists to remove.
+    """
+    match = re.search(r"_L(\d+)_", Path(activations_dir).name)
+    return f"L{match.group(1)}" if match else "Lunk"
