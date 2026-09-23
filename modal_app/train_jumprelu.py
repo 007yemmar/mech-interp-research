@@ -24,6 +24,7 @@ from typing import Any
 
 import modal
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image
 
 DEFAULT_GPU = os.environ.get("MODAL_GPU", "L4")
@@ -50,7 +51,7 @@ def train_jumprelu_sae(config: dict[str, Any]) -> dict[str, Any]:
     from mech_interp_research.jumprelu_config import JumpReLUConfig
     from mech_interp_research.jumprelu_sae import train
 
-    cfg = JumpReLUConfig(**config)
+    cfg = JumpReLUConfig.from_dict(config)
     print(
         f"Training JumpReLU SAE: d_in={cfg.d_in}, d_sae={cfg.d_sae}, "
         f"lambda_l0={cfg.lambda_l0}, bandwidth={cfg.bandwidth}, epochs={cfg.n_epochs}"
@@ -76,10 +77,8 @@ def main(config_file: str) -> None:
         MODAL_GPU=A100-40GB modal run modal_app/train_jumprelu.py \\
             --config-file configs/jumprelu_50k.yaml
     """
-    import yaml
 
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     print(f"Dispatching JumpReLU SAE training on GPU={DEFAULT_GPU}")
     summary = train_jumprelu_sae.remote(config)

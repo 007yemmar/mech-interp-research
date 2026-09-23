@@ -34,9 +34,28 @@ lambda_l0_warmup_steps: 50   # ramp from 0 → lambda_l0 over first 50 steps (~4
 # Training — mirrors vanilla calibration settings exactly
 lr: 0.0002
 adam_beta1: 0.0
+adam_beta2: 0.999
 train_batch_size_tokens: 4096
 n_epochs: 3
 lr_warmup_steps: 100         # short warmup matching vanilla calibration run
+
+# Held-out split and schedule, scaled down to the ~244-step epochs of this 3-shard
+# subset (2 train shards + 1 eval shard). Calibration is about finding the
+# lambda_l0 that lands L0 in range, not about the schedule — these values exist so
+# the calibration run exercises the same code path as the full run, not because the
+# trigger point means anything at this size.
+eval_n_shards: 1
+eval_every_n_steps: 100
+# null → max(lambda_l0_warmup_steps, min_trigger_step - plateau_patience_steps) = 50.
+# Evals begin one patience window BEFORE the detector arms, so the window is full the
+# moment it does and min_trigger_step really is the earliest possible trigger.
+# Starting them at min_trigger_step would delay the earliest trigger by a further
+# patience window.
+eval_start_step: null
+min_trigger_step: 300
+plateau_patience_steps: 300
+plateau_min_delta: 0.001
+decay_fraction: 0.25
 
 # Output
 output_root: /out/saes
