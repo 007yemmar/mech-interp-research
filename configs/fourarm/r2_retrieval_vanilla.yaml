@@ -12,7 +12,7 @@
 # the reachable second family.
 
 auto_interp_dir: /out/auto_interp/vanilla_test_split
-icd_eval_dir:    /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/test_split
+icd_eval_dir:    ${vanilla_eval}/test_split
 icd_csv_path:    /data/sample_50k.csv
 icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
 output_dir: null
