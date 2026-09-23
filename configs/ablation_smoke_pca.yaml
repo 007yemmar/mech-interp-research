@@ -1,0 +1,128 @@
+# Causal ablation SMOKE — PCA directions, DIRECTIONAL ablation.
+# 250 notes, 4 targets. Plumbing check only — do NOT read effect sizes.
+#
+# PCA is the unsupervised, non-sparse arm of the Tier-1 quartet
+# (docs/causal_ablation_positioning.md §3.2): SAE latents / diff-in-means /
+# random-matched / PCA, all four ablatable by the same projection and readout.
+# §13.6 already answers PCA correlationally (peak |r| 0.441, exactly 1
+# component above |r| 0.3); this asks whether it carries causal effect.
+#
+# Directions: eigenvectors of the SAME Sigma the random-matched null was drawn
+# from (random_matched.pca_directions, estimated on train shards 0-3 only), so
+# PCA and random are the same decomposition used two ways — directly
+# comparable, not merely adjacent. Orthonormal by construction, hence already
+# unit-norm, which is what the projection x' = x - (x.d)d requires.
+#
+# TARGET SELECTION REQUIRED --directional — read this before regenerating.
+#
+# The default threshold-gated screen rejects almost every strong PCA component
+# and keeps only ranks ~50-200 (|r| 0.124-0.158). Both drop reasons are theta
+# verdicts that this experiment never uses:
+#   - "never fires": PCA's raw thresholds_note_matched.npy has 34 entries of
+#     -inf, which calibrate_note_level_thresholds documents as "always fires"
+#     (target density 1.0). import_direction_source.py:123 maps ALL non-finite
+#     theta to float32.max — "never fires" — inverting them in the checkpoint.
+#     Published §13.1/§13.6 numbers are unaffected: they came from
+#     random_matched.py's own apply_thresholds on the raw tau, where -inf
+#     correctly passes everything. Only consumers of /out/sources/pca_note are
+#     affected (feature_inspector, the §14 judge arm, this screen).
+#   - "density 1.000": leading PCs are high-variance axes that clear tau in
+#     every note, failing max_note_density=0.95. §13.6 already records
+#     thresholding as near-inert for this source (note-level density 0.9999).
+# ablation.py never consults theta (see its comment: "reusing it here would be
+# a category error"), so --directional screens threshold-free instead, on where
+# the max-pool that produced r_pb actually lands.
+#
+# That screen is not a formality here: it dropped PC19 (r = +0.266, the #3
+# correlate) at argmax_row0 = 0.54 — its pooled value sits on <bos> in 54% of
+# notes. The threshold-gated screen had labelled PC19 "never fires" and would
+# have missed the real pathology while rejecting it for the wrong reason.
+#
+#   modal run scripts/select_ablation_targets.py \
+#       --source-dir /out/sources/pca_note \
+#       --audit-dir /out/necessity/pca/seed0/audit_note_matched \
+#       --n-grounded 10 --directional
+#
+# BASELINE: delta = l_abl - l_clean (no reconstruction), mean_recon_tax = 0.0
+# by construction. Absolute nats are NOT comparable with the SAE arms; Cliff's
+# delta IS (within-arm rank contrast, so a per-arm baseline offset cancels).
+#
+# WHAT GOOD LOOKS LIKE
+#   1. mean_loss_recon == mean_loss_clean and mean_recon_tax == 0.0 exactly.
+#   2. "directional_ablation": true and "baseline": "clean" in the summary.
+#   3. No NaN anywhere.
+#   4. Non-degenerate Cliff's delta — not 0.0 exactly across targets (the
+#      splice.mode regression documented in ablation_smoke_random_matched.yaml).
+#
+# Run:
+#   MODAL_GPU=A100-40GB modal run modal_app/ablation.py \
+#       --config-file configs/ablation_smoke_pca.yaml
+
+# --- Source identity (pseudo-SAE; only W_dec columns are used) -------------
+sae_name: pca_smoke
+sae_checkpoint_dir: /out/sources/pca_note
+sae_hf_repo_id: null
+sae_hf_filename: null
+is_centered: true
+
+# --- Intervention ----------------------------------------------------------
+directional_ablation: true
+intervention: zero
+mean_act_path: null
+mean_act_n_shards: 2
+mean_act_max_tokens: 100000
+
+# --- Activations / model ---------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (2 grounded + both controls, from the --directional screen) ---
+targets:
+  - feature_idx: 108
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.4254
+  - feature_idx: 105
+    code: icd9_V4986
+    kind: grounded
+    r_pb: 0.2816
+  - feature_idx: 1316
+    code: icd9_V1582
+    kind: random_control
+    r_pb: 0.049
+  - feature_idx: 345
+    code: icd9_5849
+    kind: low_r_control
+    r_pb: 0.0778
+
+# --- Forward / measurement (identical to every other arm) -----------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: 250
+
+# --- Output ----------------------------------------------------------------
+# Fresh dir: run_ablation resumes by skipping shards that already have
+# shard_*_results.json, so re-running into a used dir re-aggregates the OLD
+# per-note results and reproduces the previous summary exactly.
+output_dir: /out/ablation/pca_smoke_dir
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

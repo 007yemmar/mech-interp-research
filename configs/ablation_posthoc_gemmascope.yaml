@@ -1,0 +1,61 @@
+# Post-hoc specificity analyses (#2/#3/#4) on the GEMMASCOPE PILOT ablation run.
+#
+# Fills the one remaining gap in the top-10 cross-SAE comparison: vanilla and
+# JumpReLU already have top-10 post-hoc (jumprelu_pilot is natively 12 targets /
+# 10 grounded; vanilla's top-10 is derivable from vanilla_meanabl's per-target
+# CSVs), but gemma_scope_pilot/posthoc_specificity/ was never populated.
+#
+# No GPU, no forward passes — reads shard_results/*.json + ablation_summary.json
+# already on the volume and writes CSVs + a summary JSON to
+# /out/ablation/gemma_scope_pilot/posthoc_specificity/.
+#
+#   #2 off-target ICD specificity   (on-target vs off-target Cliff's delta)
+#   #3 length/#codes-matched effect (delta residualized on n_tokens + #codes)
+#   #4 effect-size calibration       (delta in nats, % of base loss, x recon-tax)
+#
+# CAVEAT for the cross-SAE table this feeds. GemmaScope's top-10 grounded
+# targets sit at |r| 0.428-0.545 (median 0.477) against vanilla's 0.822-0.860
+# and JumpReLU's 0.799-0.864, and span 8 ICD codes rather than 3. This is a
+# best-vs-best comparison, not an |r|-matched one — GemmaScope has only 4
+# held-out features above |r| 0.5, so a strength-matched top-10 does not exist.
+# Report the |r| range alongside every row.
+#
+# Note the reconstruction tax: GemmaScope's is 0.648 nats against vanilla's
+# 0.029 (22x), so #4's ratio_to_recon_tax is on a very different denominator
+# here. Cliff's delta is the cross-SAE-comparable quantity; nats are not.
+#
+# Run:
+#   modal run modal_app/ablation_posthoc.py --config-file configs/ablation_posthoc_gemmascope.yaml
+
+# Ablation run to analyse (must contain ablation_summary.json + shard_results/).
+# Pilot only — top-10 grounded + 2 controls. gemma_scope_pilot_extended
+# (ranks 11-30) is deliberately not analysed; the paper table is top-10.
+ablation_output_dir: /out/ablation/gemma_scope_pilot
+
+# Same ICD CSV + activation metadata the ablation run used (for the label join
+# and held-out shard enumeration). All 46 codes are aligned (no prevalence
+# filter) so off-target specificity can test every other code.
+#
+# GemmaScope ran with is_centered: false against the RAW activations dir, but
+# the post-hoc only uses this path for note/shard metadata (row counts and the
+# held-out note ordering), which is identical between the raw and _centered
+# directories. Kept as _centered to match the vanilla/jumprelu configs so the
+# three runs enumerate the held-out notes identically.
+icd_csv_path: /data/sample_50k.csv
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+
+join_key: admission_id
+icd_col_prefix: "icd9_"
+held_out_shard_start: 281
+held_out_shard_end: 312
+shard_checkpoint_subdir: shard_results
+output_subdir: posthoc_specificity
+
+# #2: restrict off-target tests to notes NEGATIVE for the feature's true code,
+# so genuine clinical co-occurrence (e.g. afib + CHF) can't inflate off-target
+# effects. Off-target codes need >= this many positives (in the restricted pool)
+# to be tested.
+restrict_true_negative: true
+min_off_target_pos: 10
+
+logging_level: INFO

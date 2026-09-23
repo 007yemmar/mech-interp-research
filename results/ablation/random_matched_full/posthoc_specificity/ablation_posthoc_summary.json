@@ -1,0 +1,25 @@
+{
+  "ablation_output_dir": "/out/ablation/random_matched_full",
+  "n_targets": 12,
+  "n_grounded": 10,
+  "restrict_true_negative": true,
+  "off_target": {
+    "mean_on_target_delta": -0.0896902911632137,
+    "mean_abs_off_target_delta": 0.06161562765165163,
+    "median_specificity_ratio": -1.532583388064574,
+    "total_off_target_sig_q05": 7
+  },
+  "length_matched": {
+    "mean_delta_raw": -0.0896902911632137,
+    "mean_delta_adjusted": -0.005419129418055166,
+    "mean_attenuation": -0.08427116174515853,
+    "n_sig_after_adjust": 0
+  },
+  "calibration": {
+    "base_loss": 1.6347653633087866,
+    "recon_tax": 0.0,
+    "mean_on_target_delta_nats": 0.018519631305398455,
+    "mean_pct_of_base_loss": 1.1328617379019137,
+    "mean_ratio_to_recon_tax": NaN
+  }
+}
