@@ -1672,6 +1672,60 @@ def _process_one_feature(
     }
 
 
+class _LockedTokenizer:
+    """Serialise a HF tokenizer across threads.
+
+    Fast (Rust) tokenizers raise ``RuntimeError: Already borrowed`` when two threads
+    use one instance at once. Only the ``max_workers > 1`` path wraps it; the serial
+    path keeps using the raw tokenizer.
+    """
+
+    def __init__(self, tokenizer):
+        import threading
+
+        self._tokenizer = tokenizer
+        self._lock = threading.Lock()
+
+    def __call__(self, *args, **kwargs):
+        with self._lock:
+            return self._tokenizer(*args, **kwargs)
+
+    def decode(self, *args, **kwargs):
+        with self._lock:
+            return self._tokenizer.decode(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._tokenizer, name)
+
+
+def _run_feature_loop(items, process_one, *, max_workers=1, on_progress=None):
+    """``[process_one(x) for x in items]``, optionally over a thread pool.
+
+    Results are returned in ``items`` order whatever order the threads finish in, so
+    every downstream CSV is identical to the serial path's. ``on_progress(n_done)``
+    runs on the calling thread -- volume commits must not happen from workers.
+    Exceptions escaping ``process_one`` propagate, as in the serial path.
+    """
+    if max_workers <= 1:
+        out = []
+        for n, item in enumerate(items, start=1):
+            out.append(process_one(item))
+            if on_progress is not None:
+                on_progress(n)
+        return out
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results = [None] * len(items)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(process_one, item): i for i, item in enumerate(items)}
+        for n, fut in enumerate(as_completed(futures), start=1):
+            results[futures[fut]] = fut.result()
+            if on_progress is not None:
+                on_progress(n)
+    return results
+
+
 def _dead_result(feature_idx: int, tier: str, model: str, reason: str) -> dict:
     return {
         "feature_idx": feature_idx,
@@ -1739,6 +1793,7 @@ def run_auto_interp(
     model_name: str = "google/gemma-2-2b",
     join_key: str = "admission_id",
     text_col: str = "note_text",
+    max_workers: int = 1,
     _client=None,
     _sae: JumpReLUSAE | None = None,
     _tokenizer=None,
@@ -1896,81 +1951,62 @@ def run_auto_interp(
 
         model_feature_dir = per_feature_dir / current_model.replace("/", "_")
 
-        feature_results: list[dict] = []
-        n_errors = 0
+        # Concurrency changes throughput only: prompts, models, max_tokens, per-feature
+        # checkpoints and result order are the same as the serial path's.
+        loop_tokenizer = _LockedTokenizer(tokenizer) if max_workers > 1 else tokenizer
 
-        pbar = tqdm(
-            enumerate(feature_list),
-            total=len(feature_list),
-            desc=f"auto-interp ({model_label})",
-            unit="feat",
-        )
-        for _idx, (feature_idx, tier) in pbar:
-            ckpt_path = model_feature_dir / f"feature_{feature_idx}.json"
+        def _one(item, _model=current_model, _dir=model_feature_dir, _tok=loop_tokenizer):
+            """One feature -> (result, errored). Resumes from its checkpoint if present."""
+            feature_idx, tier = item
+            ckpt_path = _dir / f"feature_{feature_idx}.json"
+            contexts = all_contexts.get(feature_idx, {"pos_contexts": [], "neg_contexts": []})
+            shared = dict(
+                contexts=contexts,
+                note_texts=note_texts,
+                tokenizer=_tok,
+                client=client,
+                model=_model,
+                concordance_model=concordance_model,
+                r_pb=r_pb,
+                code_names=code_names,
+                code_descriptions=code_descriptions,
+                scorers=scorers,
+                n_contexts_train=n_contexts_train,
+                n_contexts_test=n_contexts_test,
+                context_window=max_tokens_context,
+                pairing_override=pairing_override,
+            )
             if ckpt_path.exists():
                 with open(ckpt_path) as f:
                     existing = json.load(f)
                 if _needs_retry(existing, scorers):
-                    pbar.set_postfix(feat=feature_idx, tier=tier[:6], status="retry")
-                    contexts = all_contexts.get(
-                        feature_idx, {"pos_contexts": [], "neg_contexts": []}
-                    )
                     try:
-                        existing = _fill_missing_scores(
-                            result=existing,
-                            contexts=contexts,
-                            note_texts=note_texts,
-                            tokenizer=tokenizer,
-                            client=client,
-                            model=current_model,
-                            concordance_model=concordance_model,
-                            r_pb=r_pb,
-                            code_names=code_names,
-                            code_descriptions=code_descriptions,
-                            scorers=scorers,
-                            n_contexts_train=n_contexts_train,
-                            n_contexts_test=n_contexts_test,
-                            context_window=max_tokens_context,
-                            pairing_override=pairing_override,
-                        )
+                        existing = _fill_missing_scores(result=existing, **shared)
                         _write_json(existing, ckpt_path)
                     except Exception:
                         logger.exception(f"Error retrying failed scores for feature {feature_idx}")
-                feature_results.append(existing)
-                continue
-
-            pbar.set_postfix(feat=feature_idx, tier=tier[:6])
-
-            contexts = all_contexts.get(feature_idx, {"pos_contexts": [], "neg_contexts": []})
-
+                return existing, False
             try:
-                result = _process_one_feature(
-                    feature_idx=feature_idx,
-                    tier=tier,
-                    contexts=contexts,
-                    note_texts=note_texts,
-                    tokenizer=tokenizer,
-                    client=client,
-                    model=current_model,
-                    concordance_model=concordance_model,
-                    r_pb=r_pb,
-                    code_names=code_names,
-                    code_descriptions=code_descriptions,
-                    scorers=scorers,
-                    n_contexts_train=n_contexts_train,
-                    n_contexts_test=n_contexts_test,
-                    context_window=max_tokens_context,
-                    pairing_override=pairing_override,
-                )
+                result = _process_one_feature(feature_idx=feature_idx, tier=tier, **shared)
                 _write_json(result, ckpt_path)
-                feature_results.append(result)
+                return result, False
             except Exception:
                 logger.exception(f"Error processing feature {feature_idx}")
-                n_errors += 1
-                feature_results.append(_dead_result(feature_idx, tier, current_model, "error"))
+                return _dead_result(feature_idx, tier, _model, "error"), True
 
-            if _commit_volume is not None and (_idx + 1) % 50 == 0:
+        pbar = tqdm(total=len(feature_list), desc=f"auto-interp ({model_label})", unit="feat")
+
+        def _progress(n_done, _pbar=pbar):
+            _pbar.update(1)
+            if _commit_volume is not None and n_done % 50 == 0:
                 _commit_volume()
+
+        outcomes = _run_feature_loop(
+            feature_list, _one, max_workers=max_workers, on_progress=_progress
+        )
+        pbar.close()
+        feature_results = [res for res, _ in outcomes]
+        n_errors = sum(errored for _, errored in outcomes)
 
         if _commit_volume is not None:
             _commit_volume()
