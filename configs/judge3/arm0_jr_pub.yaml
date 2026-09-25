@@ -1,0 +1,20 @@
+# Third judge (OpenAI GPT-5-mini) via OpenRouter — arm0 concordance, jr_pub.
+# Adds a third lab to the Sonnet-4.6 / DeepSeek-V3 panel so the judge-invariance
+# claim in RESULTS.md §14.7a rests on three families, not two.
+#
+# output_dir is set EXPLICITLY on every arm. Leaving it null defaults to
+# <auto_interp_dir>/retrieval_eval and has previously overwritten published
+# cross-chapter results. Do not remove it.
+#
+# Run: uv run modal run --detach modal_app/arm0_eval.py --config-file configs/judge3/arm0_jr_pub.yaml --detach
+
+auto_interp_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+output_dir: /out/auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/arm0_eval
+
+judges:
+  - {slug: gpt-5-mini, backend: openrouter, model: openai/gpt-5-mini, reasoning_effort: minimal}
+
+thresholds: [0.3, 0.5]
+max_workers: 4
+client_max_retries: 8
+logging_level: INFO

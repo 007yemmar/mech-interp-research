@@ -1,0 +1,8 @@
+# Fourth judge (Google Gemini 2.5 Flash) via OpenRouter — de-anchored concordance (r sentence removed), van.
+# Explanations held fixed; only the judge changes. Extends RESULTS.md §14.7 to four labs.
+auto_interp_dir: /out/auto_interp/vanilla_test_split
+output_dir: /out/auto_interp/vanilla_test_split/deanchored_eval
+judges:
+  - {slug: gemini-2.5-flash, backend: openrouter, model: google/gemini-2.5-flash}
+client_max_retries: 8
+logging_level: INFO
