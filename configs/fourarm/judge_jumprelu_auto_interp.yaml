@@ -17,10 +17,10 @@
 # maximisation bias is introduced by the binning. Cached features are preferred
 # where a bucket contains them: 43 of 200 already have contexts from the
 # credit-failed run, and auto_interp extracts only the difference.
-sae_checkpoint: ${jumprelu_ckpt}
+sae_checkpoint: ${jumprelu_s0_ckpt}
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 icd_eval_dir: ${necessity_audit}/sae_jumprelu
-shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
+shard_ckpt_dir: ${jumprelu_s0_eval}/shard_ckpt
 icd_csv_path: /data/sample_50k.csv
 output_dir: /out/auto_interp/judgetest/jumprelu
 

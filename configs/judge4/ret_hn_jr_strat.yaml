@@ -10,7 +10,7 @@
 # Run: uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/judge3/ret_hn_jr_strat.yaml --detach
 
 auto_interp_dir: /out/auto_interp/judgetest/jumprelu
-icd_eval_dir:    /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+icd_eval_dir:    ${jumprelu_s0_eval}
 icd_csv_path:    /data/sample_50k.csv
 icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
 output_dir: /out/auto_interp/judgetest/jumprelu/retrieval_eval_hardneg

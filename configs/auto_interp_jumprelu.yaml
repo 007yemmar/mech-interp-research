@@ -4,11 +4,11 @@
 #   modal run modal_app/auto_interp.py --config-file configs/auto_interp_jumprelu.yaml
 
 # --- paths ---
-sae_checkpoint: ${jumprelu_ckpt}
+sae_checkpoint: ${jumprelu_s0_ckpt}
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-icd_eval_dir: ${jumprelu_eval}
+icd_eval_dir: ${jumprelu_s0_eval}
 icd_csv_path: /data/sample_50k.csv
-output_dir: ${jumprelu_auto_interp}
+output_dir: ${jumprelu_s0_auto_interp}
 
 # --- feature selection ---
 n_strong_grounded: 280       # all r > 0.4

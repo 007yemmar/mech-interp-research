@@ -27,7 +27,7 @@ max_length: 8192
 # Reference JumpReLU SAE's pooled-vector checkpoints -- see
 # source_diff_in_means.yaml for what this drives (Arm C selection +
 # note-level calibration target, shared by every arm).
-sae_shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
+sae_shard_ckpt_dir: ${jumprelu_s0_eval}/shard_ckpt
 arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
 
 held_out_shard_start: 281

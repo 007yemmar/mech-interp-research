@@ -31,7 +31,7 @@ max_length: 8192
 # selection, the per-code note-level calibration target (Ruling 1), AND
 # (uniquely for this arm) the per-code dilution target |r| via
 # arm_c["r_selection"] -- see source_diff_in_means.yaml for the first two.
-sae_shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
+sae_shard_ckpt_dir: ${jumprelu_s0_eval}/shard_ckpt
 arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
 
 held_out_shard_start: 281

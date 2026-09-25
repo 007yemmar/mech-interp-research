@@ -9,7 +9,7 @@
 #   uv run modal run modal_app/arm0_eval.py --config-file configs/arm0_4omini.yaml
 #   uv run modal run --detach modal_app/arm0_eval.py --config-file configs/arm0_4omini.yaml --detach
 
-auto_interp_dir: ${jumprelu_auto_interp}
+auto_interp_dir: ${jumprelu_s0_auto_interp}
 output_dir: null   # null -> <auto_interp_dir>/arm0_eval
 
 judges:
