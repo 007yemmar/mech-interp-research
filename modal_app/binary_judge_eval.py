@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import modal
-import yaml
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image, raw_volume
 
 
@@ -125,8 +125,7 @@ def binary_remote(config: dict[str, Any]) -> dict[str, Any]:
 
 @app.local_entrypoint()
 def main(config_file: str, detach: bool = False) -> None:
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
     if detach:
         print(f"Spawned detached: {binary_remote.spawn(config).object_id}")
         return
