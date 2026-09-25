@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 324" width="700" height="324"
+     font-family="Avenir Next, Avenir, Helvetica Neue, Helvetica, Arial, sans-serif"
+     role="img" aria-label="Nine feature sources are reduced to one per-note matrix, read by one audit, then evaluated by a concordance test and a causal ablation test.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#14191F"/>
+    </marker>
+    <marker id="v" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4C3E93"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="700" height="324" fill="#FFFFFF"/>
+
+  <!-- inputs -->
+  <rect x="8" y="4" width="330" height="28" rx="3.5" fill="#F6F8F8" stroke="#14191F" stroke-width="0.9"/>
+  <text x="20" y="17" font-size="11" fill="#14191F">50,000 MIMIC-IV discharge summaries</text>
+  <text x="20" y="28" font-size="10" fill="#5C6B72">Gemma-2-2B, layer 16 residual stream, 2,304-d</text>
+
+  <rect x="362" y="4" width="330" height="28" rx="3.5" fill="#EFEDF8" stroke="#4C3E93" stroke-width="1" stroke-dasharray="4 2.5"/>
+  <text x="374" y="17" font-size="11" fill="#14191F">46 ICD-9 codes per note</text>
+  <text x="374" y="28" font-size="10" fill="#5C6B72">assigned by human coders</text>
+
+  <path d="M173,32 V42" stroke="#14191F" stroke-width="1" fill="none" marker-end="url(#a)"/>
+  <path d="M575,32 V42" stroke="#4C3E93" stroke-width="1" fill="none" stroke-dasharray="4 2.5" marker-end="url(#v)"/>
+
+  <!-- 1. sources -->
+  <rect x="8" y="46" width="684" height="84" rx="4" fill="#FFFFFF" stroke="#14191F" stroke-width="1"/>
+  <circle cx="20" cy="59" r="6.5" fill="#0C6B70"/>
+  <text x="20" y="62.5" font-size="9" fill="#FFFFFF" text-anchor="middle">1</text>
+  <text x="31" y="63" font-size="12" fill="#14191F">Nine feature sources</text>
+
+  <rect x="16" y="72" width="668" height="17" rx="2.5" fill="#F6F8F8"/>
+  <text x="24" y="84" font-size="10" fill="#5C6B72">SAE dictionaries</text>
+  <text x="170" y="84" font-size="11" fill="#14191F">ReLU + L1</text>
+  <text x="340" y="84" font-size="11" fill="#14191F">JumpReLU</text>
+  <text x="510" y="84" font-size="11" fill="#14191F">GemmaScope (general)</text>
+
+  <rect x="16" y="91" width="668" height="17" rx="2.5" fill="#F6F8F8"/>
+  <text x="24" y="103" font-size="10" fill="#5C6B72">non-SAE, unsupervised</text>
+  <text x="170" y="103" font-size="11" fill="#14191F">PCA</text>
+  <text x="340" y="103" font-size="11" fill="#14191F">random directions</text>
+  <text x="510" y="103" font-size="11" fill="#14191F">TF-IDF n-grams</text>
+
+  <rect x="16" y="110" width="668" height="17" rx="2.5" fill="#EFEDF8" stroke="#4C3E93" stroke-width="0.8"/>
+  <text x="24" y="122" font-size="10" fill="#4C3E93">one feature per ICD code</text>
+  <text x="170" y="122" font-size="11" fill="#14191F">diff-in-means (LDA)</text>
+  <text x="340" y="122" font-size="11" fill="#14191F">LR probe</text>
+  <text x="510" y="122" font-size="11" fill="#14191F">keyword indicators</text>
+
+  <path d="M125,130 V140" stroke="#14191F" stroke-width="0.9" fill="none" marker-end="url(#a)"/>
+  <path d="M350,130 V140" stroke="#14191F" stroke-width="0.9" fill="none" marker-end="url(#a)"/>
+  <path d="M575,130 V140" stroke="#14191F" stroke-width="0.9" fill="none" marker-end="url(#a)"/>
+
+  <!-- 2. common interface -->
+  <path d="M8,144 L692,144 L540,160 L160,160 Z" fill="#E7F1F1" fill-opacity="0.5" stroke="#0C6B70" stroke-width="0.8"/>
+  <rect x="160" y="160" width="380" height="32" rx="3.5" fill="#E7F1F1" stroke="#0C6B70" stroke-width="1.2"/>
+  <circle cx="174" cy="173" r="6.5" fill="#0C6B70"/>
+  <text x="174" y="176.5" font-size="9" fill="#FFFFFF" text-anchor="middle">2</text>
+  <text x="185" y="177" font-size="11.5" fill="#14191F">One interface for every source</text>
+  <text x="174" y="188" font-size="10" fill="#5C6B72">one [notes × k] matrix per source; activations max-pooled over tokens</text>
+
+  <path d="M350,192 V202" stroke="#14191F" stroke-width="1" fill="none" marker-end="url(#a)"/>
+
+  <!-- 3. audit -->
+  <rect x="110" y="206" width="480" height="46" rx="3.5" fill="#FFFFFF" stroke="#14191F" stroke-width="1.1"/>
+  <circle cx="126" cy="219" r="6.5" fill="#0C6B70"/>
+  <text x="126" y="222.5" font-size="9" fill="#FFFFFF" text-anchor="middle">3</text>
+  <text x="137" y="223" font-size="11.5" fill="#14191F">One audit for every source</text>
+  <text x="126" y="236" font-size="10" fill="#14191F">one feature per code selected on shards 0–30, scored on held-out 281–311</text>
+  <text x="126" y="248" font-size="10" fill="#14191F">point-biserial r, BH-FDR q = 0.05 → on-target |r|, off-target correlation</text>
+
+  <path d="M350,252 V264" stroke="#14191F" stroke-width="1" fill="none"/>
+  <path d="M350,264 H173 V274" stroke="#14191F" stroke-width="1" fill="none" marker-end="url(#a)"/>
+  <path d="M350,264 H527 V274" stroke="#14191F" stroke-width="1" fill="none" marker-end="url(#a)"/>
+
+  <!-- 4a / 4b -->
+  <rect x="8" y="278" width="330" height="42" rx="3.5" fill="#FFFFFF" stroke="#0C6B70" stroke-width="1.2"/>
+  <rect x="20" y="283" width="24" height="13" rx="6.5" fill="#0C6B70"/>
+  <text x="32" y="292.5" font-size="8.5" fill="#FFFFFF" text-anchor="middle" font-family="Menlo, monospace">4a</text>
+  <text x="50" y="293" font-size="11.5" fill="#14191F">Concordance</text>
+  <text x="20" y="306" font-size="10" fill="#14191F">an LLM explains the feature from its top contexts; a</text>
+  <text x="20" y="317" font-size="10" fill="#14191F">blind judge picks the code from 9 same-chapter options</text>
+
+  <rect x="362" y="278" width="330" height="42" rx="3.5" fill="#FFFFFF" stroke="#93303E" stroke-width="1.2"/>
+  <rect x="374" y="283" width="24" height="13" rx="6.5" fill="#93303E"/>
+  <text x="386" y="292.5" font-size="8.5" fill="#FFFFFF" text-anchor="middle" font-family="Menlo, monospace">4b</text>
+  <text x="404" y="293" font-size="11.5" fill="#14191F">Causal ablation</text>
+  <text x="374" y="306" font-size="10" fill="#14191F">the feature is removed from the residual stream; the</text>
+  <text x="374" y="317" font-size="10" fill="#14191F">change in loss is compared, code-positive vs code-negative notes</text>
+</svg>

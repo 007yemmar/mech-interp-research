@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 1700" width="1220" height="1700"
+     font-family="Avenir Next, Avenir, Helvetica Neue, Helvetica, Arial, sans-serif"
+     role="img" aria-label="Pipeline for validating interpretability features against external ICD-9 labels: nine feature sources reduced to one matrix format, one shared audit, then a concordance test and a causal ablation test.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#14191F"/>
+    </marker>
+    <marker id="arv" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4C3E93"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1220" height="1700" fill="#FFFFFF"/>
+
+  <!-- ============ BAND 0 : inputs ============ -->
+  <rect x="40" y="36" width="540" height="110" rx="5" fill="#F6F8F8" stroke="#14191F" stroke-width="1.3"/>
+  <text x="68" y="84" font-size="25" fill="#14191F">50,000 MIMIC-IV discharge summaries</text>
+  <text x="68" y="112" font-size="20" fill="#5C6B72">312 shards, stratified sample</text>
+  <text x="68" y="136" font-size="20" fill="#5C6B72">the text never leaves the compute volume</text>
+
+  <rect x="620" y="36" width="520" height="110" rx="5" fill="#EFEDF8" stroke="#4C3E93" stroke-width="1.4" stroke-dasharray="7 4"/>
+  <text x="648" y="84" font-size="25" fill="#14191F">46 ICD-9 codes per note</text>
+  <text x="648" y="112" font-size="20" fill="#5C6B72">written by human coders for billing,</text>
+  <text x="648" y="136" font-size="20" fill="#5C6B72">before any model saw the text</text>
+
+  <path d="M310,146 V182" stroke="#14191F" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+  <!-- ============ BAND 1 : representation ============ -->
+  <rect x="40" y="190" width="540" height="72" rx="5" fill="#F6F8F8" stroke="#14191F" stroke-width="1.3"/>
+  <text x="68" y="226" font-size="25" fill="#14191F">Gemma-2-2B, layer 16 residual stream</text>
+  <text x="68" y="252" font-size="20" fill="#5C6B72">2,304-d, mean-centred, 15.2 M tokens</text>
+
+  <text x="620" y="212" font-size="20" fill="#5C6B72">Why these labels: they were written by clinicians</text>
+  <text x="620" y="236" font-size="20" fill="#5C6B72">for billing, before this study existed, so nothing in</text>
+  <text x="620" y="260" font-size="20" fill="#5C6B72">the pipeline could have shaped them.</text>
+  <path d="M310,262 V296" stroke="#14191F" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+  <!-- ============ BAND 2 : feature sources ============ -->
+  <rect x="40" y="304" width="1100" height="306" rx="6" fill="#FBFCFC" stroke="#14191F" stroke-width="1.3"/>
+  <circle cx="82" cy="332" r="13" fill="#0C6B70"/>
+  <text x="82" y="339" font-size="19" fill="#FFFFFF" text-anchor="middle">1</text>
+  <text x="106" y="340" font-size="25" fill="#14191F">Feature sources — anything that maps a note to per-token values</text>
+
+  <text x="230" y="372" font-size="18" fill="#5C6B72" text-anchor="middle">trained on this corpus</text>
+  <text x="498" y="372" font-size="18" fill="#5C6B72" text-anchor="middle">off-the-shelf</text>
+  <text x="766" y="372" font-size="18" fill="#5C6B72" text-anchor="middle">no labels, no learning</text>
+  <text x="1034" y="372" font-size="18" fill="#5C6B72" text-anchor="middle">surface text</text>
+
+  <rect x="68" y="380" width="156" height="88" rx="4" fill="#E7F1F1" stroke="#0C6B70" stroke-width="1.3"/>
+  <text x="146" y="414" font-size="22" fill="#14191F" text-anchor="middle">ReLU + L1</text>
+  <text x="146" y="438" font-size="22" fill="#14191F" text-anchor="middle">SAE</text>
+  <text x="146" y="460" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 18,432</text>
+
+  <rect x="236" y="380" width="156" height="88" rx="4" fill="#E7F1F1" stroke="#0C6B70" stroke-width="1.3"/>
+  <text x="314" y="414" font-size="22" fill="#14191F" text-anchor="middle">JumpReLU</text>
+  <text x="314" y="438" font-size="22" fill="#14191F" text-anchor="middle">SAE</text>
+  <text x="314" y="460" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 18,432</text>
+
+  <rect x="420" y="380" width="156" height="88" rx="4" fill="#F6F8F8" stroke="#14191F" stroke-width="1.1"/>
+  <text x="498" y="414" font-size="22" fill="#14191F" text-anchor="middle">GemmaScope</text>
+  <text x="498" y="438" font-size="22" fill="#14191F" text-anchor="middle">SAE</text>
+  <text x="498" y="460" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 16,384</text>
+
+  <rect x="604" y="380" width="156" height="88" rx="4" fill="#F6F8F8" stroke="#14191F" stroke-width="1.1"/>
+  <text x="682" y="414" font-size="22" fill="#14191F" text-anchor="middle">PCA</text>
+  <text x="682" y="438" font-size="22" fill="#14191F" text-anchor="middle">directions</text>
+  <text x="682" y="460" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 2,304</text>
+
+  <rect x="772" y="380" width="156" height="88" rx="4" fill="#F7F0E2" stroke="#8A5E10" stroke-width="1.3"/>
+  <text x="850" y="414" font-size="22" fill="#14191F" text-anchor="middle">random,</text>
+  <text x="850" y="438" font-size="22" fill="#14191F" text-anchor="middle">cov-matched</text>
+  <text x="850" y="460" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 18,432</text>
+
+  <rect x="956" y="380" width="156" height="88" rx="4" fill="#F6F8F8" stroke="#14191F" stroke-width="1.1"/>
+  <text x="1034" y="414" font-size="22" fill="#14191F" text-anchor="middle">TF-IDF</text>
+  <text x="1034" y="438" font-size="22" fill="#14191F" text-anchor="middle">n-grams</text>
+  <text x="1034" y="460" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 10,000</text>
+
+  <text x="68" y="502" font-size="20" fill="#4C3E93">built from the ICD-9 labels — the only three sources that see the codes</text>
+
+  <rect x="68" y="512" width="156" height="88" rx="4" fill="#EFEDF8" stroke="#4C3E93" stroke-width="1.3"/>
+  <text x="146" y="546" font-size="21" fill="#14191F" text-anchor="middle">diff-in-means</text>
+  <text x="146" y="570" font-size="21" fill="#14191F" text-anchor="middle">(LDA)</text>
+  <text x="146" y="592" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 46</text>
+
+  <rect x="236" y="512" width="156" height="88" rx="4" fill="#EFEDF8" stroke="#4C3E93" stroke-width="1.3"/>
+  <text x="314" y="546" font-size="21" fill="#14191F" text-anchor="middle">LR probe</text>
+  <text x="314" y="570" font-size="21" fill="#14191F" text-anchor="middle">directions</text>
+  <text x="314" y="592" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 46</text>
+
+  <rect x="404" y="512" width="156" height="88" rx="4" fill="#EFEDF8" stroke="#4C3E93" stroke-width="1.3"/>
+  <text x="482" y="546" font-size="21" fill="#14191F" text-anchor="middle">keyword</text>
+  <text x="482" y="570" font-size="21" fill="#14191F" text-anchor="middle">indicators</text>
+  <text x="482" y="592" font-size="18" fill="#5C6B72" text-anchor="middle" font-family="Menlo, monospace">k = 46</text>
+
+  <path d="M300,610 V632" stroke="#14191F" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+  <path d="M590,610 V632" stroke="#14191F" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+  <path d="M880,610 V632" stroke="#14191F" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+
+  <!-- ============ BAND 3 : the common interface ============ -->
+  <path d="M40,638 L1140,638 L880,694 L300,694 Z" fill="#E7F1F1" fill-opacity="0.55" stroke="#0C6B70" stroke-width="1.2"/>
+  <rect x="300" y="694" width="580" height="102" rx="5" fill="#E7F1F1" stroke="#0C6B70" stroke-width="1.6"/>
+  <circle cx="334" cy="726" r="13" fill="#0C6B70"/>
+  <text x="334" y="733" font-size="19" fill="#FFFFFF" text-anchor="middle">2</text>
+  <text x="358" y="734" font-size="25" fill="#14191F">One interface for every source</text>
+  <text x="330" y="764" font-size="22" fill="#14191F">max-pool each feature over the note's tokens,</text>
+  <text x="330" y="787" font-size="20" fill="#5C6B72">giving one [notes × k] matrix in the same format for all nine</text>
+
+  <path d="M590,796 V828" stroke="#14191F" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+  <!-- ============ BAND 4 : the audit ============ -->
+  <rect x="190" y="836" width="800" height="206" rx="6" fill="#FBFCFC" stroke="#14191F" stroke-width="1.5"/>
+  <circle cx="224" cy="868" r="13" fill="#0C6B70"/>
+  <text x="224" y="875" font-size="19" fill="#FFFFFF" text-anchor="middle">3</text>
+  <text x="248" y="876" font-size="25" fill="#14191F">The audit — one code path, every source</text>
+  <text x="222" y="918" font-size="20" fill="#0C6B70" font-family="Menlo, monospace">select</text>
+  <text x="340" y="918" font-size="22" fill="#14191F">one feature per code, chosen on shards 0–30</text>
+  <text x="222" y="952" font-size="20" fill="#0C6B70" font-family="Menlo, monospace">score</text>
+  <text x="340" y="952" font-size="22" fill="#14191F">point-biserial r on shards 281–311, BH-FDR at q = 0.05</text>
+  <text x="222" y="986" font-size="20" fill="#0C6B70" font-family="Menlo, monospace">report</text>
+  <text x="340" y="986" font-size="22" fill="#14191F">on-target |r|, off-target leakage, specificity ratio</text>
+  <text x="222" y="1010" font-size="19" fill="#5C6B72" font-style="italic">the two splits never overlap, so the best of 18,432 features is never</text>
+  <text x="222" y="1032" font-size="19" fill="#5C6B72" font-style="italic">scored on the notes that chose it</text>
+
+  <!-- ============ handoff ============ -->
+  <path d="M590,1042 V1090" stroke="#14191F" stroke-width="1.4" fill="none"/>
+  <text x="610" y="1074" font-size="21" fill="#5C6B72">one feature per code, per source</text>
+  <path d="M590,1090 H310 V1112" stroke="#14191F" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+  <path d="M590,1090 H870 V1112" stroke="#14191F" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+  <!-- ============ BAND 5a : concordance test ============ -->
+  <rect x="40" y="1116" width="540" height="454" rx="6" fill="#FFFFFF" stroke="#0C6B70" stroke-width="1.8"/>
+  <rect x="68" y="1132" width="48" height="26" rx="13" fill="#0C6B70"/>
+  <text x="92" y="1151" font-size="18" fill="#FFFFFF" text-anchor="middle" font-family="Menlo, monospace">4a</text>
+  <text x="128" y="1153" font-size="26" fill="#14191F">Concordance test</text>
+  <text x="68" y="1186" font-size="20" fill="#5C6B72">can a judge who never sees the code recover</text>
+  <text x="68" y="1208" font-size="20" fill="#5C6B72">it from the feature's explanation alone?</text>
+
+  <rect x="68" y="1218" width="484" height="84" rx="4" fill="#F6F8F8" stroke="#14191F" stroke-width="1.1"/>
+  <text x="90" y="1248" font-size="22" fill="#14191F">the feature's top-activating contexts</text>
+  <text x="90" y="1273" font-size="20" fill="#5C6B72">pulled from held-out notes, shards 281–311</text>
+  <text x="90" y="1295" font-size="20" fill="#5C6B72">no note text ever leaves the volume</text>
+  <path d="M310,1302 V1316" stroke="#14191F" stroke-width="1.3" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="68" y="1318" width="484" height="84" rx="4" fill="#E7F1F1" stroke="#0C6B70" stroke-width="1.3"/>
+  <text x="90" y="1348" font-size="22" fill="#14191F">explainer LLM writes one sentence</text>
+  <text x="90" y="1373" font-size="20" fill="#5C6B72">sees the contexts only — no code, no |r|</text>
+  <text x="90" y="1395" font-size="20" fill="#5C6B72">Claude Sonnet 4.6</text>
+  <path d="M310,1402 V1416" stroke="#14191F" stroke-width="1.3" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="68" y="1418" width="484" height="68" rx="4" fill="#E7F1F1" stroke="#0C6B70" stroke-width="1.3"/>
+  <text x="90" y="1447" font-size="22" fill="#14191F">judge LLM picks 1 of 9 options</text>
+  <text x="90" y="1472" font-size="20" fill="#5C6B72">8 codes from the same ICD-9 chapter, plus 'none'</text>
+  <path d="M310,1486 V1500" stroke="#14191F" stroke-width="1.3" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="68" y="1502" width="484" height="60" rx="4" fill="#F6F8F8" stroke="#14191F" stroke-width="1.4"/>
+  <text x="90" y="1529" font-size="22" fill="#14191F">hit@1, against 11.1 % chance</text>
+  <text x="90" y="1552" font-size="20" fill="#5C6B72">two judge families, three disjoint |r| bands</text>
+
+  <!-- ============ BAND 5b : causal ablation test ============ -->
+  <rect x="600" y="1116" width="540" height="454" rx="6" fill="#FFFFFF" stroke="#93303E" stroke-width="1.8"/>
+  <rect x="628" y="1132" width="48" height="26" rx="13" fill="#93303E"/>
+  <text x="652" y="1151" font-size="18" fill="#FFFFFF" text-anchor="middle" font-family="Menlo, monospace">4b</text>
+  <text x="688" y="1153" font-size="26" fill="#14191F">Causal ablation test</text>
+  <text x="628" y="1186" font-size="20" fill="#5C6B72">does the model actually use the feature,</text>
+  <text x="628" y="1208" font-size="20" fill="#5C6B72">or does it only correlate with the code?</text>
+
+  <rect x="628" y="1218" width="484" height="84" rx="4" fill="#F7ECEE" stroke="#93303E" stroke-width="1.3"/>
+  <text x="650" y="1248" font-size="22" fill="#14191F">remove the feature at layer 16</text>
+  <text x="650" y="1273" font-size="20" fill="#5C6B72">SAE latent: set it to 0, or to its dataset mean</text>
+  <text x="650" y="1295" font-size="20" fill="#5C6B72">plain direction d: x' = x − (x · d) d</text>
+  <path d="M870,1302 V1316" stroke="#14191F" stroke-width="1.3" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="628" y="1318" width="484" height="84" rx="4" fill="#F7ECEE" stroke="#93303E" stroke-width="1.3"/>
+  <text x="650" y="1348" font-size="22" fill="#14191F">re-run the remaining layers</text>
+  <text x="650" y="1373" font-size="20" fill="#5C6B72">cross-entropy on the note's last 25 % of tokens</text>
+  <text x="650" y="1395" font-size="20" fill="#5C6B72">three passes: clean, reconstructed, ablated</text>
+  <path d="M870,1402 V1416" stroke="#14191F" stroke-width="1.3" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="628" y="1418" width="484" height="68" rx="4" fill="#F7ECEE" stroke="#93303E" stroke-width="1.3"/>
+  <text x="650" y="1447" font-size="22" fill="#14191F">split the 4,911 held-out notes in two</text>
+  <text x="650" y="1472" font-size="20" fill="#5C6B72">notes carrying the code, vs notes without it</text>
+  <path d="M870,1486 V1500" stroke="#14191F" stroke-width="1.3" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="628" y="1502" width="484" height="60" rx="4" fill="#F6F8F8" stroke="#14191F" stroke-width="1.4"/>
+  <text x="650" y="1529" font-size="22" fill="#14191F">does loss rise more on code-positive notes?</text>
+  <text x="650" y="1552" font-size="20" fill="#5C6B72">Cliff's δ, Mann–Whitney U, BH across targets</text>
+
+  <!-- ============ violet label lane ============ -->
+  <path d="M1140,91 H1180 V1400" stroke="#4C3E93" stroke-width="1.5" fill="none" stroke-dasharray="7 4"/>
+  <path d="M1180,556 H576" stroke="#4C3E93" stroke-width="1.5" fill="none" stroke-dasharray="7 4" marker-end="url(#arv)"/>
+  <path d="M1180,940 H1000" stroke="#4C3E93" stroke-width="1.5" fill="none" stroke-dasharray="7 4" marker-end="url(#arv)"/>
+  <path d="M1180,1400 H1150" stroke="#4C3E93" stroke-width="1.5" fill="none" stroke-dasharray="7 4" marker-end="url(#arv)"/>
+  <text x="1168" y="176" font-size="19" fill="#4C3E93" text-anchor="end" font-style="italic">the codes are the answer key in both tests</text>
+
+  <!-- ============ footer ============ -->
+  <rect x="40" y="1600" width="1100" height="76" rx="5" fill="#F2F5F5" stroke="#D4DCDB" stroke-width="1"/>
+  <text x="68" y="1636" font-size="22" fill="#14191F">Every one of the nine sources is run through both tests, so each SAE number is read against a</text>
+  <text x="68" y="1662" font-size="22" fill="#14191F">random-direction floor and a keyword ceiling measured on the identical pipeline — not against nothing.</text>
+</svg>
