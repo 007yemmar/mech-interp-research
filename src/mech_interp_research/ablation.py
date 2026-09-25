@@ -147,6 +147,30 @@ class AblationConfig:
     # "mean": clamp the feature to its dataset-mean activation m_j, removing
     #   only this note's deviation from baseline (cleaner counterfactual).
     intervention: str = "zero"
+    # Ablate by projecting the direction out of the RAW residual stream instead
+    # of removing a latent from an SAE reconstruction.
+    #
+    # The reconstruction-based protocol assumes decode(z) is a faithful x. A
+    # trained SAE earns that (EV ~0.90, reconstruction tax 0.029 nats); a
+    # pseudo-SAE built from random or label-constructed directions does not.
+    # Measured: dim_full (k=46) reconstructs a 2304-dim residual so badly its
+    # tax is 7.47 nats -- 4.6x the base loss -- and every effect it reports is
+    # noise on rubble. random_matched (k=18,432) overflows fp16 at BOS because
+    # decode sums 18,432 contributions.
+    #
+    # Directional ablation is the standard intervention for a direction rather
+    # than a dictionary feature:
+    #     x' = x - (x . d) d           d unit-norm      (intervention: zero)
+    #     x' = x - (x . d - m_j) d                      (intervention: mean)
+    # The first is Arditi et al. (NeurIPS 2024) directional ablation / the
+    # projection used in amnesic probing (Elazar et al., TACL 2021) and INLP;
+    # the second is the mean-projection variant.
+    #
+    # There is no reconstruction, so the baseline is l_clean, NOT l_recon, and
+    # absolute nats are not comparable with the SAE arms. Cliff's delta is,
+    # being a within-arm rank contrast. See
+    # docs/2026-08-29-bos-contamination-audit.md and the ablation spec.
+    directional_ablation: bool = False
     # Optional precomputed {feature_idx: m_j} JSON. If None and intervention
     # == "mean", m_j is estimated from the activation shards at run time.
     mean_act_path: str | None = None
@@ -727,6 +751,7 @@ def run_ablation_for_note(
     layer_dtype: torch.dtype,
     intervention: str = "zero",
     mean_acts: dict[int, float] | None = None,
+    directional_ablation: bool = False,
     measure_sections: bool = False,
     section_headers: list[str] | None = None,
 ) -> NoteAblationResult | None:
@@ -836,14 +861,29 @@ def run_ablation_for_note(
         return full
 
     # ---- 3. Reconstructed (un-ablated) forward ----
-    splice_tensor = _build_full(x_hat)
-    splice.mode = "splice"
-    splice.splice_tensor = splice_tensor
-    with torch.no_grad():
-        out_recon = model(input_ids=input_ids, attention_mask=attn_mask, use_cache=False)
-    loss_recon = cross_entropy_in_window(out_recon.logits, input_ids, window_mask)
-    loss_recon_section, loss_recon_rest = _sec_rest(out_recon.logits)
-    del out_recon
+    if directional_ablation:
+        # No reconstruction is spliced, so there is no reconstruction tax and
+        # the un-ablated pass IS the clean pass. Recording loss_recon = loss_clean
+        # keeps delta = loss_abl - loss_recon identical in form to the SAE arm
+        # while making the baseline l_clean, and leaves the post-hoc unchanged.
+        loss_recon = loss_clean
+        loss_recon_section, loss_recon_rest = loss_clean_section, loss_clean_rest
+        # The reconstruction branch below sets this before its forward and the
+        # target loop inherits it. Skipping that branch leaves the hook in
+        # "capture" mode, where it stashes the layer output and returns it
+        # UNCHANGED -- so every ablated forward silently equals the clean one and
+        # Cliff's delta comes back 0.0 exactly for every target. Observed once;
+        # the assertion below is what stops it recurring.
+        splice.mode = "splice"
+    else:
+        splice_tensor = _build_full(x_hat)
+        splice.mode = "splice"
+        splice.splice_tensor = splice_tensor
+        with torch.no_grad():
+            out_recon = model(input_ids=input_ids, attention_mask=attn_mask, use_cache=False)
+        loss_recon = cross_entropy_in_window(out_recon.logits, input_ids, window_mask)
+        loss_recon_section, loss_recon_rest = _sec_rest(out_recon.logits)
+        del out_recon
 
     # ---- 4. Per-feature ablations ----
     per_feature_loss: dict[int, float] = {}
@@ -861,13 +901,53 @@ def run_ablation_for_note(
     # but its activation is included here as a one-position rounding effect).
     window_token_end = max(window_token_start + 1, n_real)
 
+    # An ablation that does not replace the layer output is not an ablation.
+    assert splice.mode == "splice", (
+        f"splice.mode is {splice.mode!r}, not 'splice' — the ablated forwards "
+        "would run unmodified and every delta would be exactly 0."
+    )
+
+    _first_target_check = note_idx == 0
+
     for j in target_feature_indices:
-        if intervention == "mean":
+        if directional_ablation:
+            # Project direction j out of the RAW stream. W_dec[j] is unit-norm
+            # for every pseudo-SAE source (write_pseudo_sae sets W_dec = W_enc.T
+            # on unit columns), so (x . d) d is the orthogonal component along d
+            # and x - (x . d) d removes it exactly. No threshold gating: the
+            # calibrated tau describes note-level detection for grounding, not a
+            # token-level firing rule, and reusing it here would be a category
+            # error. Unconditional projection is also what Arditi et al. do.
+            d = sae.W_dec[j : j + 1]  # [1, d_model], unit norm
+            coeff = x16_for_sae @ d.reshape(-1, 1)  # [1, n_real, 1]
+            if intervention == "mean":
+                coeff = coeff - (float(mean_acts.get(j, 0.0)) if mean_acts else 0.0)
+            x_hat_abl = x16_for_sae - coeff * d
+        elif intervention == "mean":
             m_j = float(mean_acts.get(j, 0.0)) if mean_acts else 0.0
             x_hat_abl = sae.decode_with_mean_ablation(z, feature_idx=j, mean_act=m_j)
         else:
             x_hat_abl = sae.decode_with_ablation(z, feature_idx=j)
-        splice.splice_tensor = _build_full(x_hat_abl)
+        splice_full = _build_full(x_hat_abl)
+        if _first_target_check:
+            # An intervention that leaves the activation bit-identical is not an
+            # intervention. Distinguishes "splice ran but changed nothing" from
+            # "splice never ran" (the mode assert above) and from a stale-resume
+            # re-aggregation, all three of which present as delta == 0.0 exactly.
+            n_changed = int((splice_full != x16).any(dim=-1).sum().item())
+            max_abs = float((splice_full.float() - x16.float()).abs().max().item())
+            logger.info(
+                f"note {note_idx} target {j}: intervention changed "
+                f"{n_changed}/{splice_full.shape[1]} positions, max|delta_x| = {max_abs:.4g}"
+            )
+            if n_changed == 0:
+                raise RuntimeError(
+                    f"target {j}: the spliced activation is identical to the clean one "
+                    f"(max|delta_x| = {max_abs:.4g}). The projection removed nothing — "
+                    "check that W_dec[j] is non-zero and unit-norm."
+                )
+            _first_target_check = False
+        splice.splice_tensor = splice_full
         with torch.no_grad():
             out_abl = model(input_ids=input_ids, attention_mask=attn_mask, use_cache=False)
         loss_abl = cross_entropy_in_window(out_abl.logits, input_ids, window_mask)
@@ -1506,6 +1586,7 @@ def run_ablation(
             layer_dtype=layer_dtype,
             intervention=config.intervention,
             mean_acts=mean_acts,
+            directional_ablation=config.directional_ablation,
             measure_sections=config.measure_sections,
             section_headers=config.section_headers,
         )
@@ -1559,6 +1640,8 @@ def run_ablation(
         "mean_loss_recon": float(stats_df["mean_loss_recon"].mean()),
         "mean_recon_tax": float(stats_df["mean_recon_tax"].mean()),
         "intervention": config.intervention,
+        "directional_ablation": config.directional_ablation,
+        "baseline": "clean" if config.directional_ablation else "recon",
         "config": asdict(config),
     }
     # Section-local coverage (#5): how many notes had a discharge-diagnosis

@@ -1,0 +1,30 @@
+{
+  "method": "eigh",
+  "seed": 0,
+  "ridge": 1e-06,
+  "k": 18432,
+  "d_model": 2304,
+  "normalized": true,
+  "n_negative_eigenvalues": 0,
+  "min_eigenvalue": 0.19966080002456785,
+  "max_eigenvalue": 4313.7602242603025,
+  "condition_number": 21605.443951589412,
+  "effective_rank": 2304,
+  "sigma_provenance": {
+    "shards_used": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "n_sigma_tokens": 1986733,
+    "n_token_sample": 250000,
+    "d_model": 2304,
+    "trace": 30187.6020817216,
+    "mean_variance": 13.102257847969446,
+    "max_variance": 3950.1814647463952,
+    "min_variance": 4.977941204228248,
+    "mean_abs_offdiag": 0.5124413884024623
+  },
+  "activations_dir": "/out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered"
+}

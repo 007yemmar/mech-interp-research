@@ -1,0 +1,151 @@
+# Causal ablation FULL RUN — PCA directions, directional ablation.
+# All 4,911 held-out notes, 10 grounded + 2 screened controls.
+#
+# The unsupervised, non-sparse arm of the Tier-1 quartet
+# (docs/causal_ablation_positioning.md §3.2). Completes the consolidated paper
+# table §11.4 alongside the two domain SAEs, GemmaScope, diff-in-means and
+# random-matched. §13.6 answers PCA correlationally (peak |r| 0.441, exactly 1
+# component above |r| 0.3); this answers it causally.
+#
+# See configs/ablation_smoke_pca.yaml for the full rationale, the
+# --directional selection requirement, and the theta sign-inversion in
+# import_direction_source.py that makes the default screen unusable here.
+# Run that smoke config first and confirm mean_recon_tax == 0.0 exactly.
+#
+# BASELINE: delta = l_abl - l_clean, NOT l_abl - l_recon (no reconstruction
+# step). mean_recon_tax = 0.0 by construction. Absolute nats are NOT comparable
+# with the SAE arms (vanilla/jumprelu/gemmascope), which carry their own
+# reconstruction tax; they ARE comparable with random_matched_full and
+# diff_in_means_full, which share the l_clean baseline. Cliff's delta is the
+# quantity comparable across every arm.
+#
+# WHERE THIS ROW WILL SIT. Its top-10 spans |r| 0.220-0.425, against
+# random-matched's 0.309-0.432 and the domain SAEs' 0.80-0.86. §11.4's
+# best-vs-best caveat therefore applies with full force: each arm contributes
+# its own top-10, so a delta gap between rows is not attributable to
+# architecture alone. Carry the |r| column.
+#
+# CONTROLS ARE GENUINE NULLS HERE — unlike diff-in-means. PCA offers 619
+# components with max|r| < 0.05 and 1,504 in [0.05, 0.10], so both control
+# kinds are drawn from real pools rather than being the weakest label-built
+# survivors (contrast configs/ablation_full_diff_in_means.yaml, where k=46
+# leaves no uncorrelated direction at all).
+#
+# Expected runtime: ~4.5 h on A100-40GB (1 + 12x0.38 = 5.56 forward units/note
+# x 4,911 notes), matching random_matched_full.
+#
+# Run:
+#   MODAL_GPU=A100-40GB modal run --detach modal_app/ablation.py \
+#       --config-file configs/ablation_full_pca.yaml
+
+# --- Source identity (pseudo-SAE; only W_dec columns are used) -------------
+sae_name: pca_full
+sae_checkpoint_dir: /out/sources/pca_note
+sae_hf_repo_id: null
+sae_hf_filename: null
+is_centered: true
+
+# --- Intervention ----------------------------------------------------------
+directional_ablation: true
+intervention: zero
+mean_act_path: null
+mean_act_n_shards: 2
+mean_act_max_tokens: 100000
+
+# --- Activations / model ---------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (10 grounded + 1 random_control + 1 low_r_control) ------------
+# From: modal run scripts/select_ablation_targets.py \
+#           --source-dir /out/sources/pca_note \
+#           --audit-dir /out/necessity/pca/seed0/audit_note_matched \
+#           --n-grounded 10 --directional
+# (screened on 80 notes from shard 281; all kept targets argmax_row0 = 0.00).
+#
+# PC19 (r = +0.266, the #3 correlate) was DROPPED at argmax_row0 = 0.54 — its
+# max-pooled value lands on <bos> in 54% of notes, so its grounding is a BOS
+# artifact (docs/2026-08-29-bos-contamination-audit.md). This is the only
+# component the screen rejected, and it is the reason the screen exists.
+#
+# Skew toward icd9_4280 (3/10) and icd9_5849 / icd9_V5867 (2 each) is the
+# natural consequence of top-by-|r| selection, same as vanilla_pilot's
+# icd9_2449 skew and random_matched_full's icd9_4280 skew.
+targets:
+  - feature_idx: 108
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.4254
+  - feature_idx: 105
+    code: icd9_V4986
+    kind: grounded
+    r_pb: 0.2816
+  - feature_idx: 8
+    code: icd9_5849
+    kind: grounded
+    r_pb: 0.2422
+  - feature_idx: 128
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.2349
+  - feature_idx: 24
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.2297
+  - feature_idx: 3
+    code: icd9_5849
+    kind: grounded
+    r_pb: 0.2241
+  - feature_idx: 203
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.2207
+  - feature_idx: 37
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.2206
+  - feature_idx: 74
+    code: icd9_5990
+    kind: grounded
+    r_pb: 0.2201
+  - feature_idx: 132
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.2199
+  - feature_idx: 1316
+    code: icd9_V1582
+    kind: random_control
+    r_pb: 0.049
+  - feature_idx: 345
+    code: icd9_5849
+    kind: low_r_control
+    r_pb: 0.0778
+
+# --- Forward / measurement (identical to every other arm) -----------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: null  # full held-out set (~4,911 notes)
+
+# --- Output (FRESH directory; do NOT collide with the smoke run) -----------
+output_dir: /out/ablation/pca_full
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

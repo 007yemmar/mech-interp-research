@@ -1,0 +1,138 @@
+# Causal ablation FULL RUN — random-matched directions, directional ablation.
+# All 4,911 held-out notes, 10 grounded + 2 screened controls.
+#
+# Full-scale follow-up to ablation_smoke_random_matched.yaml, which confirmed
+# the directional-ablation fix: mean_loss_recon == mean_loss_clean exactly,
+# mean_recon_tax == 0.0, and Cliff's delta came back non-degenerate (not the
+# 0.0-exactly bug from the splice.mode regression). See .tmp/ablation_handoff.md
+# §4 for the failure history and §3.1 for why this arm uses directional
+# ablation (x' = x - (x.d)d) instead of the SAE reconstruction protocol.
+#
+# BASELINE: delta = l_abl - l_clean, NOT l_abl - l_recon (no reconstruction
+# step). mean_recon_tax = 0.0 by construction. Absolute nats are NOT
+# comparable with the SAE arms (vanilla/jumprelu/gemmascope), which carry
+# their own reconstruction tax. Cliff's delta is the comparable quantity
+# across arms (within-arm rank contrast; a per-arm baseline offset cancels).
+#
+# TARGETS BELOW ARE A PLACEHOLDER. Run target selection first:
+#
+#   modal run scripts/select_ablation_targets.py \
+#       --source-dir /out/sources/random_matched_note \
+#       --audit-dir /out/necessity/random_matched/seed0/audit_note_matched \
+#       --n-grounded 10
+#
+# This screens candidates for row-0/BOS-only firing (a direction whose
+# grounding rests entirely on <bos> is not meaningfully ablatable — see
+# docs/2026-08-29-bos-contamination-audit.md) and prints a ready-to-paste
+# `targets:` block. Replace the block below with that output, then run:
+#
+#   MODAL_GPU=A100-40GB modal run --detach modal_app/ablation.py \
+#       --config-file configs/ablation_full_random_matched.yaml
+#
+# Expected runtime: ~4.5 h on A100-40GB (1 + 12x0.38 = 5.56 forward units/note
+# x 4,911 notes -- cheaper per-target than the SAE reconstruction protocol
+# because there is no un-ablated reconstruction pass to run separately).
+
+# --- Source identity (pseudo-SAE; only W_dec columns are used) -------------
+sae_name: random_matched_full
+sae_checkpoint_dir: /out/sources/random_matched_note
+sae_hf_repo_id: null
+sae_hf_filename: null
+is_centered: true
+
+# --- Intervention ------------------------------------------------------------
+directional_ablation: true
+intervention: zero
+mean_act_path: null
+mean_act_n_shards: 2
+mean_act_max_tokens: 100000
+
+# --- Activations / model -----------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -----------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (10 grounded + 1 random_control + 1 low_r_control) ------------
+# From select_ablation_targets.py --source-dir /out/sources/random_matched_note
+# --audit-dir /out/necessity/random_matched/seed0/audit_note_matched --n-grounded 10
+# (screened on 80 notes from shard 281; all row0only=0.00). Skewed toward
+# icd9_4280 (8/10) -- the natural consequence of top-by-|r| selection, same
+# as the vanilla SAE pilot's skew toward icd9_2449 (see
+# configs/ablation_pilot_vanilla.yaml).
+targets:
+  - feature_idx: 14681
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.4322
+  - feature_idx: 11717
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3618
+  - feature_idx: 3955
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3614
+  - feature_idx: 12514
+    code: icd9_42731
+    kind: grounded
+    r_pb: 0.337
+  - feature_idx: 10957
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.326
+  - feature_idx: 12172
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3239
+  - feature_idx: 12543
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3192
+  - feature_idx: 9111
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3183
+  - feature_idx: 18042
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.309
+  - feature_idx: 13813
+    code: icd9_25000
+    kind: grounded
+    r_pb: 0.3086
+  - feature_idx: 7984
+    code: icd9_V1582
+    kind: random_control
+    r_pb: 0.0443
+  - feature_idx: 3273
+    code: icd9_5849
+    kind: low_r_control
+    r_pb: 0.0983
+
+# --- Forward / measurement (identical to the SAE arms) ---------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: null  # full held-out set (~4911 notes)
+
+# --- Output (FRESH directory; do NOT collide with the smoke run) -----------
+output_dir: /out/ablation/random_matched_full
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc --------------------------------------------------------------------
+seed: 42
+logging_level: INFO

@@ -2,7 +2,7 @@
 #
 # No GPU, no forward passes — reads shard_results/*.json + ablation_summary.json
 # already on the volume and writes CSVs + a summary JSON to
-# /out/ablation/jumprelu_pilot/posthoc_specificity/.
+# ${jumprelu_ablation}/posthoc_specificity/.
 #
 #   #2 off-target ICD specificity   (on-target vs off-target Cliff's delta)
 #   #3 length/#codes-matched effect (delta residualized on n_tokens + #codes)
@@ -12,7 +12,7 @@
 #   modal run modal_app/ablation_posthoc.py --config-file configs/ablation_posthoc_jumprelu.yaml
 
 # Ablation run to analyse (must contain ablation_summary.json + shard_results/).
-ablation_output_dir: /out/ablation/jumprelu_pilot
+ablation_output_dir: ${jumprelu_ablation}
 
 # Same ICD CSV + activation metadata the ablation run used (for the label join
 # and held-out shard enumeration). All 46 codes are aligned (no prevalence

@@ -19,6 +19,7 @@ import json
 import os
 from typing import Any
 
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, image, raw_volume
 
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "16"))
@@ -50,10 +51,7 @@ def run_probe_directions_remote(config: dict[str, Any]) -> dict[str, Any]:
 
 @app.local_entrypoint()
 def main(config_file: str, detach: bool = False) -> None:
-    import yaml
-
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     if detach:
         call = run_probe_directions_remote.spawn(config)

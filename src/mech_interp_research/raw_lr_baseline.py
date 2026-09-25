@@ -160,6 +160,7 @@ def pool_raw_activations(
     metadata: pd.DataFrame,
     pooling: PoolingStrategy = "max",
     topk: int = 10,
+    skip_first_token: bool = False,
     shard_filter: list[int] | None = None,
     checkpoint_dir: str | Path | None = None,
     on_shard_complete: Callable[[int], None] | None = None,
@@ -174,6 +175,16 @@ def pool_raw_activations(
     ``reassemble_note_vectors`` works unchanged.
 
     Output dtype: float32. Resumable via ``checkpoint_dir``.
+
+    ``skip_first_token`` drops row 0 of every note: Gemma's <bos>, whose
+    layer-16 residual carries ~15.6x the norm of a typical token. Pooling is a
+    max, so an included BOS makes the note value max(c_j, real_max) -- a FLOOR
+    at the direction's BOS activation. That is not harmless: it shrinks the
+    pos/neg mean gap but also collapses within-negative variance, and
+    point-biserial is (M1-M0)/sigma, so it can INFLATE r rather than attenuate
+    it. On the constructed sources, 12 of 22 diff-in-means candidates cleared
+    threshold at BOS and nowhere else. Defaults False so existing artifacts
+    stay reproducible.
     """
     activations_dir = Path(activations_dir)
     if shard_filter is not None:
@@ -239,7 +250,7 @@ def pool_raw_activations(
             row_start = int(note_row["row_start"])
             row_end = int(note_row["row_end"])
 
-            note_acts = shard_activations[row_start:row_end]
+            note_acts = shard_activations[row_start + (1 if skip_first_token else 0) : row_end]
             if note_acts.shape[0] == 0:
                 logger.warning(
                     f"Empty activation slice for note_idx={note_row['note_idx']}, "
@@ -309,6 +320,7 @@ def run_raw_lr_baseline(
     output_dir: str | Path,
     pooling: PoolingStrategy = "max",
     topk: int = 10,
+    skip_first_token: bool = False,
     shard_filter: list[int] | None = None,
     checkpoint_dir: str | Path | None = None,
     on_shard_complete: Callable[[int], None] | None = None,
@@ -411,6 +423,7 @@ def run_raw_lr_baseline(
     # ------------------------------------------------------------------
     logger.info("Step 2: Pooling raw centered activations to note level...")
     pool_raw_activations(
+        skip_first_token=skip_first_token,
         activations_dir=activations_dir,
         metadata=metadata,
         pooling=pooling,

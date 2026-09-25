@@ -34,8 +34,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from mech_interp_research.config_vars import load_config
 from modal_app.app import app, artifacts_volume, hf_secret, image, raw_volume
 
 DEFAULT_CPU = int(os.environ.get("MODAL_CPU", "8"))
@@ -984,8 +983,7 @@ def main(config_file: str, detach: bool = False) -> None:
         uv run modal run modal_app/build_feature_source.py --config-file configs/source_diff_in_means.yaml
         uv run modal run modal_app/build_feature_source.py --config-file configs/source_keyword_b1.yaml --detach
     """
-    with open(config_file, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = load_config(config_file)
 
     print(
         f"Dispatching build_feature_source: arm={config.get('arm')} -> {config.get('output_dir')}"

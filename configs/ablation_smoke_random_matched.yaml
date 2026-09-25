@@ -1,0 +1,141 @@
+# Causal ablation SMOKE — RANDOM-MATCHED directions, DIRECTIONAL ablation.
+# 250 notes, 4 targets. ~10 min compute + container cold start, so 15-20 min
+# wall-clock on A100-40GB. Cheaper than the reconstruction protocol because
+# there is no un-ablated reconstruction pass: 1 + 4x0.38 = 2.52 forward units
+# per note, against 1 + 0.38 + 4x0.38 = 2.90.
+#
+# WHY THIS WAS REWRITTEN
+#
+# The first two attempts ran the SAE reconstruction protocol on a pseudo-SAE and
+# failed for the same underlying reason both times:
+#   - random_matched: mean_loss_recon = NaN. decode(z) sums 18,432 direction
+#     contributions; at BOS that reaches max|x_hat| = 2.1e6 against fp16's
+#     65,504, overflows on the splice cast, and NaNs every note.
+#   - dim_full:       mean_recon_tax = 7.47 nats, 4.6x the base loss. 46 unit
+#     directions cannot reconstruct a 2304-dim residual. Cliff's delta came back
+#     -0.210 grounded / -0.288 controls: noise on a destroyed baseline.
+#
+# Both are symptoms of one error: write_pseudo_sae makes these sources LOADABLE
+# by ablation.py, which is not the same as ABLATABLE by it. The reconstruction
+# protocol assumes decode(z) is a faithful x. A trained SAE earns that (EV ~0.90,
+# tax 0.029 nats). A random dictionary and a 46-direction label-supervised set
+# never can.
+#
+# THE CORRECT INTERVENTION FOR A DIRECTION
+#
+#     x' = x - (x . d) d        d unit-norm      (intervention: zero)
+#
+# i.e. project the direction out of the raw residual stream. This is Arditi et
+# al. (NeurIPS 2024) directional ablation; the same projection underlies amnesic
+# probing (Elazar et al., TACL 2021) and INLP (Ravfogel et al., 2020). It is the
+# standard method for a direction rather than a dictionary feature, and it
+# dissolves all four failure modes at once:
+#   - no reconstruction        -> no 7.47-nat baseline
+#   - one direction subtracted -> ||x'|| <= ||x||, so no fp16 overflow ever
+#   - no threshold gating      -> the note-level tau is not misused as a
+#                                 token-level firing rule
+#   - controls well-defined    -> "project out a random direction"
+#
+# BASELINE CHANGE — read before comparing anything
+# There is no reconstruction, so delta = l_abl - l_clean, not l_abl - l_recon.
+# mean_recon_tax will be 0.0 by construction and the summary records
+# baseline: "clean". Absolute nats are therefore NOT comparable with the SAE
+# arms, which carry 0.029 nats of reconstruction distortion. Cliff's delta IS
+# comparable: it is a positive-vs-negative rank contrast computed within an arm,
+# so a per-arm baseline offset cancels.
+#
+# intervention: zero here, not mean. Zero-projection is exactly Arditi's
+# operator and needs no m_j. The out-of-distribution objection that motivated
+# mean-ablation for the SAE is much weaker for a projection: removing one
+# component leaves the vector in the span of everything else, rather than
+# clamping a latent to a value it never takes. mean-projection is implemented
+# (intervention: mean) if the robustness check is wanted later.
+#
+# WHAT GOOD LOOKS LIKE
+#   1. mean_loss_recon == mean_loss_clean and mean_recon_tax == 0.0 exactly.
+#      Anything else means the directional branch did not run.
+#   2. "directional_ablation": true and "baseline": "clean" in the summary.
+#   3. No NaN anywhere.
+#   4. Grounded deltas positive-ish, controls near zero. DIRECTIONAL ONLY at
+#      n=250 -- do not read the effect sizes.
+#
+# Run:
+#   MODAL_GPU=A100-40GB modal run modal_app/ablation.py \
+#       --config-file configs/ablation_smoke_random_matched.yaml
+
+# --- Source identity (pseudo-SAE; only W_dec columns are used) -------------
+sae_name: random_matched_smoke
+sae_checkpoint_dir: /out/sources/random_matched_note
+sae_hf_repo_id: null
+sae_hf_filename: null
+is_centered: true
+
+# --- Intervention ----------------------------------------------------------
+directional_ablation: true
+intervention: zero
+mean_act_path: null
+mean_act_n_shards: 2
+mean_act_max_tokens: 100000
+
+# --- Activations / model ---------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets ---------------------------------------------------------------
+# Screened by scripts/select_ablation_targets.py (80 notes, shard 281): both
+# grounded targets fire on non-row-0 tokens (row0-only = 0.00), and both
+# controls were verified rather than picked blind -- three of four hand-picked
+# controls in the first attempt turned out to be row-0-only.
+#
+# Note: row0-only screening still matters for TARGET SELECTION even though
+# directional ablation no longer gates on tau -- a direction whose grounding
+# rests on BOS is measuring a constant regardless of how it is ablated.
+targets:
+  - feature_idx: 14681
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.4322
+  - feature_idx: 11717
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3618
+  - feature_idx: 7984
+    code: icd9_V1582
+    kind: random_control
+    r_pb: 0.0443
+  - feature_idx: 3273
+    code: icd9_5849
+    kind: low_r_control
+    r_pb: 0.0983
+
+# --- Forward / measurement (identical to the SAE arms) ---------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: 250
+
+# --- Output ----------------------------------------------------------------
+# Fresh dir each attempt: run_ablation resumes by skipping shards that already
+# have shard_*_results.json, so re-running into a used dir re-aggregates the
+# OLD per-note results and reproduces the previous summary exactly.
+output_dir: /out/ablation/random_matched_smoke_dir2
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc ------------------------------------------------------------------
+seed: 42
+logging_level: INFO

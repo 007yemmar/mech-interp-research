@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+
+from mech_interp_research.config import layer_tag_from_activations_dir
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,31 @@ class JumpReLUConfig:
         gradient signal pushing its threshold down until it does fire (from the L0 penalty
         on the sparsity path). Explicit resampling is therefore not needed, unlike the
         vanilla ReLU SAE where dead features are permanently stuck at zero.
+
+    Warmup-stable-decay schedule instead of eval-driven early stopping
+        The vanilla SAE picks a checkpoint: it evaluates explained variance, keeps the
+        best-scoring one in best/, and stops once EV has not improved for a few evals.
+        That rule is a poor fit here. JumpReLU's thresholds keep moving throughout
+        training, so EV can improve purely because L0 drifted upward — a less sparse
+        dictionary reconstructs better — and an EV-selected checkpoint can sit well off
+        the sparsity target the whole calibration workflow exists to hit.
+
+        This config instead follows standard JumpReLU practice: hold a constant peak
+        learning rate, then decay it linearly to zero over the final stretch and take
+        the end state. The held-out criterion is the training objective itself,
+        MSE + lambda_l0 * L0, and it is used only to decide *when* to begin decaying:
+
+            warmup   0 .. lr_warmup_steps        lr 0 -> peak, lambda_l0 0 -> target
+            stable   .. T                        lr at peak
+            decay    T .. (1 + decay_fraction)*T lr peak -> 0, then stop
+
+        T is the step at which the held-out objective plateaus (no improvement beyond
+        plateau_min_delta for plateau_patience_steps, detector armed no earlier than
+        min_trigger_step), or the n_epochs cap if no plateau occurs first. At the
+        default decay_fraction of 0.25 the decay phase is the last 20% of the run.
+
+        Because the decayed end state is the model this schedule is designed to
+        produce, there is no best/ checkpoint: final/ is the one to use.
     """
 
     # ----------------------------------------------------------------- data
@@ -77,9 +105,42 @@ class JumpReLUConfig:
     lr: float = 2e-4
     # adam_beta1=0.0: no momentum — same rationale as vanilla SAE (Gemma Scope practice).
     adam_beta1: float = 0.0
+    adam_beta2: float = 0.999
     train_batch_size_tokens: int = 4096
+    # Cap on passes over the training split. Reaching it is the fallback trigger for
+    # the decay phase, so the run ends at (1 + decay_fraction) x the cap step rather
+    # than at the cap itself.
     n_epochs: int = 3
     lr_warmup_steps: int = 2_000
+
+    # ------------------------------------------------------- held-out evaluation
+    # Last N shards are reserved for evaluation and never seen by training.
+    eval_n_shards: int = 31
+    eval_every_n_steps: int = 2_500
+    # First step at which a held-out eval runs. None resolves to
+    # max(lambda_l0_warmup_steps, min_trigger_step - plateau_patience_steps), i.e.
+    # just early enough for the plateau detector to hold a full window the moment it
+    # arms. Evaluating earlier than that costs a full pass over the eval split per
+    # eval and tells us nothing the per-step training log does not already show.
+    eval_start_step: int | None = None
+
+    # ------------------------------------------------------- decay-phase trigger
+    # Earliest step at which a plateau may end the stable phase. None resolves to one
+    # epoch. The floor exists because MSE + lambda_l0 * L0 can sit flat for thousands
+    # of steps while thresholds reorganise, and an early false plateau would truncate
+    # the run to a fraction of its budget.
+    min_trigger_step: int | None = None
+    # Steps without a meaningful improvement before the stable phase ends. Expressed
+    # in steps rather than a count of evals so that changing eval_every_n_steps does
+    # not silently change how long a plateau must last.
+    plateau_patience_steps: int = 10_000
+    # Relative improvement required to count: a new loss must beat the best so far by
+    # this fraction. Relative rather than absolute because the loss scale depends on
+    # d_in and lambda_l0.
+    plateau_min_delta: float = 1e-3
+    # Decay length as a fraction of the trigger step T. 0.25 puts the decay phase in
+    # the final 20% of the run: 0.25T of (1.25)T.
+    decay_fraction: float = 0.25
 
     # --------------------------------------------------------------- output
     output_root: str = "/out/saes"
@@ -108,11 +169,26 @@ class JumpReLUConfig:
         """Dictionary width = d_in × expansion_factor."""
         return self.d_in * self.expansion_factor
 
+    @classmethod
+    def from_dict(cls, d: dict) -> JumpReLUConfig:
+        """Construct from a dict, dropping unknown keys with a warning.
+
+        Use this instead of JumpReLUConfig(**d) whenever the dict comes from a YAML
+        file. A hand-edited config that carries a stale or misspelled key then loads
+        with a visible warning rather than dying with a TypeError halfway through a
+        Modal dispatch.
+        """
+        valid = {f.name for f in dataclasses.fields(cls)}
+        unknown = set(d) - valid
+        if unknown:
+            print(f"WARNING: dropping unknown JumpReLU config keys: {sorted(unknown)}")
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
 
 def load_jumprelu_config(path: str | Path) -> JumpReLUConfig:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    return JumpReLUConfig(**data)
+    return JumpReLUConfig.from_dict(data)
 
 
 def save_jumprelu_config(config: JumpReLUConfig, path: str | Path) -> None:
@@ -121,9 +197,18 @@ def save_jumprelu_config(config: JumpReLUConfig, path: str | Path) -> None:
 
 
 def make_jumprelu_run_id(config: JumpReLUConfig) -> str:
-    """Build a collision-free run ID encoding key hyperparameters."""
+    """Build a collision-free run ID encoding key hyperparameters.
+
+    Layer and seed are in the name because two runs differing only in those are
+    otherwise separated by nothing but a UTC timestamp, while every downstream
+    config (icd_eval, feature_inspector, auto_interp, the necessity sources)
+    refers to these directories as literal path strings. A seed-replication or
+    layer-sweep run is exactly the case where that ambiguity costs a result.
+    """
     utc = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return (
-        f"jumprelu_d{config.d_in}_e{config.expansion_factor}"
-        f"_l0{config.lambda_l0:.0e}_bw{config.bandwidth:.0e}_{utc}"
+        f"jumprelu_{layer_tag_from_activations_dir(config.activations_dir)}"
+        f"_d{config.d_in}_e{config.expansion_factor}"
+        f"_l0{config.lambda_l0:.0e}_bw{config.bandwidth:.0e}"
+        f"_s{config.seed}_{utc}"
     )

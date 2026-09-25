@@ -35,22 +35,18 @@ icd_csv_path: /data/sample_50k.csv
 # across the vanilla, JumpReLU and GemmaScope eval dirs, so this path is a
 # provenance choice, not a numerical one. Same file configs/random_matched.yaml
 # pins, so the SAE rows and the random rows are on one panel.
-code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+code_names_json: ${vanilla_eval}/code_names.json
 
-output_dir: /out/necessity/sae_audit
+output_dir: ${necessity_audit}
 
 # --- the split, held for every source --------------------------------------
 # Selection: shards 0-30 (5,001 notes). Audit: shards 281-311 (4,911 notes) --
 # the held-out notes behind every section-4 number, and the same range the
 # random-matched arms were audited on.
 #
-# NOTE on what "held out" means per SAE: vanilla was trained with
-# eval_n_shards=31 so 281-311 are genuinely unseen; JumpReLU's 50k config did
-# not pass eval_n_shards, so it saw all 312 shards (see
-# configs/test_split_eval_jumprelu.yaml); GemmaScope saw none of them. That is
-# a pre-existing property of the checkpoints and is orthogonal to the bias this
-# split removes -- labels were never used in SAE training, so the selection
-# split is doing its job for all three regardless.
+# Both trained SAEs hold out shards 281-311 (eval_n_shards=31); GemmaScope saw
+# none of these notes at all. Independently of that, labels are never used in SAE
+# training, which is the bias this selection split exists to remove.
 select_shard_start: 0
 select_shard_end: 31
 audit_shard_start: 281
@@ -80,10 +76,10 @@ audit_config:
 # per-note latents, so both splits come from the one directory.
 sources:
   - name: sae_vanilla
-    checkpoint_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/shard_ckpt
+    checkpoint_dir: ${vanilla_eval}/shard_ckpt
 
   - name: sae_jumprelu
-    checkpoint_dir: /out/icd_eval/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/shard_ckpt
+    checkpoint_dir: ${jumprelu_eval}/shard_ckpt
 
   # k = 16,384 rather than 18,432. The best-of-k selection advantage is
   # therefore marginally smaller here; that is the real dictionary size and is

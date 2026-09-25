@@ -1,0 +1,152 @@
+# Causal ablation FULL RUN — difference-in-means directions, directional ablation.
+# All 4,911 held-out notes, 10 grounded targets.
+#
+# Full-scale follow-up to ablation_smoke_diff_in_means.yaml, which confirmed
+# the directional-ablation protocol on this source: mean_loss_recon ==
+# mean_loss_clean exactly, mean_recon_tax == 0.0, Cliff's delta non-zero and
+# non-identical across all 4 targets (0.085, 0.103, -0.065, 0.104). See
+# .tmp/ablation_handoff.md and docs/causal_ablation_positioning.md,
+# "Most valuable experiments" §2/§3 for the full writeup and the random-
+# matched arm's results this one is compared against.
+#
+# CONTROLS ARE WEAK, NOT NULL -- read this before comparing off-floor counts
+# across arms. select_ablation_targets.py's strict null pools for this source
+# are both empty (max|r|<0.05: 0 candidates; |r| in [0.05,0.10]: 0) -- every
+# one of the 46 diff-in-means directions is label-constructed and therefore
+# correlates with SOME code by construction. Unlike random_matched (18,432
+# candidates, ample max|r|<0.05 pool), there is no direction here that is
+# unrelated to every code.
+#
+# The 2 controls below (feature_idx 15, 44) are instead the LOWEST-|r|
+# directions, among all 46, that survive the row0-only screen -- found by
+# re-running select_ablation_targets.py with --n-grounded 46 to screen past
+# the top 10 (only 21/46 directions clear the screen at all; feature_idx 33
+# and 42, the smoke config's original stand-in controls, turned out to be
+# ranks 9-10, i.e. already inside this run's top-10 grounded set). r_pb =
+# 0.198 and 0.194 -- weaker than every grounded target (0.386-0.699) but not
+# a genuine "uncorrelated with anything" null the way random_matched's
+# controls are. This is a structural property of the source (k=46, one
+# direction per code, fully saturated across the panel), not a selection
+# choice, and should be reported as such when comparing this arm's
+# specificity numbers against random_matched's or the SAE's.
+#
+# BASELINE: delta = l_abl - l_clean, NOT l_abl - l_recon (no reconstruction
+# step; directional_ablation: true). mean_recon_tax = 0.0 by construction.
+# Absolute nats are NOT comparable with the SAE arms or with random_matched
+# in isolation -- Cliff's delta is the comparable quantity across arms.
+#
+# Targets: from
+#   modal run scripts/select_ablation_targets.py \
+#       --source-dir /out/sources/dim_full \
+#       --audit-dir /out/necessity/direction_audit/diff_in_means_full \
+#       --n-grounded 46   # forces screening past the top 10 to find controls
+# Only 21/46 directions survive the row0-only screen at all; the rest are
+# dropped at row0-only=1.00 -- their grounding sits entirely on the BOS token,
+# see docs/2026-08-29-bos-contamination-audit.md. Grounded = top 10 by |r|
+# among survivors; low_r_control = the 2 lowest-|r| survivors (0.198, 0.194),
+# distinct from the grounded set. Two codes appear twice in the top-10
+# (icd9_V5867, icd9_V4581), the natural consequence of top-|r| selection over
+# only 46 directions, same pattern as vanilla_pilot's icd9_2449 skew.
+#
+# Run:
+#   MODAL_GPU=A100-40GB modal run --detach modal_app/ablation.py \
+#       --config-file configs/ablation_full_diff_in_means.yaml
+
+# --- Source identity (pseudo-SAE; only W_dec columns are used) -------------
+sae_name: diff_in_means_full
+sae_checkpoint_dir: /out/sources/dim_full
+sae_hf_repo_id: null
+sae_hf_filename: null
+is_centered: true
+
+# --- Intervention ------------------------------------------------------------
+directional_ablation: true
+intervention: zero
+mean_act_path: null
+mean_act_n_shards: 2
+mean_act_max_tokens: 100000
+
+# --- Activations / model -----------------------------------------------------
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+mean_path: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered/mean.pt
+centered_activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+model_name: google/gemma-2-2b
+layer: 16
+
+# --- Held-out shards -----------------------------------------------------------
+held_out_shard_start: 281
+held_out_shard_end: 312
+
+# --- ICD label join --------------------------------------------------------
+icd_csv_path: /data/sample_50k.csv
+join_key: admission_id
+text_col: note_text
+icd_col_prefix: "icd9_"
+
+# --- Targets (10 grounded + 2 low_r_control -- see note above on why the ---
+# --- controls are weak rather than a genuine null) --------------------------
+targets:
+  - feature_idx: 43
+    code: icd9_5856
+    kind: grounded
+    r_pb: 0.6987
+  - feature_idx: 10
+    code: icd9_2449
+    kind: grounded
+    r_pb: 0.5463
+  - feature_idx: 18
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.4888
+  - feature_idx: 32
+    code: icd9_2749
+    kind: grounded
+    r_pb: 0.464
+  - feature_idx: 35
+    code: icd9_2851
+    kind: grounded
+    r_pb: 0.457
+  - feature_idx: 27
+    code: icd9_V4581
+    kind: grounded
+    r_pb: 0.4234
+  - feature_idx: 11
+    code: icd9_40390
+    kind: grounded
+    r_pb: 0.4124
+  - feature_idx: 19
+    code: icd9_4280
+    kind: grounded
+    r_pb: 0.3994
+  - feature_idx: 42
+    code: icd9_V5867
+    kind: grounded
+    r_pb: 0.3953
+  - feature_idx: 33
+    code: icd9_V4581
+    kind: grounded
+    r_pb: 0.3864
+  - feature_idx: 15
+    code: icd9_4019
+    kind: low_r_control
+    r_pb: 0.198
+  - feature_idx: 44
+    code: icd9_42789
+    kind: low_r_control
+    r_pb: 0.1943
+
+# --- Forward / measurement (identical to the SAE arms) ---------------------
+max_length: 8192
+loss_window_frac: 0.25
+min_loss_window_tokens: 32
+batch_size: 1
+max_notes: null  # full held-out set (~4911 notes)
+
+# --- Output (FRESH directory; do NOT collide with the smoke run) -----------
+output_dir: /out/ablation/diff_in_means_full
+shard_checkpoint_subdir: shard_results
+save_per_note_records: true
+
+# --- Misc --------------------------------------------------------------------
+seed: 42
+logging_level: INFO

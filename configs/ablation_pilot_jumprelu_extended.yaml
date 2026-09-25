@@ -22,21 +22,18 @@
 #   icd9_60000 (BPH)                 : 1 (8668)
 #   icd9_V4581 (cardiac stent)       : 1 (18177)
 #
-# CAVEAT (G14): same held-out contamination note as the base pilot — shards
-# 281-311 were in JumpReLU's training set. Document in writeup.
-#
 # Expected runtime: ~5 h on A100-40GB (22 forwards/note x 4911 notes).
 #
 # Run (detached, resumable):
 #   modal run --detach modal_app/ablation.py --config-file configs/ablation_pilot_jumprelu_extended.yaml --detach
 #
 # Resume: re-running the same command picks up from the last completed shard.
-# Per-shard JSONs land in /out/ablation/jumprelu_pilot_extended/shard_results/.
+# Per-shard JSONs land in ${jumprelu_ablation_extended}/shard_results/.
 
 # --- SAE identity ----------------------------------------------------------
 sae_name: jumprelu_pilot_extended
 
-sae_checkpoint_dir: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00036000
+sae_checkpoint_dir: ${jumprelu_ckpt}
 sae_hf_repo_id: null
 sae_hf_filename: null
 is_centered: true
@@ -150,7 +147,7 @@ batch_size: 1
 max_notes: null  # full held-out set
 
 # --- Output (FRESH dir; do NOT collide with jumprelu_pilot) ----------------
-output_dir: /out/ablation/jumprelu_pilot_extended
+output_dir: ${jumprelu_ablation_extended}
 shard_checkpoint_subdir: shard_results
 save_per_note_records: true
 

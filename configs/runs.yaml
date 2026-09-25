@@ -1,0 +1,52 @@
+# Central run registry.
+#
+# Every config in this directory refers to a trained SAE through a ${variable}
+# defined here rather than by writing the run id inline. Retraining an SAE is then
+# a one-line edit in this file instead of a rename across ~35 configs.
+#
+# How to update after a retrain:
+#   1. Read the new run id off the training summary
+#        (train_summary.json -> "run_id", or `modal volume ls sae-artifacts saes/`).
+#   2. Change the *_run line below, and the checkpoint subdirectory if it moved.
+#   3. Nothing else. Every downstream output directory is derived from the run id,
+#      so the rerun writes to fresh directories.
+#
+# That last point matters: icd_eval and the baselines resume by skipping shards
+# whose checkpoint files already exist in output_dir. If a rerun's output_dir still
+# pointed at the previous run's directory, all 312 shards would be skipped and the
+# "new" results would be the old SAE's pooled vectors, with no error raised.
+# Because output_dir contains the run id, a new run cannot land in the old dir.
+#
+# Note on checkpoint subdirectories: the two SAEs differ by design.
+#   vanilla  -> best/   eval-EV-selected checkpoint
+#   jumprelu -> final/  end of the LR decay phase; this SAE writes no best/
+# The seed is part of the run id (_s42_), so seed replicates are separate runs
+# and separate directories automatically.
+
+# Ablation and necessity output directories are named by experiment, not by run id,
+# so they do NOT move on their own when a *_run line changes. They resume from
+# shard_results/ the same way icd_eval resumes from shard_ckpt/, so a rerun that
+# kept the old directory would pick up the previous SAE's per-note deltas. They are
+# listed here so that bumping a run means bumping these alongside it — append a
+# suffix (e.g. _v2) when re-running against a retrained SAE.
+
+# --- vanilla ReLU SAE ------------------------------------------------------
+vanilla_run: sae_d2304_e8_l11e+01_20260505T205723Z
+vanilla_ckpt: /out/saes/${vanilla_run}/best
+vanilla_eval: /out/icd_eval/${vanilla_run}
+vanilla_auto_interp: /out/auto_interp/${vanilla_run}
+vanilla_ablation: /out/ablation/vanilla_pilot
+vanilla_ablation_extended: /out/ablation/vanilla_pilot_extended
+
+# --- JumpReLU SAE ----------------------------------------------------------
+# Still the pre-retrain run. After the rerun, replace jumprelu_run with the new id
+# and change the jumprelu_ckpt suffix from step_00036000 to final.
+jumprelu_run: jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+jumprelu_ckpt: /out/saes/${jumprelu_run}/step_00036000
+jumprelu_eval: /out/icd_eval/${jumprelu_run}
+jumprelu_auto_interp: /out/auto_interp/${jumprelu_run}
+jumprelu_ablation: /out/ablation/jumprelu_pilot
+jumprelu_ablation_extended: /out/ablation/jumprelu_pilot_extended
+
+# --- cross-SAE ------------------------------------------------------------
+necessity_audit: /out/necessity/sae_audit

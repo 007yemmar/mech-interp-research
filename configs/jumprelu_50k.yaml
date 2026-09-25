@@ -1,9 +1,12 @@
-# JumpReLU SAE training config — 20k note full run.
+# JumpReLU SAE training config — 50k note full run.
 # Purpose: production JumpReLU SAE on Gemma-2-2b L16 MIMIC-IV activations,
 #   trained head-to-head against the vanilla ReLU SAE baseline
-#   (configs/sae_train_50k.yaml → /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/).
-# Expected training time on A100-40GB: ~4-8 hours (3 epochs, ~50k steps total —
-#   matches the vanilla full run on the same activation shards).
+#   (configs/sae_train_50k.yaml → /out/saes/sae_d2304_e8_l11e+01_20260505T205723Z/)
+#   on the same 281 training shards.
+# Expected training time on A100-40GB: ~5-10 hours. The upper end assumes no
+#   plateau, so the epoch cap triggers the decay phase and the run reaches
+#   ~129k steps (~3.75 epochs); an earlier plateau ends it sooner.
+# Artifact: final/ — the end of the LR decay. This run writes no best/.
 #
 # Prerequisites:
 #   1. Calibration run (configs/jumprelu_cal.yaml) complete with stable equilibrium
@@ -15,7 +18,7 @@
 #   MODAL_GPU=A100-40GB modal run modal_app/train_jumprelu.py \
 #     --config-file configs/jumprelu_50k.yaml
 
-resume_from: /out/saes/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/step_00026000
+resume_from: null
 
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
 
@@ -43,16 +46,43 @@ bandwidth: 1.0
 log_threshold_init: -2.0
 lambda_l0_warmup_steps: 5000
 
-# Training — mirrors configs/sae_train_50k.yaml exactly
+# Training
 lr: 0.0002
 adam_beta1: 0.0              # Gemma Scope / Anthropic practice: no momentum
+adam_beta2: 0.999
 train_batch_size_tokens: 4096
-n_epochs: 3                  # ~50k steps total over the 3-shard 20k-note extraction
 lr_warmup_steps: 2000
+# Cap on passes over the 281-shard training split (~34,300 steps each). Reaching it
+# is the fallback trigger for the decay phase rather than the end of the run, so a
+# no-plateau run ends at 1.25 x the cap: ~129k steps, ~3.75 epochs.
+n_epochs: 3
+
+# Held-out split: last 31 of 312 shards (~9.9%, ~15.5M tokens), matching
+# configs/sae_train_50k.yaml so both SAEs train on the same 281 shards.
+eval_n_shards: 31
+eval_every_n_steps: 2500
+# null → max(lambda_l0_warmup_steps, min_trigger_step - plateau_patience_steps)
+# ≈ step 24,300: late enough to skip ~7 eval passes that would tell us nothing the
+# per-100-step training log does not, early enough that the plateau detector holds a
+# full window the moment it arms.
+eval_start_step: null
+
+# Decay-phase trigger. null min_trigger_step → one epoch (~34,300 steps): the
+# held-out objective can sit flat for thousands of steps while thresholds
+# reorganise, and an early false plateau would truncate the run to a fraction of
+# its budget. Patience is in steps, not evals, so retuning eval_every_n_steps does
+# not silently change how long a plateau has to last.
+min_trigger_step: null
+plateau_patience_steps: 10000
+plateau_min_delta: 0.001     # relative: a new best must beat the old by 0.1%
+decay_fraction: 0.25         # decay is 0.25T of a 1.25T run — the final 20%
 
 # NB: no resample_steps / dead_feature_threshold fields — JumpReLU's per-feature
 # learned thresholds adapt downward for dead features automatically, so explicit
 # dead-neuron resampling is unnecessary (Rajamanoharan et al. 2024, §3.2).
+# NB: no early-stop / best-checkpoint fields either — the warmup-stable-decay
+# schedule makes the end of the decay phase the model to keep, so this run's
+# artifact is final/, not best/.
 
 # Output
 output_root: /out/saes

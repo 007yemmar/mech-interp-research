@@ -207,6 +207,13 @@ class RandomMatchedConfig:
     pooling: Literal["max"] = "max"
     target_l0: tuple[float, ...] = (JUMPRELU_MEAN_L0, VANILLA_MEAN_L0)
     note_token_chunk: int = 4096
+    # Drop row 0 (Gemma's <bos>) before pooling. Its residual is ~15.6x a
+    # typical token's norm, so under max-pooling it floors every note value at
+    # the direction's BOS activation -- which can INFLATE point-biserial, not
+    # just attenuate it, by collapsing within-negative variance. 12 of 22
+    # diff-in-means candidates cleared threshold at BOS and nowhere else.
+    # False reproduces the published artifacts; True recomputes BOS-free.
+    skip_first_token: bool = False
     sae_shard_ckpt_dir: str | None = None
 
     # label join (identical to icd_eval and every other baseline)
@@ -883,6 +890,7 @@ def project_and_pool(
     checkpoint_dir: str | Path,
     pooling: str = "max",
     note_token_chunk: int = 4096,
+    skip_first_token: bool = False,
     on_shard_complete: Callable[[int], None] | None = None,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Project tokens onto ``D`` and max-pool to note level.
@@ -912,6 +920,16 @@ def project_and_pool(
         checkpoint_dir: Where per-shard outputs are written; also the resume source.
         pooling: Must be ``max``.
         note_token_chunk: Tokens per matmul within a note.
+        skip_first_token: Drop row 0 of every note before pooling. Row 0 is
+            Gemma's <bos>; its layer-16 residual carries ~15.6x the norm of a
+            typical token (attention-sink effect). Since pooling is a max, an
+            included BOS makes the note value max(c_j, real_max) -- a FLOOR at
+            the direction's BOS activation. A floor is not harmless: it shrinks
+            the pos/neg mean gap but also collapses within-negative variance,
+            and point-biserial is (M1-M0)/sigma, so it can INFLATE r rather
+            than attenuate it. Measured on the constructed sources, 12 of 22
+            diff-in-means candidates cleared threshold at BOS and nowhere else.
+            Defaults False so existing artifacts stay reproducible.
         on_shard_complete: Called with the shard index after each successful
             commit. Modal entrypoints pass a volume commit here so a crash
             cannot lose completed shards.
@@ -998,7 +1016,7 @@ def project_and_pool(
         for _, note_row in shard_notes.iterrows():
             row_start = int(note_row["row_start"])
             row_end = int(note_row["row_end"])
-            note_acts = acts[row_start:row_end]
+            note_acts = acts[row_start + (1 if skip_first_token else 0) : row_end]
             if note_acts.shape[0] == 0:
                 logger.warning(
                     f"Empty activation slice for note_idx={note_row['note_idx']}, "
@@ -1149,6 +1167,7 @@ def run_random_matched(
         checkpoint_dir=out / "shard_ckpt_select",
         pooling=config.pooling,
         note_token_chunk=config.note_token_chunk,
+        skip_first_token=config.skip_first_token,
         on_shard_complete=on_shard_complete,
     )
 
@@ -1161,6 +1180,7 @@ def run_random_matched(
         checkpoint_dir=out / "shard_ckpt_audit",
         pooling=config.pooling,
         note_token_chunk=config.note_token_chunk,
+        skip_first_token=config.skip_first_token,
         on_shard_complete=on_shard_complete,
     )
 

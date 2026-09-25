@@ -34,9 +34,9 @@
 # Then add the arms to configs/necessity_audit_directions.yaml and run:
 #   modal run modal_app/necessity_audit.py --config-file configs/necessity_audit_directions.yaml
 
-raw_ckpt_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
+raw_ckpt_dir: ${vanilla_eval}/posthoc/raw_lr_baseline_solo/raw_shard_ckpt
 icd_csv_path: /data/sample_50k.csv
-code_names_json: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/code_names.json
+code_names_json: ${vanilla_eval}/code_names.json
 output_dir: /out/necessity/probe_directions
 
 # Two arms so class weighting is reported rather than assumed. Panel prevalence

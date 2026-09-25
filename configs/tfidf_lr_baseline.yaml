@@ -6,11 +6,11 @@
 # Requires a completed icd_eval run (correlation_matrices.npz + shard_ckpt/).
 
 # --- paths ---------------------------------------------------------------
-eval_output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z
+eval_output_dir: ${vanilla_eval}
 
 icd_csv_path: /data/sample_50k.csv
 
-output_dir: /out/icd_eval/sae_d2304_e8_l11e+01_20260505T205723Z/posthoc/tfidf_lr_baseline
+output_dir: ${vanilla_eval}/posthoc/tfidf_lr_baseline
 
 # Per-shard encode checkpoints (auto-detected if null)
 checkpoint_dir: null
