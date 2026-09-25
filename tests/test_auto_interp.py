@@ -1531,3 +1531,46 @@ def test_binary_parser_resolves_and_flags_ambiguity():
     assert parse_binary_response("could be YES or NO here")["verdict"] == "UNKNOWN"
     assert parse_binary_response("")["verdict"] == "UNKNOWN"
     assert parse_binary_response("YES | x")["rationale"] == "x"
+
+
+def test_judge_openrouter_survives_a_null_response():
+    """A null OpenRouter body must not abort the run.
+
+    OpenRouter returns HTTP 200 with an empty choices list or a null message when
+    an upstream provider errors, and the SDK does not raise. Indexing it blindly
+    killed the DeepSeek leg of the de-anchored study after Sonnet had already
+    finished. Returning "" lets the caller's parser record UNKNOWN for that one
+    item and continue -- safe because every parser here maps unrecognised text to
+    UNKNOWN rather than to a verdict.
+    """
+    from types import SimpleNamespace
+
+    from mech_interp_research.concordance_multi_judge import Judge
+
+    class _Empty:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[])
+
+    class _NullMsg:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[SimpleNamespace(message=None)])
+
+    class _NullContent:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None))])
+
+    for impl in (_Empty(), _NullMsg(), _NullContent()):
+        client = SimpleNamespace(chat=SimpleNamespace(completions=impl))
+        j = Judge("t", "openrouter", model="x", client=client)
+        assert j.complete("hi") == ""
+
+    ok = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **kw: SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="  YES | ok  "))]
+                )
+            )
+        )
+    )
+    assert Judge("t", "openrouter", model="x", client=ok).complete("hi") == "YES | ok"

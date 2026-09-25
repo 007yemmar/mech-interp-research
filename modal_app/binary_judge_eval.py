@@ -42,7 +42,12 @@ def binary_remote(config: dict[str, Any]) -> dict[str, Any]:
 
     from openai import OpenAI
 
-    from mech_interp_research.concordance_multi_judge import build_judges, judge_binary
+    from mech_interp_research.concordance_multi_judge import (
+        build_judges,
+        judge_binary_batch,
+        rebuild_binary_summary,
+        summarize_binary_verdicts,
+    )
 
     logging.basicConfig(level=config.get("logging_level", "INFO"))
     log = logging.getLogger("binary_judge_eval")
@@ -66,26 +71,25 @@ def binary_remote(config: dict[str, Any]) -> dict[str, Any]:
     )
 
     out_dir = Path(config.get("output_dir") or (Path(config["auto_interp_dir"]) / "binary_eval"))
-    summary: dict[str, Any] = {"source": str(src), "n_features": len(rows), "judges": {}}
-
+    max_workers = int(config.get("max_workers", 4))
     for j in judges:
-        recs = []
-        for i, r in enumerate(rows):
-            v = judge_binary(
-                j, r["explanation"], r["concordance_icd_code"], r["concordance_icd_description"]
-            )
-            recs.append(
-                {
-                    "feature_idx": r["feature_idx"],
-                    "abs_r_pb": abs(float(r["concordance_r_pb"])),
-                    "icd_code": r["concordance_icd_code"],
-                    "original_verdict": r["concordance_verdict"],
-                    "binary_verdict": v["verdict"],
-                    "rationale": v["rationale"],
-                }
-            )
-            if (i + 1) % 50 == 0:
-                log.info("%s: %d/%d", j.slug, i + 1, len(rows))
+        verdicts = judge_binary_batch(
+            j,
+            rows,
+            max_workers=max_workers,
+            progress=lambda done, total, slug=j.slug: log.info("%s: %d/%d", slug, done, total),
+        )
+        recs = [
+            {
+                "feature_idx": r["feature_idx"],
+                "abs_r_pb": abs(float(r["concordance_r_pb"])),
+                "icd_code": r["concordance_icd_code"],
+                "original_verdict": r["concordance_verdict"],
+                "binary_verdict": v["verdict"],
+                "rationale": v["rationale"],
+            }
+            for r, v in zip(rows, verdicts, strict=True)
+        ]
 
         d = out_dir / j.slug
         d.mkdir(parents=True, exist_ok=True)
@@ -94,31 +98,29 @@ def binary_remote(config: dict[str, Any]) -> dict[str, Any]:
             w.writeheader()
             w.writerows(recs)
 
-        n = len(recs)
-        y = sum(1 for x in recs if x["binary_verdict"] == "YES")
-        u = sum(1 for x in recs if x["binary_verdict"] == "UNKNOWN")
-        # How the forced choice resolved what the original prompt called PARTIAL.
-        part = [x for x in recs if x["original_verdict"] == "PARTIAL"]
-        part_yes = sum(1 for x in part if x["binary_verdict"] == "YES")
-        summary["judges"][j.slug] = {
-            "n": n,
-            "binary_yes_pct": 100 * y / n,
-            "unknown_pct": 100 * u / n,
-            "n_originally_partial": len(part),
-            "partial_to_yes_pct": (100 * part_yes / len(part)) if part else None,
-        }
+        # Logged only; the roll-up below is rebuilt from the CSVs, not from this.
+        blk = summarize_binary_verdicts(recs)
         log.info(
-            "%s: binary-YES %.1f%% | of original PARTIALs, %.1f%% became YES",
+            "%s: binary-YES %.1f%% | of original PARTIALs, %s%% became YES",
             j.slug,
-            100 * y / n,
-            (100 * part_yes / len(part)) if part else float("nan"),
+            blk["binary_yes_pct"],
+            blk["partial_to_yes_pct"],
         )
         artifacts_volume.commit()
 
+    # Derive the roll-up from every per-judge CSV in the directory rather than
+    # overwriting it with this run's judges. Writing `summary` straight out erases
+    # judges an earlier invocation recorded (each arm's Sonnet and DeepSeek legs
+    # were separate runs), and an in-memory merge still loses a judge when two run
+    # concurrently against the same directory. Rebuilding from disk is idempotent
+    # and repairs a roll-up left stale by either.
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "binary_summary.json").write_text(json.dumps(summary, indent=2))
+    artifacts_volume.reload()
+    rebuilt = rebuild_binary_summary(out_dir, source=src)
+    (out_dir / "binary_summary.json").write_text(json.dumps(rebuilt, indent=2))
     artifacts_volume.commit()
-    return summary
+    log.info("summary now covers judges: %s", sorted(rebuilt["judges"]))
+    return rebuilt
 
 
 @app.local_entrypoint()
