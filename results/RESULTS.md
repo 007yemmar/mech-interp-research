@@ -20,8 +20,7 @@ with a pointer to what replaced it, because "what changed" is itself a result.
   arms carry different baselines). See §11.
 - `–` = not run / not applicable. `n/a` = the metric does not exist for that arm.
 
-> **✅ LLM-judge sections filled 2026-08-31; third judge added 2026-09-01.** §8, §10,
-> §12 and §14 — everything that
+> **✅ LLM-judge sections filled 2026-08-31; third and fourth judges added 2026-09-01.** §8, §10, §12 and §14 — everything that
 > depends on an LLM explainer or judge — were re-run, and their numbers have now been
 > read directly off the Modal `sae-artifacts` volume rather than off the stale local
 > copies in `results/`. Each of those sections names the Modal path it was read from.
@@ -47,7 +46,7 @@ with a pointer to what replaced it, because "what changed" is itself a result.
 | [11](#11-causal-ablation) | 2026-05-24 → 09-01 | Zero / mean / section-local ablation + post-hoc — **[paper table §11.4](#114-paper-table--top-10-all-six-arms)** | final |
 | [12](#12-multi-judge-concordance-and-blind-retrieval) | 2026-07-10 → 07-14 | 3-judge concordance + forced-choice retrieval | **superseded by §14** |
 | [13](#13-sae-necessity-suite) | 2026-08-17 → 09-01 | 16 feature sources through one shared audit — **[paper table §13.1](#131-paper-table--per-code-grounding-13-sources-one-audit)** | **current necessity numbers** |
-| [14](#14-four-arm-concordance-validation) | 2026-08-29 → 09-01 | 8 sources × **3 judges** × 5 metrics × \|r\| bands | **current concordance numbers** |
+| [14](#14-four-arm-concordance-validation) | 2026-08-29 → 09-01 | 8 sources × **4 judges** × 7 metrics × \|r\| bands | **current concordance numbers** |
 | [15](#15-bos-contamination-audit) | 2026-08-30 → 08-31 | `<bos>` floor in max-pooled grounding | ✅ **examined and closed** |
 | [16](#16-directional-ablation-of-non-sae-sources) | 2026-08-31 | Causal necessity for random + diff-in-means | final |
 
@@ -942,12 +941,12 @@ comparable |r| at all.
 
 ## 14. Four-arm concordance validation
 
-*2026-08-29 → 2026-09-01. Third judge added 2026-09-01. **Pulled from Modal 2026-09-01.**
-Sources: `auto_interp/<source>/retrieval_eval_hardneg/<judge>/` (same-chapter retrieval),
-`.../arm0_eval/<judge>/` (concordance), `.../deanchored_eval/<judge>/`,
-`.../binary_eval/<judge>/`. Every source is audited on the held-out split (shards
-281–311, 4,911 notes) through the §13 pseudo-SAE feature-source contract, so all eight
-arms go through one identical pipeline.*
+*2026-08-29 → 2026-09-01. Third and fourth judges added 2026-09-01. **Pulled from Modal
+2026-09-01.** Sources: `auto_interp/<source>/retrieval_eval_hardneg/<judge>/`
+(same-chapter retrieval), `.../arm0_eval/<judge>/` (concordance),
+`.../deanchored_eval/<judge>/`, `.../binary_eval/<judge>/`. Every source is audited on
+the held-out split (shards 281–311, 4,911 notes) through the §13 pseudo-SAE
+feature-source contract, so all eight arms go through one identical pipeline.*
 
 **What this experiment is for.** §12 established that judges agree on the *ordering* of
 SAE features and disagree on the *level*. It could not answer the question a reviewer
@@ -957,51 +956,85 @@ are not SAEs — including a floor (random directions) and a ceiling (keyword in
 
 Three changes from §12 make the comparison discriminating:
 
-1. **Same-chapter distractors.** The seven decoys now come from the correct code's own
+1. **Same-chapter distractors.** The seven decoys come from the correct code's own
    ICD-9 chapter, so chapter-level gist is worthless — the judge must discriminate at
    the diagnosis level.
 2. **Disjoint |r| bands** (0.1–0.3, 0.3–0.5, > 0.5) rather than nested thresholds, so a
    cell is never a superset of the cell to its right.
 3. **Matched pools per band.** Each source contributes its own features in each band;
-   `n` is reported in every cell because grounding scarcity (§14.3) means the sources do
-   not have comparable populations everywhere, and that asymmetry is itself a result.
+   `n` is reported because grounding scarcity (§14.3) means the sources do not have
+   comparable populations everywhere, and that asymmetry is itself a result.
 
-**Three judges, three labs: S** = Claude Sonnet 4.6, **D** = DeepSeek-V3, **G** = OpenAI
-GPT-5-mini. Cells are `percent (n)`; `–` means fewer than 5 features exist in that band
-for that source. SAE rows merge the published 380-feature pool with the stratified
-sampling pool (identical configs, different feature draws).
+**Four judges, four labs: S** = Claude Sonnet 4.6 (Anthropic), **D** = DeepSeek-V3,
+**G** = GPT-5-mini (OpenAI), **M** = Gemini 2.5 Flash (Google). `–` means fewer than 5
+features exist in that band. SAE rows merge the published 380-feature pool with the
+stratified sampling pool (identical configs, different feature draws).
 
-> **Operational note — reasoning models.** GPT-5-mini is a reasoning model. At the
-> judge's default `max_tokens=256` it spends the whole budget on hidden reasoning and
-> returns **empty content**, which every parser here records as `__unparse__`/`UNKNOWN`
-> — i.e. a *failed call is scored as a wrong answer*, silently depressing hit@1. It must
-> be run with `reasoning_effort: minimal` (also ~10× cheaper). A first attempt at this
-> arm using `gpt-5.6-luna` was discarded entirely for the related reason that OpenRouter
-> caps new accounts at 20 rpm on that model, failing up to 39% of features. Both failure
-> modes produce *plausible-looking* summaries, so every run below was gated on a raw
-> per-feature audit (0 blank / 0 error / 0 unparse across all 4,320 judgments).
+> **Operational note — screening a judge before trusting it.** Two failure modes here
+> produce *plausible-looking* summaries rather than errors, because a failed call is
+> recorded as a **wrong answer** rather than skipped:
+> (i) **Rate caps.** OpenRouter caps new accounts at 20 rpm on most current-generation
+> models; an early attempt at the third judge using `gpt-5.6-luna` failed up to 39% of
+> features this way and was discarded entirely.
+> (ii) **Reasoning models returning empty content.** At the judge's default
+> `max_tokens=256`, GPT-5-mini spends the whole budget on hidden reasoning and returns
+> `""`, parsed as `__unparse__`. It must run with `reasoning_effort: minimal` (also
+> ~10× cheaper). Gemini 2.5 Flash emits 0 reasoning tokens and needs no override;
+> `grok-4.3` was rejected because it *ignores* the flag.
+> Every run below is therefore gated on a raw per-feature audit. Across all 8,640
+> third- and fourth-judge calls in the 2026-09-01 headline runs: **0 blank, 0 error,
+> 1 unparseable** (a Gemini refusal written as prose instead of the required format,
+> scored conservatively as a miss). The forced-binary and cross-chapter arms added later
+> the same day contribute a further **4,964 calls: 0 blank, 0 error, 0 unparseable**.
+> For contrast, the same audit over the *first two* judges' arms is not spotless —
+> DeepSeek returns 22 unparseable verdicts across these arms and Sonnet 5 — which is a
+> further reason the reportable panel does not depend on DeepSeek.
 
 ### 14.1 hit@1, same-chapter distractors — the headline
 
-*Chance = 11.1%. `retrieval_eval_hardneg/`.*
+*Chance = 11.1%. `retrieval_eval_hardneg/`. `n` is shared across judges within a band.*
 
-| source | 0.1–0.3 S | D | G | 0.3–0.5 S | D | G | > 0.5 S | D | G |
-|---|---|---|---|---|---|---|---|---|---|
-| keyword (lexical ceiling) | 50 (6) | 83 (6) | 83 (6) | **92** (26) | **96** (26) | **96** (26) | **100** (6) | **100** (6) | **100** (6) |
-| **SAE JumpReLU** (domain) | 9 (139) | 12 (139) | 7 (139) | **73** (175) | **73** (175) | **75** (175) | **92** (144) | **92** (144) | **94** (144) |
-| **SAE ReLU+L1** (domain) | 15 (126) | 17 (126) | 17 (126) | **67** (177) | **71** (177) | **73** (177) | **94** (143) | **94** (143) | **96** (143) |
-| SAE GemmaScope (general) | 0 (100) | 0 (100) | 0 (100) | 52 (50) | 46 (50) | 52 (50) | – | – | – |
-| diff-in-means (supervised) | 22 (18) | 28 (18) | 22 (18) | 24 (21) | 38 (21) | 29 (21) | 43 (7) | 29 (7) | 29 (7) |
-| probe LR (supervised) | 12 (17) | 18 (17) | 12 (17) | 17 (24) | 17 (24) | 17 (24) | 40 (5) | 40 (5) | 0 (5) |
-| PCA (unsupervised) | 12 (34) | 15 (34) | 15 (34) | – | – | – | – | – | – |
-| random directions (floor) | 17 (284) | 18 (284) | 23 (284) | 38 (16) | 44 (16) | 38 (16) | – | – | – |
+**Band |r| 0.3–0.5** — the band where every source has a real population:
+
+| source | n | S | D | G | M | spread |
+|---|---|---|---|---|---|---|
+| keyword (lexical ceiling) | 26 | 92 | 96 | 96 | **100** | 8 pp |
+| **SAE JumpReLU** | 175 | **73** | **73** | **75** | **70** | **5 pp** |
+| **SAE ReLU+L1** | 177 | **67** | **71** | **73** | **62** | 11 pp |
+| SAE GemmaScope | 50 | 52 | 46 | 52 | 50 | 6 pp |
+| diff-in-means (supervised) | 21 | 24 | 38 | 29 | 29 | 14 pp |
+| probe LR (supervised) | 24 | 17 | 17 | 17 | 17 | 0 pp |
+| random directions (floor) | 16 | 38 | 44 | 38 | 38 | 6 pp |
+
+**Band |r| > 0.5:**
+
+| source | n | S | D | G | M | spread |
+|---|---|---|---|---|---|---|
+| keyword (lexical ceiling) | 6 | 100 | 100 | 100 | 100 | 0 pp |
+| **SAE JumpReLU** | 144 | **92** | **92** | **94** | **91** | **3 pp** |
+| **SAE ReLU+L1** | 143 | **94** | **94** | **96** | **96** | **2 pp** |
+| diff-in-means | 7 | 43 | 29 | 29 | 29 | 14 pp |
+| probe LR | 5 | 40 | 40 | 0 | 20 | 40 pp |
+| GemmaScope / PCA / random | 4 / 0 / 0 | – | – | – | – | – |
+
+**Band |r| 0.1–0.3:**
+
+| source | n | S | D | G | M | spread |
+|---|---|---|---|---|---|---|
+| keyword (lexical ceiling) | 6 | 50 | 83 | 83 | 83 | 33 pp |
+| SAE JumpReLU | 139 | 9 | 12 | 7 | 9 | 5 pp |
+| SAE ReLU+L1 | 126 | 15 | 17 | 17 | 13 | 4 pp |
+| SAE GemmaScope | 100 | 0 | 0 | 0 | 0 | 0 pp |
+| diff-in-means | 18 | 22 | 28 | 22 | 28 | 6 pp |
+| probe LR | 17 | 12 | 18 | 12 | 12 | 6 pp |
+| PCA | 34 | 12 | 15 | 15 | 12 | 3 pp |
+| random directions (floor) | 284 | 17 | 18 | 23 | 16 | 7 pp |
 
 **The domain SAEs are the only learned sources that hold up under same-chapter
-distractors, and all three judges agree.** At |r| 0.3–0.5 — the band where every source
-has a real population — JumpReLU and ReLU+L1 reach 67–75% while the two
-label-*supervised* sources sit at 17–38%, barely above the random floor. Above |r| > 0.5
-both domain SAEs reach 92–96%, within reach of the keyword ceiling, and the supervised
-directions never build a population there worth reporting.
+distractors, and four judges from four labs agree.** At |r| 0.3–0.5, JumpReLU and
+ReLU+L1 reach 62–75% while the two label-*supervised* sources sit at 17–38%, at or below
+the random floor. Above |r| > 0.5 both reach 91–96%, near the keyword ceiling, and the
+supervised directions never build a population there worth reporting.
 
 **The supervised sources being at the floor is the result, not a bug.** Diff-in-means
 and probe LR are *built from the labels* — §13.1 ranks them 6th and 8th on specificity,
@@ -1010,28 +1043,32 @@ explanation a judge can then use to recover the code from nine options. Directio
 separation and human-legible content come apart, and only the SAEs have both.
 
 **GemmaScope is the informative negative.** A general-purpose SAE trained on web text,
-run through the identical pipeline, scores 0 (100) in the lowest band and 46–52% in the
-middle — clearly above random in the middle band, clearly below the domain SAEs. Domain
-training, not the SAE architecture alone, is doing the work.
+run through the identical pipeline, scores 0 in the lowest band and 46–52% in the middle
+— above random in the middle band, below the domain SAEs. Domain training, not the SAE
+architecture alone, is doing the work.
+
+**Small-*n* cells are not judge disagreement.** probe LR at |r| > 0.5 spans 0–40% on
+**n = 5**, and the keyword ceiling spans 33 pp on **n = 6**. Read spreads only where
+n is large; on the SAE pools (n = 126–177) they are 2–11 pp.
 
 ### 14.2 Is the SAE advantage significant? (vs. the random floor)
 
 *Fisher exact, two-sided, |r| 0.3–0.5 — the only band where every source has a testable
 population. Fisher rather than χ²: the random arm has n = 16 here.*
 
-| source | hit@1 (S / D / G) | vs random | *p* (S) | *p* (G) |
-|---|---|---|---|---|
-| keyword (lexical ceiling) | 92 / 96 / 96 | 38–44% | **0.0002** | **<0.0001** |
-| **SAE JumpReLU** | 73 / 73 / 75 | 38–44% | **0.0074** | **0.0030** |
-| **SAE ReLU+L1** | 67 / 71 / 73 | 38–44% | **0.0266** | **0.0076** |
-| SAE GemmaScope | 52 / 46 / 52 | 38–44% | 0.394 | 0.394 |
-| diff-in-means | 24 / 38 / 29 | 38–44% | 0.475 | 0.726 |
-| probe LR | 17 / 17 / 17 | 38–44% | 0.159 | 0.159 |
+| source | Sonnet 4.6 | GPT-5-mini | Gemini 2.5 Flash |
+|---|---|---|---|
+| **SAE JumpReLU** | 73%, ***p* = 0.0074** | 75%, ***p* = 0.0030** | 70%, ***p* = 0.0125** |
+| **SAE ReLU+L1** | 67%, ***p* = 0.0266** | 73%, ***p* = 0.0076** | 62%, *p* = 0.0681 |
+| SAE GemmaScope | 52%, *p* = 0.394 | 52%, *p* = 0.394 | 50%, *p* = 0.407 |
 
-Only the keyword ceiling and the two domain SAEs separate from the random floor, **and
-the result is judge-independent** — significance holds for Sonnet and GPT-5-mini alike,
-with GPT-5-mini's *p* slightly stronger. GemmaScope's 14-point lead does not reach
-significance at n = 50, and both supervised sources are numerically at or below random.
+**JumpReLU clears the random floor for every judge tested** (*p* = 0.003–0.013).
+**ReLU+L1 clears it for three of four and falls just short for Gemini** (*p* = 0.068) —
+Gemini is the strictest judge on this source (62% vs 67–73%), and at n = 177 against a
+16-feature random arm the test has limited power. This is the one place the fourth judge
+*weakens* rather than strengthens a claim, and it should be reported that way: the
+architecture-independent version of the result rests on JumpReLU, with ReLU+L1
+directionally consistent but not uniformly significant. GemmaScope never separates.
 
 ### 14.3 Grounding scarcity — why several cells are empty
 
@@ -1044,63 +1081,76 @@ row of §14.1 draws from.*
 | SAE ReLU+L1 | 675 | **291** | 143 | 73 |
 | SAE GemmaScope | 54 | **13** | 4 | 0 |
 
-GemmaScope's thin cells in §14.1 are **complete populations, not samples** — it has 13
-features above |r| > 0.4 in total and none above 0.6, so there is nothing left to judge.
-Reporting a wide interval there would misrepresent a hard scarcity as sampling noise.
-The domain SAEs have 20× the population at every threshold.
+GemmaScope's thin cells are **complete populations, not samples** — 13 features above
+|r| > 0.4 in total, none above 0.6. Reporting a wide interval there would misrepresent a
+hard scarcity as sampling noise. The domain SAEs have 20× the population at every
+threshold.
 
 ### 14.4 Exact-YES concordance
 
-*The judge must name the code, not describe something adjacent to it. `arm0_eval/`.*
+*The judge must name the code, not recognise it in a list. Cells are the **range across
+all four judges**, `min–max (n)`; per-judge values are in the artifacts.*
 
-| source | 0.1–0.3 S | D | G | 0.3–0.5 S | D | G | > 0.5 S | D | G |
-|---|---|---|---|---|---|---|---|---|---|
-| keyword (lexical ceiling) | 67 (6) | 50 (6) | 67 (6) | **85** (26) | **77** (26) | **96** (26) | **100** (6) | **83** (6) | **100** (6) |
-| **SAE JumpReLU** | 0 (139) | 0 (139) | 0 (139) | 15 (175) | 19 (175) | 21 (175) | **42** (144) | **42** (144) | **60** (144) |
-| **SAE ReLU+L1** | 0 (126) | 0 (126) | 2 (126) | 12 (177) | 15 (177) | 23 (177) | **47** (143) | **53** (143) | **62** (143) |
-| SAE GemmaScope | 0 (100) | 0 (100) | 0 (100) | 6 (50) | 10 (50) | 12 (50) | – | – | – |
-| diff-in-means | 6 (18) | 11 (18) | 11 (18) | 19 (21) | 29 (21) | 24 (21) | 14 (7) | 29 (7) | 29 (7) |
-| probe LR | 12 (17) | 12 (17) | 12 (17) | 12 (24) | 12 (24) | 17 (24) | 20 (5) | 20 (5) | 20 (5) |
-| PCA | 0 (34) | 3 (34) | 3 (34) | – | – | – | – | – | – |
-| random directions (floor) | 2 (284) | 2 (284) | 3 (284) | 0 (16) | 0 (16) | 0 (16) | – | – | – |
+| source | 0.1–0.3 | 0.3–0.5 | > 0.5 |
+|---|---|---|---|
+| keyword (lexical ceiling) | 50–67 (6) | **77–96** (26) | **83–100** (6) |
+| **SAE JumpReLU** | 0 (139) | 15–21 (175) | **42–60** (144) |
+| **SAE ReLU+L1** | 0–2 (126) | 12–23 (177) | **47–62** (143) |
+| SAE GemmaScope | 0 (100) | 6–12 (50) | – |
+| diff-in-means | 6–11 (18) | 19–29 (21) | 14–29 (7) |
+| probe LR | 12 (17) | 12–17 (24) | 20 (5) |
+| PCA | 0–3 (34) | – | – |
+| random directions (floor) | 2–3 (284) | 0 (16) | – |
 
-Exact-YES is far stricter than hit@1 (42–62% vs 92–96% for the SAEs at |r| > 0.5)
-because the judge must produce the code unaided rather than recognise it in a list. It
-preserves the ordering and keeps the random floor at 0–3% everywhere. **It is also the
-metric with the widest judge spread**: GPT-5-mini is 18 points above Sonnet on JumpReLU
-at |r| > 0.5 (60 vs 42). Open-ended generation leaves more room for a judge's
-answer-style to matter than forced choice does, so where §14.1 and §14.4 disagree,
-prefer §14.1.
+Exact-YES is far stricter than hit@1 (42–62% vs 91–96% for the SAEs at |r| > 0.5)
+because the judge must produce the code unaided. It keeps the random floor at **0–3%
+everywhere**, which is the useful half: the 38–44% floor in §14.1 is a property of the
+nine-option format, not evidence that arbitrary directions carry recoverable content.
+
+> **Correction (2026-09-02).** This section previously said exact-YES "preserves the
+> ordering". It does not, in the middle band. At |r| 0.3–0.5 diff-in-means scores **19–29%
+> against the SAEs' 12–23%** — the supervised arm matches or beats both. The SAE
+> separation appears only above |r| > 0.5 (42–62% vs 14–29%). The ordering claim holds
+> against the *random* floor at every threshold, and against the *supervised* directions
+> only at high strength. Under forced choice (§14.1) the supervised arms sit at the random
+> floor in the same band, so the two metrics genuinely disagree there; §14.1 remains the
+> preferred instrument for the reason below, but the disagreement should be reported, not
+> smoothed. **It is also the metric with the widest judge spread**
+— 18 points on JumpReLU at |r| > 0.5. Open-ended generation leaves more room for a
+judge's answer-style than forced choice does, so where §14.1 and §14.4 disagree, prefer
+§14.1.
 
 ### 14.5 YES+PARTIAL — the metric that does not work
 
-| source | 0.1–0.3 S | D | G | 0.3–0.5 S | D | G | > 0.5 S | D | G |
-|---|---|---|---|---|---|---|---|---|---|
-| keyword (lexical ceiling) | 100 (6) | 100 (6) | 100 (6) | 100 (26) | 100 (26) | 100 (26) | 100 (6) | 100 (6) | 100 (6) |
-| SAE JumpReLU | 64 (139) | 88 (139) | 57 (139) | 91 (175) | 98 (175) | 94 (175) | 99 (144) | 100 (144) | 99 (144) |
-| SAE ReLU+L1 | 63 (126) | 89 (126) | 56 (126) | 96 (177) | 99 (177) | 95 (177) | 98 (143) | 100 (143) | 100 (143) |
-| SAE GemmaScope | 24 (100) | 72 (100) | 18 (100) | 84 (50) | 92 (50) | 80 (50) | – | – | – |
-| diff-in-means | 33 (18) | 56 (18) | 28 (18) | 52 (21) | 67 (21) | 43 (21) | 57 (7) | 86 (7) | 57 (7) |
-| probe LR | 24 (17) | 71 (17) | 29 (17) | 38 (24) | 46 (24) | 38 (24) | 100 (5) | 100 (5) | 100 (5) |
-| PCA | 32 (34) | 91 (34) | 35 (34) | – | – | – | – | – | – |
-| **random directions (floor)** | **79** (284) | **93** (284) | **70** (284) | **100** (16) | **100** (16) | **94** (16) | – | – | – |
+*Range across all four judges, `min–max (n)`.*
 
-**Random directions beat both domain SAEs in the lowest band — for every one of the
-three judges.**
+| source | 0.1–0.3 | 0.3–0.5 | > 0.5 |
+|---|---|---|---|
+| keyword (lexical ceiling) | 100 (6) | 100 (26) | 100 (6) |
+| SAE JumpReLU | 57–88 (139) | 92–98 (175) | 99–100 (144) |
+| SAE ReLU+L1 | 56–89 (126) | 95–99 (177) | 98–100 (143) |
+| SAE GemmaScope | 18–72 (100) | 80–92 (50) | – |
+| diff-in-means | 28–56 (18) | 38–67 (21) | 57–86 (7) |
+| probe LR | 24–71 (17) | 38–46 (24) | 100 (5) |
+| PCA | 32–91 (34) | – | – |
+| **random directions (floor)** | **65–93** (284) | **94–100** (16) | – |
+
+**Random directions outrank both domain SAEs in the lowest band — for every one of the
+four judges, without exception:**
 
 | judge | random | JumpReLU | ReLU+L1 |
 |---|---|---|---|
-| Sonnet 4.6 | **79%** | 64% | 63% |
+| Claude Sonnet 4.6 | **79%** | 65% | 63% |
 | DeepSeek-V3 | **93%** | 88% | 89% |
 | GPT-5-mini | **70%** | 57% | 56% |
+| Gemini 2.5 Flash | **65%** | 59% | 56% |
 
 A metric on which arbitrary directions outrank trained SAEs is not measuring
-interpretability, and the third judge removes the last escape hatch — this is not one
-lenient judge. PARTIAL is the culprit: it lets a judge accept any explanation that is
-topically near the code, and an arbitrary direction pooled over clinical notes always
-produces something topically near *some* code. Note also that the judges span 57–93% on
-the *same* JumpReLU features in the *same* band, purely on how generously each reads
-"partial".
+interpretability, and four labs remove the "one lenient judge" escape hatch entirely.
+PARTIAL is the culprit: it lets a judge accept any explanation topically near the code,
+and an arbitrary direction pooled over clinical notes always produces something
+topically near *some* code. The judges also span 57–88% on the *same* JumpReLU features
+in the *same* band, purely on how generously each reads "partial".
 
 This is why §14.1 and §14.4 are the reportable metrics and this table is kept as the
 negative control. It is also the correction to §8.3 and §12, whose headline YES+PARTIAL
@@ -1108,80 +1158,139 @@ figures have no floor underneath them.
 
 ### 14.6 "None of these" rate, same-chapter
 
-*How often the judge declines rather than guessing. Low = the explanation carries
-recoverable content.*
+*How often the judge declines rather than guessing. Range across four judges,
+`min–max (n)`. Low = the explanation carries recoverable content.*
 
-| source | 0.1–0.3 S | D | G | 0.3–0.5 S | D | G | > 0.5 S | D | G |
-|---|---|---|---|---|---|---|---|---|---|
-| keyword (lexical ceiling) | 33 (6) | 0 (6) | 0 (6) | 4 (26) | 0 (26) | 0 (26) | 0 (6) | 0 (6) | 0 (6) |
-| SAE JumpReLU | 83 (139) | 78 (139) | 86 (139) | 21 (175) | 13 (175) | 17 (175) | 8 (144) | 4 (144) | 5 (144) |
-| SAE ReLU+L1 | 80 (126) | 73 (126) | 74 (126) | 24 (177) | 14 (177) | 14 (177) | 4 (143) | 1 (143) | 1 (143) |
-| SAE GemmaScope | 97 (100) | 98 (100) | 99 (100) | 38 (50) | 36 (50) | 30 (50) | – | – | – |
-| diff-in-means | 78 (18) | 61 (18) | 78 (18) | **76** (21) | **52** (21) | **71** (21) | 57 (7) | 57 (7) | 57 (7) |
-| probe LR | 82 (17) | 82 (17) | 88 (17) | **79** (24) | **79** (24) | **83** (24) | 60 (5) | 20 (5) | 40 (5) |
-| PCA | 82 (34) | 74 (34) | 79 (34) | – | – | – | – | – | – |
-| random directions (floor) | 71 (284) | 61 (284) | 63 (284) | 38 (16) | 12 (16) | 31 (16) | – | – | – |
+| source | 0.1–0.3 | 0.3–0.5 | > 0.5 |
+|---|---|---|---|
+| keyword (lexical ceiling) | 0–33 (6) | 0–4 (26) | 0 (6) |
+| SAE JumpReLU | 78–86 (139) | **13–22** (175) | 4–8 (144) |
+| SAE ReLU+L1 | 73–81 (126) | **14–28** (177) | 1–4 (143) |
+| SAE GemmaScope | 97–99 (100) | 30–38 (50) | – |
+| diff-in-means | 61–78 (18) | **52–76** (21) | 57 (7) |
+| probe LR | 82–88 (17) | **79–83** (24) | 20–60 (5) |
+| PCA | 74–82 (34) | – | – |
+| random directions (floor) | 61–71 (284) | 12–44 (16) | – |
 
 The supervised sources' failure in §14.1 is a *decline*, not a wrong answer: at |r|
 0.3–0.5 every judge declines on 52–83% of probe-LR and diff-in-means features while
-declining only 13–24% of SAE features at the same correlation strength. The
-explanations of supervised directions do not contain enough to pick from — the cleanest
-statement of what SAE features add over directions that separate the label equally well.
+declining only 13–28% of SAE features at the same correlation strength. The explanations
+of supervised directions do not contain enough to pick from — the cleanest statement of
+what SAE features add over directions that separate the label equally well.
 
-### 14.7 Robustness — three ways the headline could have been an artifact
+### 14.7 Robustness — five ways the headline could have been an artifact
 
-**(a) Judge.** Across the SAE cells of §14.1, three judges from three labs span **≤ 6
-percentage points**:
+**(a) Judge.** Across the SAE cells of §14.1, four judges from four labs span:
 
-| source | band | S / D / G | spread |
+| source | band | S / D / G / M | spread |
 |---|---|---|---|
-| SAE JumpReLU | 0.3–0.5 | 73 / 73 / 75 | **2 pp** |
-| SAE JumpReLU | > 0.5 | 92 / 92 / 94 | **2 pp** |
-| SAE ReLU+L1 | 0.3–0.5 | 67 / 71 / 73 | **6 pp** |
-| SAE ReLU+L1 | > 0.5 | 94 / 94 / 96 | **2 pp** |
-| keyword (ceiling) | 0.3–0.5 | 92 / 96 / 96 | 4 pp |
-| GemmaScope | 0.3–0.5 | 52 / 46 / 52 | 6 pp |
+| SAE JumpReLU | 0.3–0.5 | 73 / 73 / 75 / 70 | **5 pp** |
+| SAE JumpReLU | > 0.5 | 92 / 92 / 94 / 91 | **3 pp** |
+| SAE ReLU+L1 | 0.3–0.5 | 67 / 71 / 73 / 62 | 11 pp |
+| SAE ReLU+L1 | > 0.5 | 94 / 94 / 96 / 96 | **2 pp** |
 
-Under same-chapter forced choice the judge stops mattering — compare the 10.8-point
-spread the pooled metric produced under the superseded protocol (§12), and the 18-point
-spread exact-YES still shows in §14.4. The small-*n* sources are the exception and
-should not be read as judge disagreement: probe LR at |r| > 0.5 spans 0–40% on **n = 5**.
+Under same-chapter forced choice the judge largely stops mattering — compare the
+10.8-point spread the pooled metric produced under the superseded protocol (§12) and the
+18-point spread exact-YES still shows in §14.4. The exception is **ReLU+L1 at |r|
+0.3–0.5, where the spread is 11 pp** because Gemini scores it 62%; that is the same cell
+that misses significance in §14.2, so the two observations are one finding, not two.
 
-**(b) Architecture.** JumpReLU and ReLU+L1 differ by ≤ 6 points in every band of §14.1
-for every judge, despite different sparsity mechanisms, different L0, and independently
-trained weights. The result is a property of domain-trained SAEs, not of one checkpoint.
+**(b) Architecture.** JumpReLU and ReLU+L1 differ by ≤ 8 points in every band for every
+judge, despite different sparsity mechanisms, different L0 and independently trained
+weights. The result is a property of domain-trained SAEs, not of one checkpoint — with
+the caveat from §14.2 that JumpReLU is the more robust of the two.
 
 **(c) `r`-anchoring.** The published concordance prompt states the correlation value.
-Removing it (`deanchored_eval/`) and re-judging only the features previously marked YES:
+Removing it (`deanchored_eval/`) and re-judging only features previously marked YES:
 
-| source | Sonnet 4.6 | GPT-5-mini | DeepSeek-V3 | n |
-|---|---|---|---|---|
-| SAE JumpReLU | **88%** | 58% | 45% | 85 |
-| SAE ReLU+L1 | **85%** | 57% | 35% | 88 |
+| source | Sonnet 4.6 | Gemini 2.5 Flash | GPT-5-mini | DeepSeek-V3 | n |
+|---|---|---|---|---|---|
+| SAE JumpReLU | **88%** | 73% | 58% | 45% | 85 |
+| SAE ReLU+L1 | **85%** | 52% | 57% | 35% | 88 |
 
 **This corrects an earlier two-judge reading of this table.** With only Sonnet and
-DeepSeek the effect looked *DeepSeek-specific*; the third judge lands squarely between
+DeepSeek the effect looked *DeepSeek-specific*; the third and fourth judges land between
 them, so anchor-dependence is a **continuum across judges, not one outlier**. The
-practical conclusions are unchanged and one is strengthened: Sonnet, the judge behind
-the published numbers, retains 85–88% without the anchor, so those numbers are not an
-artifact of showing the judge `r` — but an anchor-free protocol is now clearly the
-safer default for *any* new judge, not merely for DeepSeek.
+practical conclusions are unchanged and one is strengthened: Sonnet, the judge behind the
+published numbers, retains 85–88% without the anchor, so those numbers are not an
+artifact of showing the judge `r` — but an anchor-free protocol is clearly the safer
+default for *any* new judge.
 
-*A fourth arm — a forced-binary YES/NO re-judge (`binary_eval/`) — was run but is
-not reported here: it is two-judge only and redundant with exact-YES, which covers
-all eight sources. Its numbers are preserved under **Do not mention in paper §4**.*
+**(d) Removing PARTIAL entirely.** Re-judging with a forced binary YES/NO
+(`binary_eval/`). **All four judges as of 2026-09-01** — GPT-5-mini and Gemini were run
+on 2026-09-01 through the identical config (same `auto_interp_dir`, same explanations,
+same prompt), so this arm no longer depends on DeepSeek.
+
+binary-YES % / of originally-PARTIAL features, % that resolved to YES:
+
+| source | n | S | D | G | M |
+|---|---|---|---|---|---|
+| **SAE JumpReLU** | 380 | **32.4** / 14.7 | **22.4** / 7.1 | **33.7** / 18.9 | **31.1** / 14.7 |
+| **SAE ReLU+L1** | 380 | **33.4** / 16.3 | **21.3** / 6.3 | **32.4** / 17.2 | **26.6** / 9.2 |
+| random directions | 300 | **9.3** / 9.4 | **7.0** / 6.8 | **9.3** / 9.8 | **10.7** / 11.5 |
+
+With PARTIAL removed the ordering inverts back to the correct one on **every one of the
+four judges**: SAEs 21.3–33.7%, random 7.0–10.7% — where §14.5 had random *ahead*. The
+separation is 2.5–3.6× (narrowest under Gemini, which is also the strictest judge in
+§14.2). Dropping DeepSeek does not weaken this: on S/G/M alone the SAEs span 26.6–33.7%
+against a 9.3–10.7% floor. Only 6.3–18.9% of former PARTIAL verdicts survive as YES,
+confirming PARTIAL was absorbing non-answers rather than naming a real category.
+
+**(e) Was the distractor set too easy?** The cross-chapter slate draws its seven decoys
+from *other* ICD-9 chapters, so organ-system gist suffices; the same-chapter slate
+(§14.1) draws them from the true code's own chapter. Change in hit@1 in percentage
+points when the shortcut is removed — negative means the source loses ground. Run on all
+four judges as of 2026-09-01 (`retrieval_eval/` vs `retrieval_eval_hardneg/`).
+
+| source | band | n | S | D | G | M |
+|---|---|---|---|---|---|---|
+| keyword (ceiling) | 0.3–0.4 | 13 | −7.7 | −7.7 | −7.7 | +0.0 |
+| keyword (ceiling) | 0.4–0.5 | 13 | +0.0 | +15.4 | +0.0 | +0.0 |
+| **SAE JumpReLU** (pub 380) | 0.4–0.5 | **136** | **−8.8** | **−11.0** | **−11.0** | **−10.3** |
+| SAE JumpReLU (strat 200) | 0.3–0.4 | 40 | −10.0 | −22.5 | +0.0 | −10.0 |
+| SAE JumpReLU (strat 200) | 0.4–0.5 | 40 | −7.5 | −5.0 | −17.5 | −15.0 |
+| diff-in-means (LDA) | 0.3–0.4 | 10 | −10.0 | −10.0 | −10.0 | −20.0 |
+| diff-in-means (LDA) | 0.4–0.5 | 11 | +0.0 | +9.1 | −9.1 | +0.0 |
+| probe LR (balanced) | 0.3–0.4 | 14 | −7.1 | −7.1 | +0.0 | +0.0 |
+| probe LR (balanced) | 0.4–0.5 | 10 | +0.0 | +0.0 | +0.0 | +0.0 |
+
+**Read the `pub 380` row and treat the rest as underpowered.** At n = 136 the JumpReLU
+SAE loses 8.8–11.0 points on every judge — a tight four-judge agreement that the
+same-chapter slate is genuinely harder. Every other cell rests on n = 10–40, where one
+feature moves the number by 2.5–10 pp, which is why the strat-200 rows disagree across
+judges (−22.5 to +0.0) while the pub-380 row does not. The SAE losing the most is the
+expected direction: it is the only non-ceiling source scoring well above chance under the
+easy slate, so it has the most to lose. The keyword ceiling is nearly unmoved because a
+curated keyword direction names its concept outright.
+
+> **Slate caveat.** `icd_eval_dir` supplies the `r_pb` row that filters distractor
+> candidates. The `configs/judge3|4/ret_hn_*` (same-chapter) configs point it at the
+> JumpReLU matrix for *every* source, while `configs/fourarm/r2_*` point it at each
+> source's own audit. For the **same-chapter** condition this is almost inert: a pool
+> that falls below `n_distractors` after filtering is relaxed to the whole chapter, and
+> only the 9 endocrine and 9 V-supplementary codes have enough same-chapter neighbours
+> (8) for the filter to bind at all — and then it only changes which one of 8 is dropped.
+> For the **cross-chapter** condition it binds everywhere (pools of 37–45 against 7
+> needed), so the 2026-09-01 cross-chapter runs use each source's own audit dir, matching
+> the Sonnet/DeepSeek runs they are compared against. All eight previously published
+> Sonnet and DeepSeek cells in this table reproduce exactly from the raw verdicts.
 
 ### 14.8 Verdict
 
 Under a protocol where the judge cannot be generous — same-chapter distractors, forced
-choice, disjoint bands, a random floor and a keyword ceiling running through the same
-pipeline, and **three judges from three labs** — **domain-trained SAE features are the
-only learned source whose explanations let a judge recover the ICD-9 code**, at 73–75%
-and 67–73% hit@1 (*p* = 0.003–0.027 vs random) rising to 92–96% above |r| > 0.5, with a
-between-judge spread of ≤ 6 points. Label-supervised directions that separate the same
-codes do not clear the random floor, a general-purpose SAE lands in between, and the
-widely-reported pooled YES+PARTIAL metric ranks random directions above trained SAEs
-**for all three judges** and should not be used.
+choice, disjoint bands, a random floor and a keyword ceiling through the same pipeline,
+and **four judges from four labs** — **domain-trained SAE features are the only learned
+source whose explanations let a judge recover the ICD-9 code.** JumpReLU reaches 70–75%
+hit@1 at |r| 0.3–0.5, clearing the random floor for every judge (*p* = 0.003–0.013), and
+91–94% above |r| > 0.5, with a between-judge spread of 3–5 pp. ReLU+L1 tracks it closely
+(62–73%, 94–96%) but misses significance under the strictest judge (*p* = 0.068), so the
+strongest architecture-independent claim rests on JumpReLU. Label-supervised directions
+that separate the same codes do not clear the random floor; a general-purpose SAE lands
+in between; and the widely-reported pooled YES+PARTIAL metric ranks random directions
+above trained SAEs **for all four judges** and should not be used. Removing PARTIAL from
+the option set restores the correct ordering on all four judges (SAEs 21.3–33.7% against
+a 7.0–10.7% random floor, §14.7d), and the same-chapter slate costs the SAE 8.8–11.0
+points against the easy cross-chapter one on every judge at n = 136 (§14.7e).
 
 ---
 
@@ -1312,11 +1421,19 @@ is in δ.
 
 ### 16.1 Three-arm verdict — 4,911 held-out notes, 12 targets each
 
-| arm | on-target median δ | BH-sig (grounded) | off-target sig. (of 588) | specificity ratio |
-|---|---|---|---|---|
-| **`vanilla_pilot` (SAE, top-10)** | **0.352** | **10/10** | **0/588** | **12.4×** |
-| `diff_in_means_full` (10 grounded) | 0.055 | 4/10 | 20/588 | 1.165 |
-| `random_matched_full` (10 grounded) | **−0.096** | **0/10** | 9/588 | −1.53 |
+| arm | on-target median δ | on-target mean δ | BH-sig (grounded) | off-target sig. (of 588) | specificity ratio |
+|---|---|---|---|---|---|
+| **`vanilla_pilot` (SAE, top-10)** | **0.300** | **0.352** | **10/10** | **0/588** | **12.4×** |
+| `diff_in_means_full` (10 grounded) | 0.055 | 0.045 | 4/10 | 20/588 | 1.165 |
+| `random_matched_full` (10 grounded) | **−0.096** | **−0.090** | **0/10** | 9/588 | −1.53 |
+
+> **Corrected 2026-09-01.** This column previously read "on-target median δ" but carried
+> **0.352** for `vanilla_pilot` — that is the *mean* (`ablation_posthoc_summary.json →
+> off_target.mean_on_target_delta`); the median is **0.300**
+> (`ablation_summary.json → median_cliffs_delta_grounded`). The other two rows were
+> already medians (§16.2, §16.3), so the column mixed the two statistics. Both are now
+> given. The specificity ratio is built from the *mean*, which is why 0.352 belongs in
+> the table at all. Cliff's δ comparisons across arms should use the median column.
 
 ### 16.2 Random-matched — no causal effect at all
 
@@ -1393,7 +1510,9 @@ diffuse and comorbidity-entangled; the SAE isolates something causally sharper.
 | GemmaScope above \|r\| > 0.5 in the judge arms | §14.1 | not testable — only 4 held-out features exist |
 | PCA above \|r\| > 0.3 in the judge arms | §14.1 | not testable — population too small |
 | Second-explainer control (same features, different explainer model) | §14.7 | not run — would isolate explainer from judge |
-| Forced-binary arm (§14.7d) for the third judge | §14.7d | not run — redundant with exact-YES, which covers all 8 sources |
+| `~~Forced-binary arm (§14.7d) for judges 3 and 4~~` | §14.7d | ✅ run 2026-09-01; all four judges |
+| `~~Cross-chapter arm for judges 3 and 4~~` | §14.7e | ✅ run 2026-09-01; all four judges |
+| ReLU+L1 misses significance vs random under Gemini (*p* = 0.068) | §14.2 | open — JumpReLU is the robust arm; more random-arm features would raise power |
 | `~~Pull re-run LLM-judge artifacts from Modal~~` | §8, §10, §12, §14 | ✅ done 2026-08-31 |
 | `~~GemmaScope ablation post-hoc~~` | §11.2 | ✅ done 2026-09-01 — `configs/ablation_posthoc_gemmascope.yaml` |
 | `~~Pull directional-ablation artifacts from Modal~~` | §16 | ✅ done 2026-09-01 |
@@ -1415,7 +1534,7 @@ diffuse and comorbidity-entangled; the SAE isolates something causally sharper.
 | auto-interp | `auto_interp/jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z/` |
 | concordance arms (§14) | `auto_interp/{jumprelu…,vanilla_strat,vanilla_test_split,gemmascope_mid,gemmascope_test_split}/` |
 | judge sub-arms | `<run>/{arm0_eval,retrieval_eval,retrieval_eval_hardneg,binary_eval,deanchored_eval,shuffled_control}/` |
-| judges (§14) | `<run>/<arm>/{sonnet-4-6,deepseek-v3,gpt-5-mini}/` — S/D via Anthropic + OpenRouter, G via OpenRouter |
+| judges (§14) | `<run>/<arm>/{sonnet-4-6,deepseek-v3,gpt-5-mini,gemini-2.5-flash}/` — all via OpenRouter except Sonnet (Anthropic direct) |
 
 Tracked-vs-local-only policy, PHI status of each file, and `modal volume get` recovery
 commands: see `results/README.md`.
