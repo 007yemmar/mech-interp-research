@@ -1,0 +1,25 @@
+# JumpReLU s2 concordance replication -- ret_hn_son_ds, pub pool
+#
+# PRELIMINARY: SAE = ${jumprelu_run} @ step_00046000 (no LR decay, no final/).
+# Protocol = vanilla's: pool selection, r values, contexts and retrieval slates all
+# come from the 31 held-out shards (281-311) -- ${jumprelu_eval} covers exactly
+# those. Every value other than the paths is copied verbatim from
+# configs/fourarm/r2_hardneg_vanilla.yaml, so these rows sit next to the published §14 rows.
+# Generated 2026-09-26 (spec: docs/superpowers/specs/2026-09-26-jumprelu-s2-concordance-design.md).
+#
+# uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/seed_rep/ret_hn_son_ds_pub.yaml --detach
+
+auto_interp_dir: ${jumprelu_auto_interp}
+icd_eval_dir: ${jumprelu_eval}
+icd_csv_path: /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: ${jumprelu_auto_interp}/retrieval_eval_hardneg
+judges:
+- {slug: sonnet-4-6, backend: anthropic, model: claude-sonnet-4-6}
+- {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+n_distractors: 7
+same_chapter_distractors: true
+r_unrelated: 0.05
+thresholds: [0.3, 0.5]
+max_workers: 4
+logging_level: INFO

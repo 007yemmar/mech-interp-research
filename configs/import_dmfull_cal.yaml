@@ -18,7 +18,7 @@ held_out_shard_start: 281
 
 # Inputs for note-level calibration (no thresholds_npy supplied).
 activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
-sae_shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
+sae_shard_ckpt_dir: ${jumprelu_s0_eval}/shard_ckpt
 arm_c_selected_features_path: /out/sources/_shared/arm_c_selected_features.json
 calibration_n_shards: 6
 calibration_notes_per_shard: 50

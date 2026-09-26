@@ -1,0 +1,8 @@
+# Arm 1 -- de-anchored concordance for vanilla. Identical to the published prompt
+# except the 'point-biserial r = X' sentence is removed. Explanations held fixed.
+auto_interp_dir: /out/auto_interp/vanilla_test_split
+output_dir: /out/auto_interp/vanilla_test_split/deanchored_eval
+judges:
+# Sonnet already completed and wrote its verdicts; only DeepSeek is missing.
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+logging_level: INFO

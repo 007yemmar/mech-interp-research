@@ -1186,6 +1186,35 @@ class TestRunAutoInterpSmoke:
 
         assert call_count["n"] > 0
 
+        # --- max_workers>1 changes throughput only: identical artifacts ---
+        par_dir = tmp_path / "output_parallel"
+        par_summary = run_auto_interp(
+            sae_checkpoint=None,
+            activations_dir=str(act_dir),
+            icd_eval_dir=str(eval_dir),
+            icd_csv_path="unused.csv",
+            output_dir=str(par_dir),
+            n_strong_grounded=1,
+            n_weak_grounded=1,
+            n_non_grounded=1,
+            n_dead=1,
+            explainer_model="test-model",
+            scorers=["fuzzing", "detection"],
+            concordance_thresholds=[0.3, 0.5],
+            random_seed=42,
+            max_workers=4,
+            _client=original_mock,
+            _sae=sae,
+            _tokenizer=_FakeTokenizer(),
+            _note_texts=note_texts,
+        )
+        assert par_summary["n_errors"] == 0
+        for name in ("feature_catalog.csv", "concordance_results.csv"):
+            assert (par_dir / name).read_text() == (output_dir / name).read_text(), name
+        ser_ckpts = sorted(p.name for p in (output_dir / "per_feature").rglob("*.json"))
+        par_ckpts = sorted(p.name for p in (par_dir / "per_feature").rglob("*.json"))
+        assert par_ckpts == ser_ckpts
+
 
 # ---------------------------------------------------------------------------
 # test_score_explanation_against_contexts
@@ -1531,3 +1560,123 @@ def test_binary_parser_resolves_and_flags_ambiguity():
     assert parse_binary_response("could be YES or NO here")["verdict"] == "UNKNOWN"
     assert parse_binary_response("")["verdict"] == "UNKNOWN"
     assert parse_binary_response("YES | x")["rationale"] == "x"
+
+
+def test_judge_openrouter_survives_a_null_response():
+    """A null OpenRouter body must not abort the run.
+
+    OpenRouter returns HTTP 200 with an empty choices list or a null message when
+    an upstream provider errors, and the SDK does not raise. Indexing it blindly
+    killed the DeepSeek leg of the de-anchored study after Sonnet had already
+    finished. Returning "" lets the caller's parser record UNKNOWN for that one
+    item and continue -- safe because every parser here maps unrecognised text to
+    UNKNOWN rather than to a verdict.
+    """
+    from types import SimpleNamespace
+
+    from mech_interp_research.concordance_multi_judge import Judge
+
+    class _Empty:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[])
+
+    class _NullMsg:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[SimpleNamespace(message=None)])
+
+    class _NullContent:
+        def create(self, **kw):
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None))])
+
+    for impl in (_Empty(), _NullMsg(), _NullContent()):
+        client = SimpleNamespace(chat=SimpleNamespace(completions=impl))
+        j = Judge("t", "openrouter", model="x", client=client)
+        assert j.complete("hi") == ""
+
+    ok = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **kw: SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="  YES | ok  "))]
+                )
+            )
+        )
+    )
+    assert Judge("t", "openrouter", model="x", client=ok).complete("hi") == "YES | ok"
+
+
+# ---------------------------------------------------------------------------
+# max_workers: concurrent per-feature phase
+# ---------------------------------------------------------------------------
+
+
+def test_feature_loop_preserves_input_order_under_concurrency():
+    """Results come back in input order however the threads finish."""
+    import random
+    import time
+
+    from mech_interp_research.auto_interp import _run_feature_loop
+
+    items = list(range(40))
+
+    def slow(i):
+        time.sleep(random.random() / 200)
+        return i * 10
+
+    for workers in (1, 8):
+        progress = []
+        out = _run_feature_loop(items, slow, max_workers=workers, on_progress=progress.append)
+        assert out == [i * 10 for i in items]
+        assert progress == list(range(1, 41))
+
+
+def test_feature_loop_propagates_worker_exceptions():
+    """process_one owns error handling; anything it lets escape must fail loudly."""
+    import pytest
+
+    from mech_interp_research.auto_interp import _run_feature_loop
+
+    def boom(i):
+        if i == 3:
+            raise RuntimeError("x")
+        return i
+
+    for workers in (1, 4):
+        with pytest.raises(RuntimeError):
+            _run_feature_loop(list(range(6)), boom, max_workers=workers)
+
+
+def test_locked_tokenizer_serialises_encode_and_decode():
+    """Fast tokenizers raise 'Already borrowed' when two threads use them at once."""
+    import threading
+    import time
+
+    from mech_interp_research.auto_interp import _LockedTokenizer
+
+    active = {"n": 0, "max": 0}
+
+    class _Tok:
+        model_max_length = 8192
+
+        def _enter(self):
+            active["n"] += 1
+            active["max"] = max(active["max"], active["n"])
+            time.sleep(0.001)
+            active["n"] -= 1
+
+        def __call__(self, text, **kw):
+            self._enter()
+            return {"input_ids": [1]}
+
+        def decode(self, ids, **kw):
+            self._enter()
+            return "t"
+
+    tok = _LockedTokenizer(_Tok())
+    threads = [threading.Thread(target=lambda: [tok("a"), tok.decode([1])]) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert active["max"] == 1
+    assert tok.model_max_length == 8192  # attribute passthrough

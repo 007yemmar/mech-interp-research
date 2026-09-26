@@ -1,0 +1,27 @@
+# Fourth judge (Google Gemini 2.5 Flash) via OpenRouter — same-chapter retrieval, pca.
+# Adds a fourth lab (Google) to the Sonnet-4.6 / DeepSeek-V3 / GPT-5-mini panel.
+# Gemini 2.5 Flash: 0 reasoning tokens and no rate cap at 60-way concurrency
+# (screened 2026-09-01), so it needs no reasoning_effort override.
+#
+# output_dir is set EXPLICITLY on every arm. Leaving it null defaults to
+# <auto_interp_dir>/retrieval_eval and has previously overwritten published
+# cross-chapter results. Do not remove it.
+#
+# Run: uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/judge3/ret_hn_pca.yaml --detach
+
+auto_interp_dir: /out/auto_interp/judgetest/pca_note
+icd_eval_dir:    ${jumprelu_s0_eval}
+icd_csv_path:    /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: /out/auto_interp/judgetest/pca_note/retrieval_eval_hardneg
+
+judges:
+  - {slug: gemini-2.5-flash, backend: openrouter, model: google/gemini-2.5-flash}
+
+same_chapter_distractors: true
+n_distractors: 7
+r_unrelated: 0.05
+thresholds: [0.3, 0.5]
+max_workers: 4
+client_max_retries: 8
+logging_level: INFO

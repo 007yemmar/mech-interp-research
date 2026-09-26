@@ -1,7 +1,7 @@
 # Multi-judge discriminative concordance (post-hoc; reuses the completed run).
 # Run: uv run modal run modal_app/concordance_multi_judge.py --config-file configs/concordance_multi_judge.yaml
-auto_interp_dir: ${jumprelu_auto_interp}
-icd_eval_dir:    ${jumprelu_eval}
+auto_interp_dir: ${jumprelu_s0_auto_interp}
+icd_eval_dir:    ${jumprelu_s0_eval}
 output_dir: null   # null -> <auto_interp_dir>/multi_judge
 icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
 

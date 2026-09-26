@@ -7,8 +7,8 @@
 # Run:
 #   uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/retrieval_panel.yaml --detach
 
-auto_interp_dir: ${jumprelu_auto_interp}
-icd_eval_dir:    ${jumprelu_eval}
+auto_interp_dir: ${jumprelu_s0_auto_interp}
+icd_eval_dir:    ${jumprelu_s0_eval}
 icd_csv_path:    /data/sample_50k.csv
 icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
 output_dir: null

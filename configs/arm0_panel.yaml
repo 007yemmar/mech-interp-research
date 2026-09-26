@@ -1,7 +1,7 @@
 # Arm 0 (verbatim original YES/PARTIAL concordance prompt) — 3-judge panel via OpenRouter.
 # Same prompt as the published Table 2; only the judge model changes.
 # Run: uv run modal run --detach modal_app/arm0_eval.py --config-file configs/arm0_panel.yaml --detach
-auto_interp_dir: ${jumprelu_auto_interp}
+auto_interp_dir: ${jumprelu_s0_auto_interp}
 output_dir: null
 judges:
   - {slug: gpt-4o,      backend: openrouter, model: openai/gpt-4o}

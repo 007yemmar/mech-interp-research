@@ -1,0 +1,26 @@
+# Third judge (OpenAI GPT-5-mini) via OpenRouter — same-chapter retrieval, jr_pub.
+# Adds a third lab to the Sonnet-4.6 / DeepSeek-V3 panel so the judge-invariance
+# claim in RESULTS.md §14.7a rests on three families, not two.
+#
+# output_dir is set EXPLICITLY on every arm. Leaving it null defaults to
+# <auto_interp_dir>/retrieval_eval and has previously overwritten published
+# cross-chapter results. Do not remove it.
+#
+# Run: uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/judge3/ret_hn_jr_pub.yaml --detach
+
+auto_interp_dir: ${jumprelu_s0_auto_interp}
+icd_eval_dir:    ${jumprelu_s0_eval}
+icd_csv_path:    /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: ${jumprelu_s0_auto_interp}/retrieval_eval_hardneg
+
+judges:
+  - {slug: gpt-5-mini, backend: openrouter, model: openai/gpt-5-mini, reasoning_effort: minimal}
+
+same_chapter_distractors: true
+n_distractors: 7
+r_unrelated: 0.05
+thresholds: [0.3, 0.5]
+max_workers: 4
+client_max_retries: 8
+logging_level: INFO

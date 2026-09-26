@@ -1,0 +1,115 @@
+# Source rows for the §14 concordance-validation tables
+# (results/concordance_validation/F*.csv and RESULTS.md §14).
+#
+# Consumed by scripts/build_concordance_results.py. Paths are volume-relative on
+# `sae-artifacts` (a leading /out/ is stripped), and may use ${var} from
+# configs/runs.yaml. Rows are emitted in the order listed here.
+#
+# Per source:
+#   key        stable id used by `groups` below
+#   label      Source column in F1-F6 / F8 (F7 / F9 use `label_short` if given)
+#   type       Type column in F1-F5
+#   pool_dirs  one auto_interp output dir per pool. Several dirs = union by
+#              feature_idx, the first-listed pool winning for a shared feature.
+#   tables     optional: restrict the row to these tables (F1 F2 F3 F4 F4b F5 F5b
+#              F6 F7 F8 F8c F9); default is every table it has data for.
+#   fisher_ref true for the random floor that F8 / §14.2 test against.
+#
+# To add a new SAE: append its pub and strat sources (copy the jumprelu_s0 pair,
+# change key/label/pool_dirs), add a group for §14, then re-run the builder.
+#
+# judges: display name -> slug per arm. `auto_interp` = the Sonnet verdict written
+# by auto_interp itself (<pool>/concordance_results.csv, the verbatim Table-2
+# prompt); any other slug is <pool>/<arm>/<slug>/. A list is a preference order.
+# `concordance_s14` overrides the concordance slug for the §14 four-judge tables
+# only: §14 uses the arm0 Sonnet re-judge where one exists (JumpReLU seed-0 pub
+# pool) so all four judges come from the one arm0 harness, and falls back to the
+# auto_interp verdict elsewhere. The two-judge F-tables use auto_interp throughout.
+judges:
+  Sonnet: {concordance: auto_interp, concordance_s14: [sonnet-4-6, auto_interp], retrieval: sonnet-4-6, deanchored: sonnet-4-6, binary: sonnet-4-6}
+  DeepSeek: {concordance: deepseek-v3, retrieval: deepseek-v3, deanchored: deepseek-v3, binary: deepseek-v3}
+  GPT-5-mini: {concordance: gpt-5-mini, retrieval: gpt-5-mini, deanchored: gpt-5-mini, binary: gpt-5-mini}
+  Gemini: {concordance: gemini-2.5-flash, retrieval: gemini-2.5-flash, deanchored: gemini-2.5-flash, binary: gemini-2.5-flash}
+
+sources:
+  - key: jumprelu_pub
+    label: SAE jumprelu (pub 380)
+    label_short: SAE jumprelu (380)
+    type: domain, JumpReLU
+    pool_dirs: ["${jumprelu_s0_auto_interp}"]
+  - key: jumprelu_strat
+    label: SAE jumprelu (strat 200)
+    type: domain, stratified
+    pool_dirs: [auto_interp/judgetest/jumprelu]
+  - key: vanilla_pub
+    label: SAE vanilla (380)
+    type: domain, ReLU+L1
+    pool_dirs: [auto_interp/vanilla_test_split]
+  - key: vanilla_strat
+    label: SAE vanilla (strat 200)
+    type: domain, stratified
+    pool_dirs: [auto_interp/vanilla_strat]
+  # JumpReLU seed 2 @ step_00046000 -- PRELIMINARY (no LR decay, no final/).
+  # Vanilla's protocol (held-out selection, r, contexts and slates), so its rows
+  # sit beside vanilla's; the seed-0 JumpReLU rows above used full-corpus
+  # selection and contexts. configs/seed_rep/ produced these pools.
+  - key: jumprelu_s2_pub
+    label: SAE jumprelu s2 prelim (pub 380)
+    label_short: SAE jumprelu s2 prelim (380)
+    type: domain, JumpReLU
+    pool_dirs: ["${jumprelu_auto_interp}"]
+  - key: jumprelu_s2_strat
+    label: SAE jumprelu s2 prelim (strat 200)
+    type: domain, stratified
+    pool_dirs: ["${jumprelu_auto_interp}_strat"]
+  # GemmaScope: the published tables label it two ways. F1-F5b and F8-coarse use
+  # the 154-feature union (113 test-split + 41 mid-band); F6 and fine F8 use the
+  # 113-feature test-split pool alone.
+  - key: gemmascope
+    label: SAE gemmascope (154)
+    type: general-purpose
+    pool_dirs: [auto_interp/gemmascope_test_split, auto_interp/gemmascope_mid]
+    tables: [F1, F2, F3, F4, F4b, F5, F5b, F8c]
+  - key: gemmascope_113
+    label: SAE gemmascope (113)
+    type: general-purpose
+    pool_dirs: [auto_interp/gemmascope_test_split]
+    tables: [F6, F8]
+  - key: keyword
+    label: keyword (39)
+    type: lexical
+    pool_dirs: [auto_interp/judgetest/keyword_b1]
+  - key: random
+    label: random (300)
+    type: random directions
+    pool_dirs: [auto_interp/judgetest/random_hard]
+    fisher_ref: true
+  - key: random_spanning
+    label: random spanning (150)
+    type: random directions
+    pool_dirs: [auto_interp/judgetest/random]
+  - key: dm
+    label: diff-in-means (46)
+    type: supervised
+    pool_dirs: [auto_interp/judgetest/dmfull_cal]
+  - key: probe
+    label: probe LR (46)
+    type: supervised
+    pool_dirs: [auto_interp/judgetest/probe_bal_cal]
+  - key: pca
+    label: PCA (35)
+    type: unsupervised
+    pool_dirs: [auto_interp/judgetest/pca_note]
+
+# §14 (3-band, 4-judge) rows. RESULTS.md §14: "SAE rows merge the published
+# 380-feature pool with the stratified sampling pool".
+groups:
+  - {label: SAE JumpReLU, members: [jumprelu_pub, jumprelu_strat]}
+  - {label: SAE ReLU+L1, members: [vanilla_pub, vanilla_strat]}
+  - {label: SAE JumpReLU s2 (prelim 46k), members: [jumprelu_s2_pub, jumprelu_s2_strat]}
+  - {label: SAE GemmaScope, members: [gemmascope]}
+  - {label: keyword (lexical ceiling), members: [keyword]}
+  - {label: diff-in-means (supervised), members: [dm]}
+  - {label: probe LR (supervised), members: [probe]}
+  - {label: PCA, members: [pca]}
+  - {label: random directions (floor), members: [random], fisher_ref: true}

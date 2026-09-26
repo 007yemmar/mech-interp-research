@@ -1,0 +1,86 @@
+# JumpReLU s2 concordance replication -- auto_interp, strat pool
+#
+# PRELIMINARY: SAE = ${jumprelu_run} @ step_00046000 (no LR decay, no final/).
+# Protocol = vanilla's: pool selection, r values, contexts and retrieval slates all
+# come from the 31 held-out shards (281-311) -- ${jumprelu_eval} covers exactly
+# those. Every value other than the paths is copied verbatim from
+# configs/judge_vanilla_strat.yaml, so these rows sit next to the published §14 rows.
+# Generated 2026-09-26 (spec: docs/superpowers/specs/2026-09-26-jumprelu-s2-concordance-design.md).
+#
+# uv run modal run --detach modal_app/auto_interp.py --config-file configs/seed_rep/auto_interp_strat200.yaml --detach
+
+# Published 380-feature rule applied to the vanilla SAE, on held-out shards.
+#
+# Same selection (280 strong at r>0.4 + 100 weak at 0.1-0.3), same prompts and
+# thresholds as the published jumprelu run, so results drop straight into the
+# R1/R2 tables. For vanilla: 291 features clear r>0.4 (jumprelu: 276), max |r| 0.859 vs 0.864 --
+# a like-for-like 380-feature replication of the published run.
+
+# --- paths ---
+sae_checkpoint: ${jumprelu_ckpt}
+activations_dir: /out/activations/google-gemma-2-2b_L16_50000notes_39c5801_20260423T193837Z_centered
+icd_eval_dir: ${jumprelu_eval}
+# 31 held-out shards, not the 312-shard full checkpoint: auto_interp's shard
+# fan-out is bounded only by what note_vectors covers, and the full checkpoint
+# drove an 83-minute extraction that never survived to the explainer.
+shard_ckpt_dir: ${jumprelu_eval}/shard_ckpt
+icd_csv_path: /data/sample_50k.csv
+output_dir: ${jumprelu_auto_interp}_strat
+
+# --- feature selection ---
+# explicit_features pins the stratified pool, so the tier knobs are inert.
+n_strong_grounded: 0
+n_weak_grounded: 0
+# Noise-floor tiers OFF. The published config carries n_non_grounded: 1000 and
+# n_dead: 100, which inflated the selection to 616 (vanilla) and 1213
+# (gemmascope) features. Those tiers have no ICD code, so they yield no
+# concordance verdict and never enter the banded tables -- ~60% and ~90% of the
+# calls respectively bought nothing reportable. They are already established
+# for jumprelu, and the architecture question is answered by the grounded
+# features alone. Fewer features also shrinks the shard union
+# select_shards_for_features returns, so extraction shortens too.
+n_non_grounded: 0
+n_dead: 0
+random_seed: 42
+
+# --- explanation ---
+explainer_model: claude-sonnet-4-6
+comparison_model: null
+n_contexts_train: 20         # activating contexts shown to the explainer
+n_contexts_test: 10          # held out for scoring (5 pos, 5 neg)
+max_tokens_context: 30       # +/- tokens around trigger token
+
+# --- scoring ---
+# Fuzzing/Detection do not affect the concordance verdict and are half the
+# calls; the published run included them, this one does not.
+scorers: []
+
+# --- post-processing ---
+concordance_model: claude-sonnet-4-6
+concordance_thresholds:
+  - 0.3
+  - 0.4
+  - 0.5
+
+# --- ICD descriptions (for concordance prompts) ---
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+
+# --- tokenizer ---
+model_name: google/gemma-2-2b
+
+# --- resume ---
+checkpoint_dir: null         # auto-detected from output_dir
+
+logging_level: INFO
+
+# 40 features per |r| bucket (0.2-0.3 ... 0.6+), matching the JumpReLU stratified
+# pool. The published 380-rule leaves 0.3-0.4 EMPTY by construction (strong is
+# r>0.4, weak is 0.1-0.3), so vanilla's replication of JumpReLU was approximate
+# in exactly the band where hit@1 transitions. 134 of 200 already have contexts
+# from the 380 run; auto_interp extracts only the remaining 66.
+explicit_features: [[106, "icd9_2851"], [462, "icd9_V4581"], [510, "icd9_V5867"], [541, "icd9_4280"], [822, "icd9_2449"], [925, "icd9_2449"], [1003, "icd9_V5861"], [1100, "icd9_5990"], [1153, "icd9_2724"], [1299, "icd9_53081"], [1413, "icd9_4280"], [1492, "icd9_4280"], [1560, "icd9_5849"], [1561, "icd9_5849"], [1562, "icd9_53081"], [1817, "icd9_5856"], [1895, "icd9_V5867"], [1912, "icd9_41401"], [1926, "icd9_5849"], [1959, "icd9_4280"], [1976, "icd9_2875"], [2173, "icd9_2875"], [2176, "icd9_32723"], [2237, "icd9_V5861"], [2247, "icd9_V4581"], [2345, "icd9_2720"], [2353, "icd9_2449"], [2374, "icd9_2761"], [2429, "icd9_2875"], [2463, "icd9_41401"], [2579, "icd9_V5867"], [2582, "icd9_2720"], [2748, "icd9_5990"], [2898, "icd9_V5861"], [2946, "icd9_42731"], [2980, "icd9_V5861"], [2981, "icd9_V5867"], [3190, "icd9_5849"], [3373, "icd9_4280"], [3536, "icd9_2724"], [3609, "icd9_2449"], [3625, "icd9_4280"], [3729, "icd9_5990"], [3833, "icd9_27800"], [3859, "icd9_42731"], [3892, "icd9_5990"], [3920, "icd9_42731"], [4083, "icd9_5849"], [4148, "icd9_4280"], [4203, "icd9_4280"], [4234, "icd9_42731"], [4248, "icd9_4019"], [4464, "icd9_42731"], [4529, "icd9_V4986"], [4538, "icd9_5856"], [4612, "icd9_V5861"], [5127, "icd9_V4986"], [5223, "icd9_5849"], [5325, "icd9_2749"], [5368, "icd9_4280"], [5526, "icd9_5849"], [5534, "icd9_49390"], [5822, "icd9_4280"], [5840, "icd9_42731"], [5959, "icd9_25000"], [5976, "icd9_5856"], [6016, "icd9_25000"], [6094, "icd9_5990"], [6439, "icd9_41401"], [6490, "icd9_4280"], [6501, "icd9_4280"], [6550, "icd9_4280"], [6718, "icd9_2762"], [6771, "icd9_4280"], [6780, "icd9_2724"], [6791, "icd9_42731"], [6913, "icd9_53081"], [6937, "icd9_V4986"], [6952, "icd9_40390"], [7050, "icd9_5856"], [7054, "icd9_5856"], [7316, "icd9_5990"], [7322, "icd9_5849"], [7581, "icd9_5990"], [7589, "icd9_V5861"], [7590, "icd9_5856"], [7742, "icd9_4280"], [7753, "icd9_2449"], [7819, "icd9_41401"], [7830, "icd9_5849"], [7832, "icd9_42731"], [7854, "icd9_2761"], [7924, "icd9_V5867"], [8067, "icd9_4280"], [8117, "icd9_V4986"], [8142, "icd9_4280"], [8202, "icd9_V5867"], [8273, "icd9_4280"], [8381, "icd9_V5867"], [8385, "icd9_V5861"], [8889, "icd9_4280"], [8919, "icd9_4280"], [9012, "icd9_25000"], [9030, "icd9_2720"], [9136, "icd9_4280"], [9139, "icd9_V1582"], [9186, "icd9_2449"], [9313, "icd9_4280"], [9331, "icd9_2749"], [9532, "icd9_4280"], [9607, "icd9_41401"], [9728, "icd9_2851"], [9923, "icd9_42731"], [10397, "icd9_4280"], [10430, "icd9_V4581"], [10495, "icd9_4280"], [10744, "icd9_2749"], [10787, "icd9_41401"], [10894, "icd9_4280"], [10954, "icd9_2749"], [10971, "icd9_V5867"], [10994, "icd9_41401"], [11101, "icd9_25000"], [11108, "icd9_3051"], [11250, "icd9_2762"], [11395, "icd9_5849"], [11525, "icd9_4280"], [11568, "icd9_4280"], [11570, "icd9_4280"], [11578, "icd9_5849"], [11901, "icd9_5990"], [11907, "icd9_5849"], [12108, "icd9_32723"], [12112, "icd9_2724"], [12236, "icd9_32723"], [12338, "icd9_42731"], [12360, "icd9_5856"], [12562, "icd9_41401"], [13022, "icd9_4280"], [13054, "icd9_4280"], [13252, "icd9_2859"], [13279, "icd9_4019"], [13295, "icd9_V5867"], [13346, "icd9_5990"], [13366, "icd9_41401"], [13517, "icd9_496"], [13522, "icd9_4280"], [13539, "icd9_5990"], [13668, "icd9_412"], [13712, "icd9_2851"], [13906, "icd9_2851"], [13958, "icd9_5856"], [13984, "icd9_4280"], [14011, "icd9_4280"], [14172, "icd9_2449"], [14180, "icd9_V4986"], [14220, "icd9_5856"], [14230, "icd9_5849"], [14246, "icd9_5856"], [14435, "icd9_25000"], [14635, "icd9_5856"], [14747, "icd9_2761"], [15051, "icd9_V5867"], [15103, "icd9_V4581"], [15110, "icd9_4280"], [15115, "icd9_60000"], [15226, "icd9_2875"], [15298, "icd9_5849"], [15319, "icd9_4280"], [15349, "icd9_496"], [15493, "icd9_5849"], [15766, "icd9_V5866"], [15774, "icd9_2449"], [15787, "icd9_5856"], [16305, "icd9_V4986"], [16309, "icd9_V5867"], [16334, "icd9_4280"], [16521, "icd9_2851"], [16604, "icd9_5856"], [16722, "icd9_32723"], [16994, "icd9_5856"], [17143, "icd9_496"], [17191, "icd9_30000"], [17225, "icd9_5849"], [17293, "icd9_5849"], [17540, "icd9_42731"], [17621, "icd9_4280"], [17633, "icd9_5849"], [17677, "icd9_41401"], [17764, "icd9_4280"], [17818, "icd9_V5861"], [17826, "icd9_2724"], [17841, "icd9_5856"], [18009, "icd9_2724"], [18101, "icd9_2449"], [18106, "icd9_42731"], [18137, "icd9_53081"], [18260, "icd9_41401"], [18345, "icd9_42731"], [18413, "icd9_V5867"]]
+
+# --- concurrency (seed_rep) ---
+# Throughput only: prompts, models and result order are unchanged. Combined
+# with the other pool this stays under the org's 50 req/min Anthropic cap.
+max_workers: 1

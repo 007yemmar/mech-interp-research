@@ -783,3 +783,222 @@ def test_parse_retrieval_angle_bracket_letter():
     assert (
         parse_retrieval_response("A more specific code fits", slate)["picked_code"] == "__unparse__"
     )
+
+
+class _FakeCompletions:
+    def __init__(self):
+        self.last_kwargs = None
+
+    def create(self, **kwargs):
+        self.last_kwargs = kwargs
+        msg = type("M", (), {"content": "a | because"})()
+        return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
+
+
+class _FakeORClient:
+    def __init__(self):
+        self.chat = type("Chat", (), {"completions": _FakeCompletions()})()
+
+
+def test_reasoning_effort_is_sent_only_when_configured():
+    """GPT-5-family judges must suppress reasoning, or they return empty content.
+
+    A reasoning model spends the completion budget on hidden reasoning tokens and
+    returns "" -- which every parser here records as UNKNOWN/__unparse__, silently
+    scoring a non-answer as a wrong answer (this corrupted a full judge run).
+    """
+    from mech_interp_research.concordance_multi_judge import build_judges
+
+    client = _FakeORClient()
+    (plain,) = build_judges(
+        [{"slug": "d", "backend": "openrouter", "model": "deepseek/deepseek-chat"}],
+        openrouter_client=client,
+    )
+    plain.complete("hi")
+    assert "extra_body" not in client.chat.completions.last_kwargs
+
+    (reasoner,) = build_judges(
+        [
+            {
+                "slug": "g",
+                "backend": "openrouter",
+                "model": "openai/gpt-5-mini",
+                "reasoning_effort": "minimal",
+            }
+        ],
+        openrouter_client=client,
+    )
+    reasoner.complete("hi")
+    assert client.chat.completions.last_kwargs["extra_body"] == {"reasoning": {"effort": "minimal"}}
+
+
+# ---------------------------------------------------------------------------
+# Forced-binary batch judging + summary merge
+# ---------------------------------------------------------------------------
+
+
+class _RecordingJudge:
+    """Judge stub whose verdict encodes the code it was asked about."""
+
+    slug = "stub"
+
+    def __init__(self, delay_pattern=None):
+        self.delay_pattern = delay_pattern or {}
+        self.seen = []
+
+    def complete(self, prompt, max_tokens=256):
+        import time
+
+        code = prompt.split("ICD-9 diagnosis code ")[1].split(" ")[0].strip()
+        # Sleep out of input order so a concurrent runner that returns results in
+        # completion order rather than input order fails this test.
+        time.sleep(self.delay_pattern.get(code, 0.0))
+        self.seen.append(code)
+        return f"YES | verdict for {code}"
+
+
+def _rows(codes):
+    return [
+        {
+            "feature_idx": str(i),
+            "explanation": f"explanation {i}",
+            "concordance_icd_code": c,
+            "concordance_icd_description": f"desc {c}",
+            "concordance_verdict": "PARTIAL",
+            "concordance_r_pb": "0.5",
+        }
+        for i, c in enumerate(codes)
+    ]
+
+
+def test_judge_binary_batch_preserves_input_order_under_concurrency():
+    """Verdict N must belong to row N.
+
+    The per-judge CSVs are compared row for row against earlier judges' files, so
+    a runner that emitted results in completion order would silently misalign
+    every verdict with a different feature.
+    """
+    from mech_interp_research.concordance_multi_judge import judge_binary_batch
+
+    codes = ["4019", "2724", "53081", "4280", "25000"]
+    # First row slowest, last row fastest: completion order is the reverse of input.
+    judge = _RecordingJudge(delay_pattern={"4019": 0.06, "2724": 0.04, "25000": 0.0})
+    out = judge_binary_batch(judge, _rows(codes), max_workers=5)
+
+    assert len(out) == len(codes)
+    for code, verdict in zip(codes, out, strict=True):
+        assert code in verdict["rationale"], f"row for {code} got {verdict['rationale']!r}"
+    assert set(judge.seen) == set(codes)
+
+
+def test_judge_binary_batch_propagates_exceptions():
+    """An unreachable judge must fail the run, not fill a column with UNKNOWN.
+
+    A silent failure is scored as a wrong answer by every parser here, which
+    produces a plausible-looking summary rather than an error.
+    """
+    import pytest
+
+    from mech_interp_research.concordance_multi_judge import judge_binary_batch
+
+    class _Broken:
+        slug = "broken"
+
+        def complete(self, prompt, max_tokens=256):
+            raise RuntimeError("403 model not available")
+
+    with pytest.raises(RuntimeError, match="403"):
+        judge_binary_batch(_Broken(), _rows(["4019", "2724"]), max_workers=2)
+
+
+def test_merge_binary_summary_keeps_judges_from_earlier_runs():
+    """Adding a judge must not erase the judges already on the volume."""
+    from mech_interp_research.concordance_multi_judge import merge_binary_summary
+
+    existing = {
+        "source": "/out/a/concordance_results.csv",
+        "n_features": 380,
+        "judges": {
+            "sonnet-4-6": {"n": 380, "binary_yes_pct": 32.4},
+            "deepseek-v3": {"n": 380, "binary_yes_pct": 22.4},
+        },
+    }
+    new = {
+        "source": "/out/a/concordance_results.csv",
+        "n_features": 380,
+        "judges": {"gemini-2.5-flash": {"n": 380, "binary_yes_pct": 27.0}},
+    }
+
+    merged = merge_binary_summary(existing, new)
+    assert set(merged["judges"]) == {"sonnet-4-6", "deepseek-v3", "gemini-2.5-flash"}
+    assert merged["judges"]["sonnet-4-6"]["binary_yes_pct"] == 32.4
+    assert merged["judges"]["gemini-2.5-flash"]["binary_yes_pct"] == 27.0
+
+
+def test_merge_binary_summary_rerun_supersedes_same_slug():
+    from mech_interp_research.concordance_multi_judge import merge_binary_summary
+
+    merged = merge_binary_summary(
+        {"judges": {"gpt-5-mini": {"binary_yes_pct": 1.0}}},
+        {"judges": {"gpt-5-mini": {"binary_yes_pct": 29.0}}},
+    )
+    assert merged["judges"]["gpt-5-mini"]["binary_yes_pct"] == 29.0
+
+
+def test_merge_binary_summary_handles_absent_prior():
+    from mech_interp_research.concordance_multi_judge import merge_binary_summary
+
+    new = {"judges": {"gemini-2.5-flash": {"n": 300}}}
+    assert merge_binary_summary(None, new) == new
+
+
+def _write_verdicts(d, rows):
+    import csv as _csv
+
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / "binary_verdicts.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=["feature_idx", "original_verdict", "binary_verdict"])
+        w.writeheader()
+        w.writerows(rows)
+
+
+def test_rebuild_binary_summary_recovers_a_judge_lost_to_a_concurrent_write(tmp_path):
+    """The roll-up must be derivable from the per-judge CSVs.
+
+    Two judges running concurrently against one output directory both load the
+    same prior summary, add themselves, and the second write drops the first --
+    which is how a completed Gemini leg went missing while its verdict CSV sat
+    intact on the volume. Rebuilding from disk repairs that.
+    """
+    from mech_interp_research.concordance_multi_judge import rebuild_binary_summary
+
+    _write_verdicts(
+        tmp_path / "sonnet-4-6",
+        [{"feature_idx": "1", "original_verdict": "PARTIAL", "binary_verdict": "YES"}] * 1
+        + [{"feature_idx": "2", "original_verdict": "NO", "binary_verdict": "NO"}] * 3,
+    )
+    _write_verdicts(
+        tmp_path / "gemini-2.5-flash",
+        [{"feature_idx": "1", "original_verdict": "PARTIAL", "binary_verdict": "NO"}] * 4,
+    )
+    # A stale roll-up naming only one judge, exactly as a lost race leaves it.
+    (tmp_path / "binary_summary.json").write_text('{"judges": {"sonnet-4-6": {}}}')
+
+    out = rebuild_binary_summary(tmp_path, source="/out/x/concordance_results.csv")
+    assert sorted(out["judges"]) == ["gemini-2.5-flash", "sonnet-4-6"]
+    assert out["judges"]["sonnet-4-6"]["binary_yes_pct"] == 25.0
+    assert out["judges"]["sonnet-4-6"]["partial_to_yes_pct"] == 100.0
+    assert out["judges"]["gemini-2.5-flash"]["binary_yes_pct"] == 0.0
+    assert out["n_features"] == 4
+
+
+def test_rebuild_binary_summary_ignores_dirs_without_verdicts(tmp_path):
+    from mech_interp_research.concordance_multi_judge import rebuild_binary_summary
+
+    _write_verdicts(
+        tmp_path / "gpt-5-mini",
+        [{"feature_idx": "1", "original_verdict": "NO", "binary_verdict": "YES"}],
+    )
+    (tmp_path / "aborted-judge").mkdir()
+    out = rebuild_binary_summary(tmp_path)
+    assert sorted(out["judges"]) == ["gpt-5-mini"]

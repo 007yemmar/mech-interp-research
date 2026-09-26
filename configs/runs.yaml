@@ -39,14 +39,32 @@ vanilla_ablation: /out/ablation/vanilla_pilot
 vanilla_ablation_extended: /out/ablation/vanilla_pilot_extended
 
 # --- JumpReLU SAE ----------------------------------------------------------
-# Still the pre-retrain run. After the rerun, replace jumprelu_run with the new id
-# and change the jumprelu_ckpt suffix from step_00036000 to final.
-jumprelu_run: jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
-jumprelu_ckpt: /out/saes/${jumprelu_run}/step_00036000
-jumprelu_eval: /out/icd_eval/${jumprelu_run}
+# ACTIVE: seed=2, held-out-split rerun (feat/jumprelu-heldout-split, new WSD
+# schedule + eval_n_shards=31 held-out split). PRELIMINARY -- interrupted at
+# step 46,000, trigger_step was never set, so it never reached the LR-decay
+# phase and wrote no final/. jumprelu_ckpt/jumprelu_eval point at the latest
+# available checkpoint and its eval as an early diagnostic read, not a
+# finished result -- thresholds have not equilibrated and the LR has not
+# decayed. Once the run is resumed and completes, update the ckpt suffix from
+# step_00046000 to final and give jumprelu_eval a fresh directory (icd_eval
+# must be re-run against final/ -- shard_ckpt/ does not carry over from an
+# earlier checkpoint's encode).
+jumprelu_run: jumprelu_L16_d2304_e8_l01e+01_bw1e+00_s2_20260923T231651Z
+jumprelu_ckpt: /out/saes/${jumprelu_run}/step_00046000
+jumprelu_eval: /out/icd_eval/${jumprelu_run}_step46000_prelim
 jumprelu_auto_interp: /out/auto_interp/${jumprelu_run}
 jumprelu_ablation: /out/ablation/jumprelu_pilot
 jumprelu_ablation_extended: /out/ablation/jumprelu_pilot_extended
+
+# --- JumpReLU SAE, seed 0 (SUPERSEDED 2026-09-25) --------------------------
+# The run every already-published RESULTS.md JumpReLU number (through
+# 2026-09-24) was computed against. Configs that describe those published
+# results reference these jumprelu_s0_* names rather than jumprelu_*, so that
+# moving the active lines above never silently retargets them.
+jumprelu_s0_run: jumprelu_d2304_e8_l01e+01_bw1e+00_20260519T084742Z
+jumprelu_s0_ckpt: /out/saes/${jumprelu_s0_run}/step_00036000
+jumprelu_s0_eval: /out/icd_eval/${jumprelu_s0_run}
+jumprelu_s0_auto_interp: /out/auto_interp/${jumprelu_s0_run}
 
 # --- cross-SAE ------------------------------------------------------------
 necessity_audit: /out/necessity/sae_audit

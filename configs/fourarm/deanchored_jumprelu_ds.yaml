@@ -1,0 +1,8 @@
+# Arm 1 -- de-anchored concordance for jumprelu. Identical to the published prompt
+# except the 'point-biserial r = X' sentence is removed. Explanations held fixed.
+auto_interp_dir: ${jumprelu_s0_auto_interp}
+output_dir: ${jumprelu_s0_auto_interp}/deanchored_eval
+judges:
+# Sonnet already completed and wrote its verdicts; only DeepSeek is missing.
+  - {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+logging_level: INFO

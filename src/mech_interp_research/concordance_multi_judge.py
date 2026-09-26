@@ -37,12 +37,21 @@ logger = logging.getLogger(__name__)
 class Judge:
     """Uniform ``.complete(prompt) -> str`` over Anthropic and OpenRouter backends."""
 
-    def __init__(self, slug, backend, model=None, client=None, max_retries=6):
+    def __init__(
+        self, slug, backend, model=None, client=None, max_retries=6, reasoning_effort=None
+    ):
         self.slug = slug
         self.backend = backend
         self.model = model
         self.max_retries = max_retries
         self._client = client
+        # OpenRouter reasoning models (the GPT-5 family) spend the completion
+        # budget on hidden reasoning tokens and can return EMPTY content, which
+        # every parser here records as UNKNOWN/__unparse__ -- silently scoring a
+        # non-answer as a wrong answer. Setting effort explicitly suppresses that
+        # and is ~10x cheaper. Opt-in per judge so non-reasoning judges are
+        # unaffected (sending it to them would be a behaviour change).
+        self.reasoning_effort = reasoning_effort
 
     def complete(self, prompt: str, max_tokens: int = 256) -> str:
         if self.backend == "anthropic":
@@ -53,12 +62,27 @@ class Judge:
             )
             return resp.content[0].text.strip()
         if self.backend == "openrouter":
+            kwargs = {}
+            if self.reasoning_effort is not None:
+                kwargs["extra_body"] = {"reasoning": {"effort": self.reasoning_effort}}
             resp = self._client.chat.completions.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
+                **kwargs,
             )
-            return resp.choices[0].message.content.strip()
+            # OpenRouter can return HTTP 200 with an empty choices list or a null
+            # message body -- an upstream provider error the SDK does not raise on.
+            # Indexing it blindly aborts a whole run partway through (it killed the
+            # DeepSeek leg of the de-anchored study after the Sonnet leg had already
+            # completed). Return "" so the caller's parser records UNKNOWN for this
+            # one item and the run continues; a silent "" is safe because every
+            # parser here treats unrecognised text as UNKNOWN rather than as a
+            # verdict.
+            if not resp.choices:
+                return ""
+            msg = resp.choices[0].message
+            return (msg.content or "").strip() if msg is not None else ""
         raise ValueError(f"unknown backend {self.backend!r}")
 
 
@@ -70,7 +94,15 @@ def build_judges(judge_cfgs, *, anthropic_client=None, openrouter_client=None):
         if backend == "reuse":
             continue
         client = anthropic_client if backend == "anthropic" else openrouter_client
-        judges.append(Judge(cfg["slug"], backend, model=cfg.get("model"), client=client))
+        judges.append(
+            Judge(
+                cfg["slug"],
+                backend,
+                model=cfg.get("model"),
+                client=client,
+                reasoning_effort=cfg.get("reasoning_effort"),
+            )
+        )
     return judges
 
 
@@ -250,6 +282,104 @@ def judge_binary(judge, explanation, code, description) -> dict:
         explanation=explanation, code=code, description=description
     )
     return parse_binary_response(judge.complete(prompt))
+
+
+def judge_binary_batch(judge, rows, *, max_workers=4, progress=None) -> list[dict]:
+    """``judge_binary`` over ``rows`` concurrently, in input order.
+
+    Each verdict is an independent, stateless call, so concurrency changes
+    throughput only -- prompt, option set and ``max_tokens`` are untouched, which
+    is what keeps a re-run comparable with the serial judges that came before it.
+    Order is preserved because the per-judge verdict CSVs are read side by side,
+    row for row, against earlier judges' files.
+
+    Exceptions propagate, as in the serial path: a judge whose model id is
+    unreachable must fail the run loudly rather than fill a column with UNKNOWN,
+    which every parser here would otherwise score as a wrong answer.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: list[dict | None] = [None] * len(rows)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {
+            ex.submit(
+                judge_binary,
+                judge,
+                r["explanation"],
+                r["concordance_icd_code"],
+                r["concordance_icd_description"],
+            ): i
+            for i, r in enumerate(rows)
+        }
+        for done, fut in enumerate(as_completed(futures), start=1):
+            results[futures[fut]] = fut.result()
+            if progress is not None and done % 50 == 0:
+                progress(done, len(rows))
+    return [r for r in results if r is not None]
+
+
+def summarize_binary_verdicts(recs) -> dict:
+    """Per-judge block of ``binary_summary.json`` from that judge's verdict rows."""
+    n = len(recs)
+    part = [x for x in recs if x["original_verdict"] == "PARTIAL"]
+    part_yes = sum(1 for x in part if x["binary_verdict"] == "YES")
+    return {
+        "n": n,
+        "binary_yes_pct": 100 * sum(1 for x in recs if x["binary_verdict"] == "YES") / n,
+        "unknown_pct": 100 * sum(1 for x in recs if x["binary_verdict"] == "UNKNOWN") / n,
+        "n_originally_partial": len(part),
+        "partial_to_yes_pct": (100 * part_yes / len(part)) if part else None,
+    }
+
+
+def rebuild_binary_summary(out_dir, *, source=None) -> dict:
+    """Rebuild the whole roll-up from every ``<slug>/binary_verdicts.csv`` on disk.
+
+    Read-modify-write merging is not safe when two judges run concurrently against
+    the same output directory: both load the same prior file, add their own judge,
+    and the second write drops the first (this is how a Gemini leg went missing
+    after running alongside GPT-5-mini). Deriving the summary from the per-judge
+    CSVs instead makes the write idempotent -- the CSVs are the primary artifact
+    and each judge owns its own -- so any later run repairs the roll-up rather
+    than replacing it.
+    """
+    import csv as _csv
+
+    out_dir = Path(out_dir)
+    judges = {}
+    for d in sorted(p for p in out_dir.iterdir() if p.is_dir()):
+        f = d / "binary_verdicts.csv"
+        if not f.exists():
+            continue
+        with open(f, newline="") as fh:
+            recs = list(_csv.DictReader(fh))
+        if recs:
+            judges[d.name] = summarize_binary_verdicts(recs)
+    out = {"judges": judges}
+    if source is not None:
+        out["source"] = str(source)
+    if judges:
+        out["n_features"] = max(v["n"] for v in judges.values())
+    return out
+
+
+def merge_binary_summary(existing, new) -> dict:
+    """Fold a fresh binary-eval summary into one already written to the volume.
+
+    ``binary_summary.json`` is a roll-up keyed by judge slug. Rebuilding it from
+    only the judges of the current run erases every judge an earlier run wrote:
+    their per-judge ``binary_verdicts.csv`` survive in their own subdirectories,
+    but the roll-up that downstream readers actually load does not. Same-slug
+    entries are replaced, so a re-run supersedes itself; other slugs survive.
+    """
+    if not existing:
+        return new
+    merged = {k: v for k, v in existing.items() if k != "judges"}
+    merged.update({k: v for k, v in new.items() if k != "judges"})
+    judges = dict(existing.get("judges") or {})
+    judges.update(new.get("judges") or {})
+    merged["judges"] = judges
+    return merged
 
 
 def judge_original(judge, explanation, icd_code, icd_description, r_pb) -> dict:
