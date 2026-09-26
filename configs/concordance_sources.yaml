@@ -49,6 +49,19 @@ sources:
     label: SAE vanilla (strat 200)
     type: domain, stratified
     pool_dirs: [auto_interp/vanilla_strat]
+  # JumpReLU seed 2 @ step_00046000 -- PRELIMINARY (no LR decay, no final/).
+  # Vanilla's protocol (held-out selection, r, contexts and slates), so its rows
+  # sit beside vanilla's; the seed-0 JumpReLU rows above used full-corpus
+  # selection and contexts. configs/seed_rep/ produced these pools.
+  - key: jumprelu_s2_pub
+    label: SAE jumprelu s2 prelim (pub 380)
+    label_short: SAE jumprelu s2 prelim (380)
+    type: domain, JumpReLU
+    pool_dirs: ["${jumprelu_auto_interp}"]
+  - key: jumprelu_s2_strat
+    label: SAE jumprelu s2 prelim (strat 200)
+    type: domain, stratified
+    pool_dirs: ["${jumprelu_auto_interp}_strat"]
   # GemmaScope: the published tables label it two ways. F1-F5b and F8-coarse use
   # the 154-feature union (113 test-split + 41 mid-band); F6 and fine F8 use the
   # 113-feature test-split pool alone.
@@ -93,6 +106,7 @@ sources:
 groups:
   - {label: SAE JumpReLU, members: [jumprelu_pub, jumprelu_strat]}
   - {label: SAE ReLU+L1, members: [vanilla_pub, vanilla_strat]}
+  - {label: SAE JumpReLU s2 (prelim 46k), members: [jumprelu_s2_pub, jumprelu_s2_strat]}
   - {label: SAE GemmaScope, members: [gemmascope]}
   - {label: keyword (lexical ceiling), members: [keyword]}
   - {label: diff-in-means (supervised), members: [dm]}
