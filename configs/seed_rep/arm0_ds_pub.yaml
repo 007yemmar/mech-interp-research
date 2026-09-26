@@ -1,0 +1,19 @@
+# JumpReLU s2 concordance replication -- arm0_ds, pub pool
+#
+# PRELIMINARY: SAE = ${jumprelu_run} @ step_00046000 (no LR decay, no final/).
+# Protocol = vanilla's: pool selection, r values, contexts and retrieval slates all
+# come from the 31 held-out shards (281-311) -- ${jumprelu_eval} covers exactly
+# those. Every value other than the paths is copied verbatim from
+# configs/fourarm/r1_arm0_vanilla.yaml, so these rows sit next to the published §14 rows.
+# Generated 2026-09-26 (spec: docs/superpowers/specs/2026-09-26-jumprelu-s2-concordance-design.md).
+#
+# uv run modal run --detach modal_app/arm0_eval.py --config-file configs/seed_rep/arm0_ds_pub.yaml --detach
+
+auto_interp_dir: ${jumprelu_auto_interp}
+output_dir: null
+judges:
+- {slug: deepseek-v3, backend: openrouter, model: deepseek/deepseek-chat}
+thresholds: [0.3, 0.5]
+max_workers: 4
+client_max_retries: 6
+logging_level: INFO

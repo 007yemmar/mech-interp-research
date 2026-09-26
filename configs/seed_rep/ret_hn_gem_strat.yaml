@@ -1,0 +1,25 @@
+# JumpReLU s2 concordance replication -- ret_hn_gem, strat pool
+#
+# PRELIMINARY: SAE = ${jumprelu_run} @ step_00046000 (no LR decay, no final/).
+# Protocol = vanilla's: pool selection, r values, contexts and retrieval slates all
+# come from the 31 held-out shards (281-311) -- ${jumprelu_eval} covers exactly
+# those. Every value other than the paths is copied verbatim from
+# configs/judge4/ret_hn_van_strat.yaml, so these rows sit next to the published §14 rows.
+# Generated 2026-09-26 (spec: docs/superpowers/specs/2026-09-26-jumprelu-s2-concordance-design.md).
+#
+# uv run modal run --detach modal_app/retrieval_eval.py --config-file configs/seed_rep/ret_hn_gem_strat.yaml --detach
+
+auto_interp_dir: ${jumprelu_auto_interp}_strat
+icd_eval_dir: ${jumprelu_eval}
+icd_csv_path: /data/sample_50k.csv
+icd_keywords_yaml_path: /root/configs/icd9_keywords_improved.yaml
+output_dir: ${jumprelu_auto_interp}_strat/retrieval_eval_hardneg
+judges:
+- {slug: gemini-2.5-flash, backend: openrouter, model: google/gemini-2.5-flash}
+same_chapter_distractors: true
+n_distractors: 7
+r_unrelated: 0.05
+thresholds: [0.3, 0.5]
+max_workers: 4
+client_max_retries: 8
+logging_level: INFO
